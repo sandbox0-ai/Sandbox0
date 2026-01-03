@@ -515,3 +515,179 @@ procd_volume_cache_hit_rate       # 缓存命中率
 procd_network_rules_total         # 防火墙规则数
 procd_network_policy_updates      # 策略更新次数
 ```
+
+---
+
+## 十、TDD 开发计划
+
+### 10.1 已有基础
+
+```
+pkg/api/procd/                    # 契约接口定义 (已完成)
+├── client.go                     # ProcdClient 接口
+├── types.go                      # 数据类型定义
+├── client_mock.go                # Mock 实现
+└── client_contract_test.go       # 契约测试
+
+pkg/test/                         # 测试工具 (已完成)
+├── httputil/server.go            # HTTP 测试服务器
+└── fixtures/fixtures.go          # 测试数据 fixture
+```
+
+### 10.2 开发阶段
+
+```
+Phase 0: 项目初始化
+├── 0.1 创建 procd 项目结构
+├── 0.2 配置依赖管理
+└── 0.3 创建基础测试框架
+
+Phase 1: 核心层 - 子进程抽象 (最先实现，被其他模块依赖)
+├── 1.1 Process 接口定义
+│   └── internal/process/interface.go
+├── 1.2 REPL 进程实现
+│   └── internal/process/repl.go
+└── 1.3 Shell 进程实现
+    └── internal/process/shell.go
+
+Phase 2: 管理层 - 各模块 Manager (可并行开发)
+├── 2.1 ContextManager (进程编排)
+│   └── internal/context/manager.go
+├── 2.2 VolumeManager (存储管理)
+│   └── internal/volume/manager.go
+├── 2.3 NetworkManager (网络隔离)
+│   └── internal/network/manager.go
+└── 2.4 FileManager (文件操作)
+    └── internal/file/manager.go
+
+Phase 3: HTTP API 层 - 对外接口
+├── 3.1 Context/Process APIs
+│   └── internal/api/context_handler.go
+├── 3.2 Volume APIs
+│   └── internal/api/volume_handler.go
+├── 3.3 Network APIs
+│   └── internal/api/network_handler.go
+├── 3.4 File APIs
+│   └── internal/api/file_handler.go
+└── 3.5 WebSocket 流式接口
+    └── internal/api/websocket.go
+
+Phase 4: 集成与 E2E 测试
+├── 4.1 模块集成测试
+└── 4.2 契约测试验证
+```
+
+### 10.3 目录结构
+
+```
+infra/procd/
+├── cmd/
+│   └── procd/
+│       └── main.go              # 主程序入口
+├── internal/
+│   ├── process/                 # 进程抽象层
+│   │   ├── interface.go         # Process 接口定义
+│   │   ├── repl.go              # REPL 进程实现
+│   │   ├── shell.go             # Shell 进程实现
+│   │   └── pty.go               # PTY 操作封装
+│   ├── context/                 # Context 管理
+│   │   ├── manager.go           # ContextManager
+│   │   └── manager_test.go
+│   ├── volume/                  # Volume 管理
+│   │   ├── manager.go           # VolumeManager
+│   │   ├── overlayfs.go         # OverlayFS 操作
+│   │   └── manager_test.go
+│   ├── network/                 # 网络管理
+│   │   ├── manager.go           # NetworkManager
+│   │   ├── nftables.go          # nftables 操作
+│   │   └── manager_test.go
+│   ├── file/                    # 文件管理
+│   │   ├── manager.go           # FileManager
+│   │   ├── watcher.go           # fsnotify 封装
+│   │   └── manager_test.go
+│   ├── api/                     # HTTP handlers
+│   │   ├── server.go            # HTTP Server
+│   │   ├── context_handler.go   # Context APIs
+│   │   ├── volume_handler.go    # Volume APIs
+│   │   ├── network_handler.go   # Network APIs
+│   │   ├── file_handler.go      # File APIs
+│   │   ├── websocket.go         # WebSocket handlers
+│   │   └── middleware.go        # 中间件
+│   └── testutil/                # 内部测试工具
+│       ├── testserver.go        # 测试 HTTP 服务器
+│       └── process_mock.go      # Process 接口 mock
+├── go.mod
+├── go.sum
+├── Makefile
+├── procd_test.go                # E2E 测试
+└── README.md
+```
+
+### 10.4 TDD 工作流示例
+
+```go
+// Step 1: 写测试 (Red)
+func TestREPLProcess_ExecuteCode(t *testing.T) {
+    // Given
+    repl := NewREPLProcess("python")
+    err := repl.Start()
+    require.NoError(t, err)
+    defer repl.Stop()
+
+    // When
+    result, err := repl.ExecuteCode("x = 42\nprint(x)")
+
+    // Then
+    require.NoError(t, err)
+    assert.Contains(t, result.Output, "42")
+}
+
+// Step 2: 运行测试 -> 失败
+// go test ./internal/process -v
+// FAIL: TestREPLProcess_ExecuteCode: not implemented yet
+
+// Step 3: 实现最少代码使测试通过 (Green)
+func (r *REPLProcess) ExecuteCode(code string) (*ExecutionResult, error) {
+    r.pty.Write([]byte(code + "\n"))
+    var output []byte
+    buf := make([]byte, 1024)
+    n, _ := r.pty.Read(buf)
+    output = append(output, buf[:n]...)
+    return &ExecutionResult{Output: string(output)}, nil
+}
+
+// Step 4: 重构优化
+// 提取公共逻辑、增加错误处理、添加更多测试
+
+// Step 5: 重复循环
+```
+
+### 10.5 测试优先级
+
+| 优先级 | 测试类型 | 说明 |
+|--------|----------|------|
+| P0 | Process 单元测试 | 核心进程抽象，必须最先实现 |
+| P0 | Manager 单元测试 | 使用 Process mock，可并行开发 |
+| P1 | Handler 契约测试 | 验证 API 符合 spec 定义 |
+| P1 | Handler 单元测试 | 使用 Manager mock |
+| P2 | 集成测试 | 真实组件集成 |
+| P3 | E2E 测试 | 完整流程测试 |
+
+### 10.6 依赖关系
+
+```
+Phase 1 (Process) ──────┐
+                         ├──> Phase 3 (API)
+Phase 2 (Managers) ─────┘
+                         │
+                         └──> Phase 4 (E2E)
+```
+
+### 10.7 关键注意事项
+
+1. **Spec 即文档**: 每个功能实现前先阅读对应的 spec 文件
+2. **依赖顺序**: Phase 1 必须先完成，Phase 2 各模块可并行
+3. **Mock 优先**: Manager 层测试使用 Process mock
+4. **契约测试**: API 层必须通过 `pkg/api/procd/client_contract_test.go`
+5. **特权操作**: Volume/Network 测试需要容器特权模式
+6. **无中文**: 代码和注释不能包含中文
