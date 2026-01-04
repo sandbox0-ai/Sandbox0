@@ -1,856 +1,1108 @@
-# Procd - Volume 管理设计规范
+# Procd - 卷管理设计规范
 
 ## 一、设计目标
 
-Sandbox0Volume 是独立于 Sandbox 的持久化存储资源，支持：
-1. **高性能冷启动**：Copy-on-Write 分层 + OverlayFS，实现 <100ms 恢复
-2. **多租户隔离**：数据加密 + 访问控制
-3. **独立生命周期**：Volume 可独立创建、删除，不被 Sandbox 绑定
-4. **灵活挂载**：一个 Volume 可被多个 Sandbox 挂载（只读），一个 Sandbox 可挂载多个 Volume
-5. **快速快照**：Snapshot 只存储元数据引用，无需复制数据
+Sandbox0Volume 是一个独立于 Sandbox 的持久化存储资源，基于 **JuiceFS**（S3 支持的 POSIX 文件系统）构建。主要特性：
+
+1. **高性能冷启动**：直接使用内核 FUSE 挂载 JuiceFS，挂载时间 <100ms
+2. **多租户隔离**：每个卷使用 JuiceFS 子目录，并配备访问控制
+3. **独立生命周期**：卷可以独立于 Sandbox 创建/删除
+4. **灵活挂载**：一个卷可以被多个 sandbox 挂载（第一个获得读写权限，其他为只读）
+5. **快速快照**：通过 JuiceFS 或简单的 S3 复制操作实现 S3 目录快照
 
 ---
 
-## 二、核心概念
+## 二、Core Concepts
 
-### 2.1 资源模型
+### 2.1 Resource Model
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Sandbox0Volume 资源模型                                │
+│                      Sandbox0Volume Resource Model                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  Volume (独立资源)                                                          │
+│  Volume (Independent Resource)                                              │
 │  ├── ID: vol-abc123                                                        │
 │  ├── Name: my-workspace                                                    │
 │  ├── TeamID: team-456                                                      │
-│  ├── BaseLayerID: base-py311 (只读)                                         │
-│  ├── WorkingLayerID: working-xyz789 (读写)                                  │
-│  └── Snapshots: [snap-001, snap-002, ...]                                  │
+│  ├── JuiceFS Config:                                                       │
+│  │   ├── MetaURL: postgres://postgres:5432/sandbox0?sslmode=disable      │
+│  │   ├── S3Bucket: sandbox0-volumes                                       │
+│  │   ├── S3Prefix: teams/team-456/volumes/vol-abc123                     │
+│  │   └── Subdir: /                                                        │
+│  ├── Encryption: AES-256-GCM (client-side)                                │
+│  └── Access Control: AllowedSandboxIDs: [sb-1, sb-2]                      │
 │                                                                             │
-│  Layer (分层存储)                                                           │
-│  ├── Base Layer (只读，可复用)                                              │
-│  │   ├── node_modules/                                                     │
-│  │   ├── venv/                                                             │
-│  │   └── 基础环境                                                           │
-│  │                                                                          │
-│  ├── Delta Layer (只读，可复用)                                             │
-│  │   ├── + new_file.py                                                     │
-│  │   └── - deleted_file.js                                                 │
-│  │                                                                          │
-│  └── Working Layer (读写，当前修改)                                          │
-│      ├── + modified.json                                                   │
-│      └── workspace/                                                        │
-│                                                                             │
-│  Snapshot (快照，元数据引用)                                                │
-│  ├── ID: snap-001                                                          │
-│  ├── LayerID: delta-def456  # 指向某个 Delta Layer                         │
-│  └── 无数据复制                                                             │
+│  JuiceFS Architecture:                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │  Procd (pid=1)                                                       │  │
+│  │  ├── Embedded JuiceFS Library                                        │  │
+│  │  │   ├── vfs.VFS - Virtual File System Layer                         │  │
+│  │  │   ├── meta.Client - Metadata Engine (Redis/PostgreSQL)            │  │
+│  │  │   ├── chunk.CachedStore - Object Storage + Local Cache           │  │
+│  │  │   └── fuse.Serve - FUSE Server (mounts to /workspace)             │  │
+│  │  └── /dev/fuse - Provided by k8s-plugin (no privileged)         │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                        │
+│                                    ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │  JuiceFS Metadata (PostgreSQL)                                       │  │
+│  │  ├── Inodes, Dentries                                                │  │
+│  │  ├── File Metadata (size, mtime, permissions)                        │  │
+│  │  └── Chunk References (object keys in S3)                            │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                        │
+│                                    ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │  S3 Object Storage (Data Chunks)                                     │  │
+│  │  s3://sandbox0-volumes/                                               │  │
+│  │  ├── teams/team-456/volumes/vol-abc123/                               │  │
+│  │  │   ├── chunks/                                                      │  │
+│  │  │   │   ├── 0/0/1_0_4194304   (4MB chunk)                           │  │
+│  │  │   │   ├── 0/0/1_1_4194304                                         │  │
+│  │  │   │   └── ...                                                     │  │
+│  │  │   └── .jfs/...               (JuiceFS metadata backup)            │  │
+│  │  └── snapshots/                                                       │  │
+│  │      ├── snap-001/               (S3 snapshot copy)                   │  │
+│  │      └── snap-002/                                                    │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 关系模型
+### 2.2 Volume-Sandbox Relationship
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Volume 与 Sandbox 的关系                            │
+│                     Volume ↔ Sandbox Relationship                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  Volume (vol-123)                Volume (vol-456)                           │
 │       │                                 │                                  │
-│       ├──► Sandbox (sb-a) [读写]         ├──► Sandbox (sb-c) [读写]          │
-│       ├──► Sandbox (sb-b) [只读]         └──► Sandbox (sb-d) [只读]          │
-│       │                                  │                                  │
-│       └──► 独立存在（未被挂载）            └──► 独立存在（未被挂载）           │
+│       ├──► Sandbox (sb-a) [Read-Write]  ├──► Sandbox (sb-c) [Read-Write]   │
+│       ├──► Sandbox (sb-b) [Read-Only]   └──► Sandbox (sb-d) [Read-Only]    │
+│       │                                                                     │
+│       └──► Independent Existence         └──► Independent Existence        │
 │                                                                             │
-│  关系说明：                                                                 │
-│  - 1 个 Volume 可被多个 Sandbox 挂载                                        │
-│  - 第一个挂载者获得读写权限，后续挂载者只读                                  │
-│  - 1 个 Sandbox 可挂载多个 Volume                                           │
-│  - Sandbox 删除不影响 Volume                                                │
-│  - Volume 可独立存在，不被任何 Sandbox 挂载                                 │
+│  Relationship Rules:                                                        │
+│  - 1 Volume can be mounted by multiple Sandboxes                           │
+│  - First mounter gets read-write access, subsequent mounters get read-only │
+│  - 1 Sandbox can mount multiple Volumes                                    │
+│  - Sandbox deletion does not affect Volumes                                │
+│  - Volumes can exist without being mounted by any Sandbox                  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.3 存储架构
+### 2.3 Storage Architecture (JuiceFS-based)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        存储架构 (S3 + 本地缓存)                              │
+│                    Pod Architecture (Procd only, no Sidecar)                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  S3 (持久化存储，事实来源)                                                   │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ s3://sandbox0-volumes/                                                │  │
-│  │ ├── volumes/                                                          │  │
-│  │ │   ├── vol-123/                                                      │  │
-│  │ │   │   ├── layers/                                                   │  │
-│  │ │   │   │   ├── base-py311/          (Base Layer，500MB)             │  │
-│  │ │   │   │   ├── delta-pip-pkgs/     (Delta Layer，50MB)              │  │
-│  │ │   │   │   └── working-current/    (Working Layer，定期上传)         │  │
-│  │ │   │   └── metadata.json             (Volume 元数据)                 │  │
-│  │ │   └── vol-456/...                                                   │  │
-│  │ └── snapshots/                                                         │  │
-│  │     ├── snap-001-metadata.json  (只存元数据，指向 delta-layer)          │  │
-│  │     └── snap-002-metadata.json                                         │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                          │
-│                                   │ 按需下载                                  │
-│                                   ▼                                          │
-│  本地缓存 (Procd 容器内)                                                     │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ /var/lib/sandbox0/                                                    │  │
-│  │ ├── preload/              (预热缓存，空闲池 Pod 启动时填充)             │  │
-│  │ │   ├── base-py311/                                                    │  │
-│  │ │   └── layer-node-modules/                                           │  │
-│  │ ├── volumes/              (运行时缓存)                                   │  │
-│  │ │   └── vol-123/                                                     │  │
-│  │ │       ├── layers/                                                   │  │
-│  │ │       │   ├── base-py311@       (硬链接到 preload)                   │  │
-│  │ │       │   ├── delta-pip-pkgs@    (按需下载)                          │  │
-│  │ │       │   └── working-xyz789/    (读写层)                           │  │
-│  │ │       └── merged/            (OverlayFS 挂载点)                      │  │
-│  │ └── cache/               (通用缓存)                                      │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-│                                   │                                          │
-│                    ┌───────────────┴───────────────┐                        │
-│                    │   bind mount (host)          │                        │
-│                    └───────────────┬───────────────┘                        │
-│                                   ▼                                          │
-│  用户容器看到                                                               │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │ /workspace  ← OverlayFS 合并后的完整文件系统                             │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Procd Container (PID=1)                                             │   │
+│  │  ┌───────────────────────────────────────────────────────────────┐  │   │
+│  │  │  JuiceFS Mount (via embedded library)                          │  │   │
+│  │  │  ┌─────────────────────────────────────────────────────────┐  │  │   │
+│  │  │  │  /workspace (FUSE mount point)                           │  │  │   │
+│  │  │  │  ├── project/                                            │  │  │   │
+│  │  │  │  ├── data/                                               │  │  │   │
+│  │  │  │  └── ...                                                 │  │  │   │
+│  │  │  └─────────────────────────────────────────────────────────┘  │  │   │
+│  │  │                                                                 │  │   │
+│  │  │  Embedded JuiceFS Components:                                  │  │   │
+│  │  │  ├── fuse.Serve() - FUSE server (goroutine)                   │  │   │
+│  │  │  ├── vfs.VFS - File system operations                          │  │   │
+│  │  │  ├── meta.Client - Metadata operations (PostgreSQL client)     │  │   │
+│  │  │  ├── chunk.CachedStore - S3 operations + local cache           │  │   │
+│  │  │  │   ├── Local Cache: /var/lib/juicefs/cache (10GB)           │  │   │
+│  │  │  │   └── S3 Backend: sandbox0-volumes bucket                   │  │   │
+│  │  │  └── object.ObjectStorage - S3 client                          │  │   │
+│  │  └───────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                       │   │
+│  │  securityContext:                                                    │   │
+│  │    capabilities:                                                     │   │
+│  │      add: [NET_ADMIN]  # For nftables only                          │   │
+│  │                        # NO SYS_ADMIN needed                         │   │
+│  │                                                                       │   │
+│  │  volumeMounts:                                                       │   │
+│  │    - name: fuse-device                                               │   │
+│  │      mountPath: /dev/fuse  # Provided by k8s-plugin            │   │
+│  │    - name: cache                                                     │   │
+│  │      mountPath: /var/lib/juicefs/cache                               │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                        │
+│                                    ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  k8s-plugin (DaemonSet)                                         │   │
+│  │  - Exposes /dev/fuse to containers                                   │   │
+│  │  - No privileged mode required                                       │   │
+│  │  - Pod resource: limits: sandbox0.ai/fuse: 1                         │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 三、数据结构定义
+## 三、Data Structure Definitions
 
 ### 3.1 Volume
 
 ```go
-// Volume Sandbox0 持久卷（独立资源，存储在 PGSQL）
+// Volume Sandbox0 persistent volume (stored in PostgreSQL, managed by Manager)
 type Volume struct {
-    // 基本属性
+    // Basic attributes
     ID          string    `json:"id" db:"id"`
     Name        string    `json:"name" db:"name"`
     TeamID      string    `json:"team_id" db:"team_id"`
     Description string    `json:"description,omitempty" db:"description"`
 
-    // 存储配置
-    S3Bucket    string    `json:"s3_bucket" db:"s3_bucket"`
-    S3Prefix    string    `json:"s3_prefix" db:"s3_prefix"`  // 如: volumes/team-123/my-workspace
-    Capacity    string    `json:"capacity" db:"capacity"`    // 如: "10Gi"
+    // JuiceFS configuration
+    JuiceFS JuiceFSConfig `json:"juicefs" db:"juicefs"`
 
-    // 分层链
-    BaseLayerID    string `json:"base_layer_id" db:"base_layer_id"`       // 根层
-    WorkingLayerID string `json:"working_layer_id" db:"working_layer_id"` // 当前工作层
+    // Capacity
+    Capacity    string    `json:"capacity" db:"capacity"`    // e.g. "10Gi"
 
-    // 加密配置
-    EncryptionKeyID string `json:"encryption_key_id" db:"encryption_key_id"` // KMS 密钥 ID
+    // Encryption (client-side, managed by JuiceFS)
+    EncryptionKeyID string `json:"encryption_key_id,omitempty" db:"encryption_key_id"`
 
-    // 访问控制
-    ReadOnly    bool     `json:"read_only" db:"read_only"`                // 只读模式
-    AllowedSandboxIDs []string `json:"allowed_sandbox_ids" db:"allowed_sandbox_ids"` // 白名单
+    // Access control
+    ReadOnly          bool     `json:"read_only" db:"read_only"`
+    AllowedSandboxIDs []string `json:"allowed_sandbox_ids,omitempty" db:"allowed_sandbox_ids"`
 
-    // 标签和元数据
+    // Tags and metadata
     Tags        []string          `json:"tags,omitempty" db:"tags"`
     Metadata    map[string]string `json:"metadata,omitempty" db:"metadata"`
 
-    // 时间戳
-    CreatedAt   time.Time `json:"created_at" db:"created_at"`
-    UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+    // Timestamps
+    CreatedAt      time.Time `json:"created_at" db:"created_at"`
+    UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
     LastAccessedAt time.Time `json:"last_accessed_at" db:"last_accessed_at"`
 
-    // 统计
-    SizeBytes   int64 `json:"size_bytes" db:"size_bytes"`
+    // Statistics
+    SizeBytes   int64 `json:"size_bytes" db:"size_bytes"`     // Actual usage
     FileCount   int32 `json:"file_count" db:"file_count"`
-    MountCount  int32 `json:"mount_count" db:"mount_count"`  // 当前挂载数
+    MountCount  int32 `json:"mount_count" db:"mount_count"`   // Currently mounted
 }
 
-// VolumeStatus Volume 状态（运行时，不在 DB 中）
+// JuiceFSConfig JuiceFS mount configuration
+type JuiceFSConfig struct {
+    // Metadata engine (unified PostgreSQL)
+    MetaURL     string `json:"meta_url"`     // e.g. "postgres://postgres:5432/sandbox0?sslmode=disable"
+    
+    // Object storage
+    S3Bucket    string `json:"s3_bucket"`    // e.g. "sandbox0-volumes"
+    S3Prefix    string `json:"s3_prefix"`    // e.g. "teams/team-456/volumes/vol-abc123"
+    S3Region    string `json:"s3_region"`    // e.g. "us-east-1"
+    S3Endpoint  string `json:"s3_endpoint,omitempty"`  // Optional custom endpoint
+    
+    // Mount options
+    CacheDir    string `json:"cache_dir"`    // e.g. "/var/lib/juicefs/cache"
+    CacheSize   string `json:"cache_size"`   // e.g. "10Gi"
+    ReadOnly    bool   `json:"read_only"`
+    Subdir      string `json:"subdir,omitempty"`  // Optional subdir within volume
+    
+    // Performance tuning
+    Prefetch    int    `json:"prefetch,omitempty"`     // Prefetch N chunks
+    BufferSize  string `json:"buffer_size,omitempty"`  // e.g. "300Mi"
+    Writeback   bool   `json:"writeback,omitempty"`    // Enable writeback cache
+}
+
+// VolumeStatus Volume runtime status (not persisted in DB)
 type VolumeStatus struct {
     VolumeID    string
     IsMounted   bool
-    MountedBy   []string  // 当前挂载的 Sandbox ID 列表
-    CacheStatus *VolumeCacheStatus
-}
-
-// VolumeCacheStatus 缓存状态
-type VolumeCacheStatus struct {
-    LocalPath   string
-    CacheSize   int64
-    LayersCached []string  // 已缓存的 Layer ID
-    IsPreloaded bool       // 是否来自预热缓存
+    MountedBy   []string  // List of Sandbox IDs currently mounting this volume
+    MountPoint  string    // e.g. "/workspace"
+    JuiceFSPID  int       // JuiceFS FUSE server goroutine reference (not OS PID)
 }
 ```
 
-### 3.2 Layer
+### 3.2 Snapshot
 
 ```go
-// Layer 存储层（可以是 Base、Delta、Working）
-type Layer struct {
-    ID          string    `json:"id"`
-    VolumeID    string    `json:"volume_id"`
-    Type        LayerType `json:"type"`
-
-    // 分层链
-    BaseLayerID string    `json:"base_layer_id,omitempty"` // 父层 ID
-
-    // 变更记录（增量同步用）
-    Changes *LayerChanges `json:"changes,omitempty"`
-
-    // 存储位置
-    S3Path      string `json:"s3_path,omitempty"`      // S3 路径 (base/delta)
-    LocalPath   string `json:"local_path,omitempty"`   // 本地路径 (working)
-
-    // 统计
-    SizeBytes   int64 `json:"size_bytes"`
-    FileCount   int32 `json:"file_count"`
-
-    // 校验
-    Checksum    string `json:"checksum"`  // SHA256 整体校验
-
-    // 时间戳
-    CreatedAt   time.Time `json:"created_at"`
-}
-
-type LayerType string
-
-const (
-    LayerTypeBase    LayerType = "base"    // 基础层（只读，可复用）
-    LayerTypeDelta   LayerType = "delta"   // 增量层（只读，可复用）
-    LayerTypeWorking LayerType = "working" // 工作层（读写）
-)
-
-// LayerChanges 层的变更记录
-type LayerChanges struct {
-    AddedFiles     []string `json:"added_files,omitempty"`     // 新增文件
-    ModifiedFiles  []string `json:"modified_files,omitempty"`  // 修改文件
-    DeletedFiles   []string `json:"deleted_files,omitempty"`   // 删除文件
-
-    // 每个文件的元数据（用于增量上传）
-    FileMetadata map[string]*FileMetadata `json:"file_metadata,omitempty"`
-}
-
-// FileMetadata 文件元数据
-type FileMetadata struct {
-    Path       string `json:"path"`
-    Size       int64  `json:"size"`
-    Checksum   string `json:"checksum"`  // SHA256
-    Modified   bool   `json:"modified"`  // 是否被修改
-    Encrypted  bool   `json:"encrypted"` // 是否加密
-}
-```
-
-### 3.3 Snapshot
-
-```go
-// Snapshot 快照（只存元数据引用，不复制数据）
+// Snapshot Volume snapshot (points to an S3 directory copy)
 type Snapshot struct {
     ID          string    `json:"id" db:"id"`
     VolumeID    string    `json:"volume_id" db:"volume_id"`
     Name        string    `json:"name" db:"name"`
     Description string    `json:"description,omitempty" db:"description"`
 
-    // 核心：Snapshot 只存储 Layer 引用
-    LayerID     string `json:"layer_id" db:"layer_id"` // 指向某个 Delta Layer
-
-    // 可选：标签和元数据
+    // Snapshot storage location (S3 copy)
+    S3Path      string `json:"s3_path" db:"s3_path"`  // e.g. "snapshots/snap-001/"
+    
+    // Snapshot method
+    Method      SnapshotMethod `json:"method" db:"method"`  // "s3_copy" | "juicefs_clone"
+    
+    // Optional: tags and metadata
     Tags        []string          `json:"tags,omitempty" db:"tags"`
     Metadata    map[string]string `json:"metadata,omitempty" db:"metadata"`
 
-    // 时间戳
-    CreatedAt   time.Time `json:"created_at" db:"created_at"`
+    // Timestamps
+    CreatedAt   time.Time  `json:"created_at" db:"created_at"`
     ExpiresAt   *time.Time `json:"expires_at,omitempty" db:"expires_at"`
 
-    // 统计
-    SizeBytes   int64 `json:"size_bytes" db:"size_bytes"`   // 引用的 Layer 大小
-    FileCount   int32 `json:"file_count" db:"file_count"`   // 文件数量
+    // Statistics (snapshot size)
+    SizeBytes   int64 `json:"size_bytes" db:"size_bytes"`
+    FileCount   int32 `json:"file_count" db:"file_count"`
 }
 
-// SnapshotRestoreConfig 快照恢复配置
+type SnapshotMethod string
+
+const (
+    SnapshotMethodS3Copy      SnapshotMethod = "s3_copy"       // Simple S3 directory copy
+    SnapshotMethodJuiceFSClone SnapshotMethod = "juicefs_clone" // JuiceFS native clone (if supported)
+)
+
+// SnapshotRestoreConfig Snapshot restore configuration
 type SnapshotRestoreConfig struct {
-    SnapshotID      string `json:"snapshot_id"`
-    TargetLayerID   string `json:"target_layer_id,omitempty"`  // 可选，恢复到指定 Layer
-    CreateNewWorking bool   `json:"create_new_working"`        // 是否创建新的 Working Layer
+    SnapshotID  string `json:"snapshot_id"`
+    TargetVolume string `json:"target_volume,omitempty"`  // Optional, create new volume from snapshot
 }
 ```
 
 ---
 
-## 四、VolumeManager 实现
+## 四、VolumeManager Implementation
 
-### 4.1 核心接口
+### 4.1 Core Interface
 
 ```go
-// VolumeManager 卷管理器（集成在 Procd 内）
+// VolumeManager Volume manager (integrated in Procd)
 type VolumeManager struct {
-    // S3 客户端
-    s3Client *s3.Client
-
-    // 加密管理器
-    crypto *CryptoManager
-
-    // 本地缓存目录
-    cacheRoot   string  // /var/lib/sandbox0
-    preloadRoot string  // /var/lib/sandbox0/preload
-
-    // 运行中的 volumes
-    volumes sync.Map  // volumeID -> *Volume
-
-    // 配置
+    // JuiceFS configuration
+    defaultMetaURL string  // Default Redis/PostgreSQL URL
+    s3Config       *S3Config
+    
+    // Local cache configuration
+    cacheRoot   string  // /var/lib/juicefs
+    
+    // Active mounts
+    mounts      sync.Map  // volumeID -> *MountContext
+    
+    // Configuration
     config *VolumeManagerConfig
 }
 
-type VolumeManagerConfig struct {
-    S3Region          string
-    S3Endpoint        string
-    CacheSizeLimit    string  // 如 "10Gi"
-    PreloadDir        string
+// MountContext JuiceFS mount context
+type MountContext struct {
+    VolumeID    string
+    MountPoint  string
+    
+    // JuiceFS components (embedded)
+    vfs         *vfs.VFS
+    metaClient  meta.Meta
+    chunkStore  chunk.ChunkStore
+    
+    // Shutdown control
+    cancel      context.CancelFunc
+    done        chan struct{}
+    
+    // Mount metadata
+    ReadOnly    bool
+    MountedAt   time.Time
 }
 
-// Mount 挂载 Volume
+type VolumeManagerConfig struct {
+    MetaURL         string
+    S3Region        string
+    S3Endpoint      string
+    DefaultCacheSize string  // e.g. "10Gi"
+    CacheRoot       string   // /var/lib/juicefs
+}
+
+// Mount mounts a volume using embedded JuiceFS library
 func (vm *VolumeManager) Mount(ctx context.Context, req *MountRequest) (*MountResponse, error)
 
-// Unmount 卸载 Volume
+// Unmount unmounts a volume
 func (vm *VolumeManager) Unmount(ctx context.Context, volumeID string) error
 
-// CreateSnapshot 创建快照
+// CreateSnapshot creates a snapshot (S3 copy)
 func (vm *VolumeManager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest) (*Snapshot, error)
 
-// RestoreSnapshot 恢复快照
+// RestoreSnapshot restores from a snapshot
 func (vm *VolumeManager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotRequest) error
 
-// ListSnapshots 列出快照
+// ListSnapshots lists all snapshots for a volume
 func (vm *VolumeManager) ListSnapshots(ctx context.Context, volumeID string) ([]*Snapshot, error)
 ```
 
-### 4.2 Mount 实现
+### 4.2 Mount Implementation (Embedded JuiceFS)
 
 ```go
-// MountRequest 挂载请求
+// MountRequest Mount request
 type MountRequest struct {
-    VolumeID    string `json:"volume_id"`
-    SandboxID   string `json:"sandbox_id"`
-    MountPoint  string `json:"mount_point"`  // 如: /workspace
-    ReadOnly    bool   `json:"read_only,omitempty"`
-    SnapshotID  string `json:"snapshot_id,omitempty"`  // 可选，从快照恢复
-
-    // 预热配置（来自 Template）
-    WarmupConfig *VolumeWarmupConfig `json:"warmup_config,omitempty"`
+    VolumeID    string            `json:"volume_id"`
+    SandboxID   string            `json:"sandbox_id"`
+    MountPoint  string            `json:"mount_point"`  // e.g. "/workspace"
+    ReadOnly    bool              `json:"read_only,omitempty"`
+    SnapshotID  string            `json:"snapshot_id,omitempty"`  // Optional: mount from snapshot
+    JuiceFSOpts map[string]string `json:"juicefs_opts,omitempty"` // Optional: JuiceFS mount options
 }
 
-// MountResponse 挂载响应
+// MountResponse Mount response
 type MountResponse struct {
-    VolumeID    string `json:"volume_id"`
-    MountPoint  string `json:"mount_point"`
-    LayerChain  []string `json:"layer_chain"`  // 当前 Layer 链
-    IsFromCache bool    `json:"is_from_cache"`  // 是否来自预热缓存
+    VolumeID       string `json:"volume_id"`
+    MountPoint     string `json:"mount_point"`
+    JuiceFSVersion string `json:"juicefs_version"`
+    CacheHit       bool   `json:"cache_hit"`  // Whether local cache was used
 }
 
-// Mount 挂载 Volume（高性能，<100ms）
+// Mount mounts a volume by embedding JuiceFS library
 func (vm *VolumeManager) Mount(ctx context.Context, req *MountRequest) (*MountResponse, error) {
-    // 1. 加载 Volume 元数据（从 PG 或本地缓存）
+    // 1. Load Volume metadata from Manager (or cache)
     volume, err := vm.loadVolume(ctx, req.VolumeID)
     if err != nil {
         return nil, fmt.Errorf("load volume: %w", err)
     }
 
-    // 2. 检查是否只读挂载
-    if volume.MountCount > 0 && !req.ReadOnly {
-        return nil, fmt.Errorf("volume already mounted in read-write mode")
+    // 2. Check if already mounted
+    if _, exists := vm.mounts.Load(req.VolumeID); exists {
+        return nil, fmt.Errorf("volume %s already mounted", req.VolumeID)
     }
 
-    // 3. 如果指定了 SnapshotID，先恢复
+    // 3. If mounting from snapshot, adjust S3 prefix
+    s3Prefix := volume.JuiceFS.S3Prefix
     if req.SnapshotID != "" {
-        if err := vm.RestoreSnapshot(ctx, &RestoreSnapshotRequest{
-            VolumeID:   req.VolumeID,
-            SnapshotID: req.SnapshotID,
-        }); err != nil {
-            return nil, fmt.Errorf("restore snapshot: %w", err)
-        }
-    }
-
-    // 4. 准备 Layer 链（按需下载）
-    layerDirs, err := vm.prepareLayerChain(ctx, volume, req.WarmupConfig)
-    if err != nil {
-        return nil, fmt.Errorf("prepare layer chain: %w", err)
-    }
-
-    // 5. 创建 Working Layer（如果不存在）
-    if volume.WorkingLayerID == "" || req.ReadOnly {
-        newWorking, err := vm.createWorkingLayer(ctx, volume)
+        snapshot, err := vm.loadSnapshot(ctx, req.SnapshotID)
         if err != nil {
-            return nil, fmt.Errorf("create working layer: %w", err)
+            return nil, fmt.Errorf("load snapshot: %w", err)
         }
-        volume.WorkingLayerID = newWorking.ID
+        s3Prefix = snapshot.S3Path
     }
 
-    // 6. 挂载 OverlayFS
-    mergedPath := filepath.Join(vm.cacheRoot, "volumes", volume.ID, "merged")
-    if err := vm.mountOverlayFS(mergedPath, layerDirs, volume.WorkingLayerID, req.ReadOnly); err != nil {
-        return nil, fmt.Errorf("mount overlay: %w", err)
+    // 4. Initialize JuiceFS metadata client (PostgreSQL)
+    metaConf := meta.DefaultConf()
+    metaConf.MountPoint = req.MountPoint
+    metaConf.ReadOnly = req.ReadOnly || volume.ReadOnly
+    metaConf.Subdir = volume.JuiceFS.Subdir
+    
+    // Connect to PostgreSQL metadata engine
+    metaClient := meta.NewClient(volume.JuiceFS.MetaURL, metaConf)
+    format, err := metaClient.Load(true)
+    if err != nil {
+        return nil, fmt.Errorf("load juicefs format from PostgreSQL: %w", err)
     }
 
-    // 7. Bind mount 到用户容器
-    if err := syscall.Mount(mergedPath, req.MountPoint, "none", syscall.MS_BIND, ""); err != nil {
-        return nil, fmt.Errorf("bind mount: %w", err)
+    // 5. Initialize JuiceFS object storage
+    format.Bucket = volume.JuiceFS.S3Bucket
+    format.Storage = "s3"
+    blob, err := vm.createS3Storage(format, s3Prefix)
+    if err != nil {
+        return nil, fmt.Errorf("create s3 storage: %w", err)
     }
 
-    // 8. 更新 Volume 状态
+    // 6. Initialize JuiceFS chunk store (with local cache)
+    chunkConf := &chunk.Config{
+        CacheDir:   filepath.Join(vm.cacheRoot, req.VolumeID),
+        CacheSize:  vm.parseCacheSize(volume.JuiceFS.CacheSize),
+        BlockSize:  format.BlockSize * 1024,
+        Compress:   format.Compression,
+        Prefetch:   volume.JuiceFS.Prefetch,
+        BufferSize: vm.parseBufferSize(volume.JuiceFS.BufferSize),
+        Writeback:  volume.JuiceFS.Writeback,
+    }
+    chunkStore := chunk.NewCachedStore(blob, *chunkConf, prometheus.DefaultRegisterer)
+
+    // 7. Initialize JuiceFS VFS
+    vfsConf := &vfs.Config{
+        Meta:   metaConf,
+        Format: *format,
+        Chunk:  chunkConf,
+    }
+    vfsInstance := vfs.NewVFS(vfsConf, metaClient, chunkStore, prometheus.DefaultRegisterer, prometheus.DefaultRegistry)
+
+    // 8. Start JuiceFS FUSE server in a goroutine
+    mountCtx, cancel := context.WithCancel(context.Background())
+    done := make(chan struct{})
+    
+    go func() {
+        defer close(done)
+        
+        // Start FUSE server (blocks until unmount)
+        err := fuse.Serve(vfsInstance, "", true, false)
+        if err != nil {
+            log.Printf("JuiceFS FUSE server error: %v", err)
+        }
+    }()
+
+    // 9. Wait for mount to be ready (check if mount point is accessible)
+    if err := vm.waitForMount(req.MountPoint, 10*time.Second); err != nil {
+        cancel()
+        return nil, fmt.Errorf("mount not ready: %w", err)
+    }
+
+    // 10. Store mount context
+    vm.mounts.Store(req.VolumeID, &MountContext{
+        VolumeID:   req.VolumeID,
+        MountPoint: req.MountPoint,
+        vfs:        vfsInstance,
+        metaClient: metaClient,
+        chunkStore: chunkStore,
+        cancel:     cancel,
+        done:       done,
+        ReadOnly:   metaConf.ReadOnly,
+        MountedAt:  time.Now(),
+    })
+
+    // 11. Update volume status
     volume.MountCount++
     volume.LastAccessedAt = time.Now()
 
     return &MountResponse{
-        VolumeID:    volume.ID,
-        MountPoint:  req.MountPoint,
-        LayerChain:  vm.getLayerChainIDs(volume),
-        IsFromCache: vm.isFromPreloadCache(volume),
+        VolumeID:       req.VolumeID,
+        MountPoint:     req.MountPoint,
+        JuiceFSVersion: version.Version(),
+        CacheHit:       vm.hasCachedData(req.VolumeID),
     }, nil
 }
 
-// prepareLayerChain 准备 Layer 链（异步下载，不阻塞冷启动）
-func (vm *VolumeManager) prepareLayerChain(ctx context.Context, volume *Volume, warmup *VolumeWarmupConfig) ([]string, error) {
-    var layerDirs []string
-    current := vm.getLayer(volume.BaseLayerID)
+// Unmount unmounts a volume
+func (vm *VolumeManager) Unmount(ctx context.Context, volumeID string) error {
+    // 1. Get mount context
+    val, exists := vm.mounts.Load(volumeID)
+    if !exists {
+        return fmt.Errorf("volume %s not mounted", volumeID)
+    }
+    mountCtx := val.(*MountContext)
 
-    // 从底到顶遍历 Layer 链
-    for current != nil {
-        var localPath string
-
-        // 1. 检查是否在预热缓存中
-        if warmup != nil && warmup.Enabled {
-            if cachedPath := vm.checkPreloadCache(current.ID); cachedPath != "" {
-                localPath = cachedPath
-                vm.metrics.CacheHits.Inc()
-            }
-        }
-
-        // 2. 检查是否已下载
-        if localPath == "" {
-            localPath = filepath.Join(vm.cacheRoot, "layers", current.ID)
-            if !exists(localPath) {
-                // 3. 按需下载（异步）
-                if err := vm.downloadLayerAsync(ctx, current, localPath); err != nil {
-                    return nil, err
-                }
-            }
-        }
-
-        layerDirs = append([]string{localPath}, layerDirs...)
-
-        // 移动到上一层
-        if current.BaseLayerID != "" {
-            current = vm.getLayer(current.BaseLayerID)
-        } else {
-            break
-        }
+    // 2. Flush all pending writes
+    if err := mountCtx.vfs.FlushAll(""); err != nil {
+        return fmt.Errorf("flush pending writes: %w", err)
     }
 
-    return layerDirs, nil
-}
-
-// downloadLayerAsync 异步下载 Layer（不阻塞挂载）
-func (vm *VolumeManager) downloadLayerAsync(ctx context.Context, layer *Layer, localPath string) error {
-    // 如果是 Working Layer，不需要下载
-    if layer.Type == LayerTypeWorking {
-        return nil
+    // 3. Close metadata session
+    if err := mountCtx.metaClient.CloseSession(); err != nil {
+        log.Printf("close meta session: %v", err)
     }
 
-    // 创建目录
-    os.MkdirAll(localPath, 0755)
+    // 4. Shutdown object storage client
+    object.Shutdown(mountCtx.chunkStore)
 
-    // 异步下载
-    go func() {
-        // 从 S3 下载
-        if err := vm.downloadLayerFromS3(context.Background(), layer, localPath); err != nil {
-            log.Printf("download layer %s failed: %v", layer.ID, err)
-            return
-        }
+    // 5. Cancel FUSE server goroutine
+    mountCtx.cancel()
 
-        // 解密（如果需要）
-        if layer.Encrypted {
-            if err := vm.crypto.DecryptLayer(localPath); err != nil {
-                log.Printf("decrypt layer %s failed: %v", layer.ID, err)
-            }
-        }
-    }()
+    // 6. Wait for FUSE server to exit
+    select {
+    case <-mountCtx.done:
+    case <-time.After(30 * time.Second):
+        return fmt.Errorf("unmount timeout")
+    }
+
+    // 7. Remove from active mounts
+    vm.mounts.Delete(volumeID)
 
     return nil
 }
-
-// mountOverlayFS 挂载 OverlayFS（内核级 CoW，高性能）
-func (vm *VolumeManager) mountOverlayFS(mergedPath string, lowerDirs []string, workingLayerID string, readOnly bool) error {
-    // 创建目录
-    os.MkdirAll(mergedPath, 0755)
-    upperDir := filepath.Join(vm.cacheRoot, "layers", workingLayerID, "upper")
-    workDir := filepath.Join(vm.cacheRoot, "layers", workingLayerID, "work")
-    os.MkdirAll(upperDir, 0755)
-    os.MkdirAll(workDir, 0755)
-
-    // 拼接 lowerdir
-    lowerdir := strings.Join(lowerDirs, ":")
-
-    // 挂载选项
-    opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", lowerdir, upperDir, workDir)
-    if readOnly {
-        opts = fmt.Sprintf("lowerdir=%s", lowerdir)  // 只读模式不需要 upper/work
-    }
-
-    // 挂载 OverlayFS
-    return syscall.Mount("overlay", mergedPath, "overlay", 0, opts)
-}
 ```
 
-### 4.3 Snapshot 实现
+### 4.3 Snapshot Implementation (S3 Copy)
 
 ```go
-// CreateSnapshot 创建快照（元数据引用，~0ms）
+// CreateSnapshot creates a snapshot via S3 directory copy
 func (vm *VolumeManager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest) (*Snapshot, error) {
     volume := vm.getVolume(req.VolumeID)
-
-    // 1. 将当前 Working Layer 转换为 Delta Layer（如果未上传）
-    workingLayer := vm.getLayer(volume.WorkingLayerID)
-
-    // 2. 上传 Working Layer 到 S3（如果未上传）
-    if workingLayer.S3Path == "" {
-        if err := vm.uploadLayerToS3(ctx, workingLayer); err != nil {
-            return nil, fmt.Errorf("upload working layer: %w", err)
+    
+    // 1. Flush all pending writes if volume is mounted
+    if mountCtx, ok := vm.mounts.Load(req.VolumeID); ok {
+        if err := mountCtx.(*MountContext).vfs.FlushAll(""); err != nil {
+            return nil, fmt.Errorf("flush pending writes: %w", err)
         }
-        workingLayer.Type = LayerTypeDelta
     }
 
-    // 3. 创建 Snapshot（只存元数据）
+    // 2. Generate snapshot ID and S3 path
+    snapshotID := generateID("snap")
+    snapshotS3Path := fmt.Sprintf("snapshots/%s/", snapshotID)
+
+    // 3. Perform S3 copy (copy all objects under volume prefix to snapshot prefix)
+    // This is a simple S3 CopyObject operation for each object
+    sourcePrefix := volume.JuiceFS.S3Prefix
+    targetPrefix := snapshotS3Path
+    
+    size, fileCount, err := vm.s3CopyDirectory(ctx, volume.JuiceFS.S3Bucket, sourcePrefix, targetPrefix)
+    if err != nil {
+        return nil, fmt.Errorf("s3 copy: %w", err)
+    }
+
+    // 4. Create snapshot metadata
     snapshot := &Snapshot{
-        ID:       generateID("snap"),
-        VolumeID: volume.ID,
-        Name:     req.Name,
-        LayerID:  workingLayer.ID,  // 关键：只引用 Layer
-        Metadata: req.Metadata,
-        CreatedAt: time.Now(),
+        ID:          snapshotID,
+        VolumeID:    volume.ID,
+        Name:        req.Name,
+        Description: req.Description,
+        S3Path:      snapshotS3Path,
+        Method:      SnapshotMethodS3Copy,
+        Metadata:    req.Metadata,
+        CreatedAt:   time.Now(),
+        SizeBytes:   size,
+        FileCount:   fileCount,
     }
 
-    // 4. 保存到 S3（只是元数据文件）
-    snapshotPath := fmt.Sprintf("snapshots/%s.json", snapshot.ID)
-    if err := vm.uploadSnapshotMetadata(ctx, snapshot, snapshotPath); err != nil {
+    // 5. Store snapshot metadata in PostgreSQL (via Manager)
+    if err := vm.saveSnapshot(ctx, snapshot); err != nil {
         return nil, err
     }
 
     return snapshot, nil
 }
 
-// RestoreSnapshot 恢复快照（指针切换，~10ms）
+// RestoreSnapshot restores from a snapshot (remounts with snapshot S3 path)
 func (vm *VolumeManager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotRequest) error {
-    // 1. 加载 Snapshot 元数据
+    // 1. Load snapshot metadata
     snapshot, err := vm.loadSnapshot(ctx, req.SnapshotID)
     if err != nil {
         return err
     }
 
-    // 2. 验证 Layer 存在
-    targetLayer := vm.getLayer(snapshot.LayerID)
-    if targetLayer == nil {
-        return fmt.Errorf("layer %s not found", snapshot.LayerID)
+    // 2. Unmount current volume if mounted
+    if _, mounted := vm.mounts.Load(req.VolumeID); mounted {
+        if err := vm.Unmount(ctx, req.VolumeID); err != nil {
+            return fmt.Errorf("unmount before restore: %w", err)
+        }
     }
 
-    // 3. 关键优化：只需更新指针，无需下载数据
-    volume := vm.getVolume(req.VolumeID)
-    volume.WorkingLayerID = snapshot.LayerID
-
-    // 4. 如果需要创建新的 Working Layer
-    if req.CreateNewWorking {
-        newWorking, err := vm.createWorkingLayer(ctx, volume)
-        if err != nil {
-            return err
-        }
-        volume.WorkingLayerID = newWorking.ID
+    // 3. Update volume's S3 prefix to point to snapshot
+    // Option A: Copy snapshot back to volume prefix
+    // Option B: Just update volume metadata to use snapshot prefix (faster)
+    
+    // Here we use Option B (faster, lazy restore)
+    volume, err := vm.loadVolume(ctx, req.VolumeID)
+    if err != nil {
+        return err
     }
 
-    // 5. 异步准备 Layer（Lazy Load）
-    go vm.prepareLayerChainAsync(ctx, volume, nil)
-
-    return nil
-}
-```
-
-### 4.4 预热实现
-
-```go
-// PreloadLayers 预加载 Base Layer（空闲池 Pod 启动时调用）
-func (vm *VolumeManager) PreloadLayers(ctx context.Context, req *PreloadRequest) error {
-    for _, layerID := range req.BaseLayerIDs {
-        // 检查是否已缓存
-        cachedPath := filepath.Join(vm.preloadRoot, layerID)
-        if exists(cachedPath) {
-            continue
-        }
-
-        // 获取 Layer 元数据
-        layer, err := vm.getLayerMetadata(ctx, layerID)
-        if err != nil {
-            return err
-        }
-
-        // 下载到预热缓存
-        if err := vm.downloadLayerFromS3(ctx, layer, cachedPath); err != nil {
-            return err
-        }
-
-        log.Printf("Preloaded layer %s to %s", layerID, cachedPath)
+    // Backup current S3 prefix
+    previousPrefix := volume.JuiceFS.S3Prefix
+    
+    // Update to snapshot S3 path
+    volume.JuiceFS.S3Prefix = snapshot.S3Path
+    
+    if err := vm.updateVolume(ctx, volume); err != nil {
+        return err
     }
+
+    log.Printf("Restored volume %s from snapshot %s (previous: %s, new: %s)",
+        req.VolumeID, req.SnapshotID, previousPrefix, snapshot.S3Path)
 
     return nil
 }
 
-type PreloadRequest struct {
-    BaseLayerIDs []string `json:"base_layer_ids"`
-    RefreshInterval string `json:"refresh_interval,omitempty"`  // 如 "24h"
-}
-
-// RefreshPreloadedCache 刷新预热缓存（定期调用）
-func (vm *VolumeManager) RefreshPreloadedCache(ctx context.Context, layerIDs []string) error {
-    for _, layerID := range layerIDs {
-        // 获取最新 Layer 元数据
-        layer, err := vm.getLayerMetadata(ctx, layerID)
-        if err != nil {
-            continue
-        }
-
-        // 检查本地版本是否过期
-        cachedPath := filepath.Join(vm.preloadRoot, layerID)
-        if vm.isLayerExpired(cachedPath, layer.Checksum) {
-            // 重新下载
-            os.RemoveAll(cachedPath)
-            if err := vm.downloadLayerFromS3(ctx, layer, cachedPath); err != nil {
-                log.Printf("Refresh layer %s failed: %v", layerID, err)
-            }
-        }
+// s3CopyDirectory copies all objects from source to target prefix
+func (vm *VolumeManager) s3CopyDirectory(ctx context.Context, bucket, sourcePrefix, targetPrefix string) (int64, int32, error) {
+    // Use S3 ListObjectsV2 + CopyObject for each object
+    // This is simplified; real implementation should handle pagination and parallel copying
+    
+    s3Client := vm.getS3Client()
+    
+    listResp, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+        Bucket: aws.String(bucket),
+        Prefix: aws.String(sourcePrefix),
+    })
+    if err != nil {
+        return 0, 0, err
     }
 
-    return nil
+    var totalSize int64
+    var fileCount int32
+
+    for _, obj := range listResp.Contents {
+        sourceKey := *obj.Key
+        targetKey := strings.Replace(sourceKey, sourcePrefix, targetPrefix, 1)
+
+        _, err := s3Client.CopyObject(ctx, &s3.CopyObjectInput{
+            Bucket:     aws.String(bucket),
+            CopySource: aws.String(fmt.Sprintf("%s/%s", bucket, sourceKey)),
+            Key:        aws.String(targetKey),
+        })
+        if err != nil {
+            return 0, 0, fmt.Errorf("copy object %s: %w", sourceKey, err)
+        }
+
+        totalSize += *obj.Size
+        fileCount++
+    }
+
+    return totalSize, fileCount, nil
 }
 ```
 
 ---
 
-## 五、性能优化总结
+## 五、Performance Optimization Summary
 
-| 操作 | 传统方案 | Sandbox0Volume 优化 | 提升 |
-|------|----------|---------------------|------|
-| **Snapshot** | tar + upload (数秒~分钟) | 元数据引用 (~0ms) | **1000x+** |
-| **Restore** | download + untar (数秒~分钟) | 指针切换 (~10ms) | **1000x+** |
-| **Cold Start** | 10s~1min | **<100ms** | **100x+** |
-| **首次访问** | N/A | Lazy Load (~100ms) | - |
+| Operation | Traditional Approach | Sandbox0Volume (JuiceFS) | Improvement |
+|-----------|---------------------|--------------------------|-------------|
+| **Mount** | OverlayFS + Layer download (seconds) | JuiceFS FUSE mount (~50ms) + lazy load | **100x+** |
+| **Snapshot** | tar + S3 upload (seconds to minutes) | S3 CopyObject (~seconds) | **10x+** |
+| **Restore** | S3 download + untar (seconds to minutes) | Update S3 prefix pointer (~10ms) | **1000x+** |
+| **Cold Start** | 10s-1min | **<100ms** (mount only) | **100x+** |
+| **File Access** | Local OverlayFS | JuiceFS local cache + S3 | Similar (with cache) |
 
-### 关键技术
+### Key Technologies
 
-1. **Copy-on-Write 分层**：Snapshot 只存元数据引用
-2. **OverlayFS**：内核级 CoW，零拷贝合并
-3. **Lazy Load**：按需下载 Layer，不阻塞冷启动
-4. **预热缓存**：空闲池 Pod 预加载常用 Layer
-5. **异步上传**：Working Layer 定期后台上传
+1. **JuiceFS Embedded Library**: Direct Go library integration, no external process overhead
+2. **FUSE Kernel Module**: Zero-copy file operations
+3. **Lazy Loading**: Files are fetched from S3 only when accessed
+4. **Local Cache**: Hot files cached in `/var/lib/juicefs/cache`
+5. **k8s-plugin**: No privileged mode required for `/dev/fuse` access
 
 ---
 
-## 六、完整流程（<100ms 冷启动）
+## 六、Complete Flow (<100ms Cold Start)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              完整的冷启动流程（<100ms）                                       │
+│              Complete Cold Start Flow (<100ms)                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  1. 用户请求创建 Sandbox                                                    │
+│  1. User requests to create Sandbox                                         │
 │     POST /api/v1/sandboxes/claim                                            │
 │     {                                                                       │
 │         "template_id": "python-dev",                                        │
 │         "volume_config": {                                                  │
-│             "snapshot_id": "snap-latest"  # 可选，指定恢复的快照            │
+│             "volume_id": "vol-123",                                         │
+│             "snapshot_id": "snap-latest"  # Optional                        │
 │         }                                                                   │
 │     }                                                                       │
 │                                                                             │
-│  2. Manager 认领空闲池 Pod (~10ms)                                          │
-│     - 更新 labels: idle → active                                            │
-│     - 传递 Volume 配置给 Procd                                              │
+│  2. Manager claims idle Pool Pod (~10ms)                                    │
+│     - Update labels: idle → active                                          │
+│     - Pass Volume config to Procd                                           │
 │                                                                             │
-│  3. Manager 调用 Procd API (~5ms)                                           │
+│  3. Manager calls Procd API (~5ms)                                          │
 │     POST /api/v1/volumes/vol-123/mount                                      │
 │     {                                                                       │
 │         "sandbox_id": "sb-abc",                                            │
-│         "snapshot_id": "snap-latest",                                       │
-│         "warmup_config": {...}                                              │
+│         "mount_point": "/workspace",                                        │
+│         "snapshot_id": "snap-latest"                                        │
 │     }                                                                       │
 │                                                                             │
-│  4. Procd VolumeManager 处理 (~20ms)                                        │
-│     a. 恢复 Snapshot（指针切换）                                            │
-│     b. 检查预热缓存（命中）                                                  │
-│     c. 挂载 OverlayFS（内核 CoW）                                           │
-│     d. Bind mount 到用户容器                                                │
+│  4. Procd VolumeManager processes (~50ms)                                   │
+│     a. Load Volume metadata from Manager                                   │
+│     b. Initialize JuiceFS meta client (Redis connection)                   │
+│     c. Initialize JuiceFS chunk store (S3 client)                          │
+│     d. Initialize JuiceFS VFS                                              │
+│     e. Start FUSE server in goroutine                                      │
+│     f. Wait for mount point to be accessible                               │
 │                                                                             │
-│  5. Sandbox Ready (~40ms 总耗时)                                            │
+│  5. Sandbox Ready (~70ms total)                                             │
 │     ────────────────────────────────────────────────────────────────────   │
-│     用户看到完整的文件系统，可以立即使用                                      │
+│     User sees empty mount point, files loaded on first access              │
 │                                                                             │
-│  6. 后台异步任务（不阻塞用户）                                               │
-│     - Lazy Load: 首次访问时下载 Layer                                       │
-│     - Writeback: 定期上传 Working Layer 到 S3                               │
-│     - Cache Refresh: 定期更新预热缓存                                       │
+│  6. Background async tasks (does not block user)                            │
+│     - Lazy Load: Fetch files from S3 when accessed                         │
+│     - Cache Warming: Prefetch frequently accessed files                    │
+│     - Writeback: Flush writes to S3 (async)                                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 七、多租户数据加密
+## 七、Multi-Tenant Data Encryption
 
-### 7.1 加密策略
+### 7.1 Encryption Strategy
+
+JuiceFS supports client-side encryption out of the box:
 
 ```go
-// CryptoManager 加密管理器
-type CryptoManager struct {
-    kmsClient kms.Client
-    cache     sync.Map  // volumeID -> encryptionKey
+// Volume with encryption enabled
+volume := &Volume{
+    JuiceFS: JuiceFSConfig{
+        // ... other config ...
+    },
+    EncryptionKeyID: "kms://aws/key/12345",  // KMS key reference
 }
 
-// EncryptLayer 加密 Layer（客户端加密）
-func (cm *CryptoManager) EncryptLayer(layerPath string, key []byte) error {
-    // 1. 遍历所有文件
-    // 2. 分块加密（AES-256-GCM）
-    // 3. 上传加密后的数据到 S3
-    return nil
-}
-
-// DecryptLayer 解密 Layer（按需解密）
-func (cm *CryptoManager) DecryptLayer(layerPath string) error {
-    // Lazy Decrypt: 首次访问文件时才解密
-    return nil
+// JuiceFS format includes encryption settings
+format := &meta.Format{
+    // ... other fields ...
+    Encryption: "aes256gcm-rsa",  // Client-side encryption
 }
 ```
 
-### 7.2 密钥管理
+### 7.2 Key Management
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        密钥管理架构                                          │
+│                        Key Management Architecture                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  KMS (AWS KMS / GCP KMS / Vault)                                           │
 │       │                                                                     │
-│       │ 1. Volume 创建时生成密钥                                            │
+│       │ 1. Volume creation generates encryption key                        │
 │       ▼                                                                     │
-│  Procd CryptoManager                                                        │
+│  Procd VolumeManager                                                        │
 │       │                                                                     │
-│       │ 2. 从 KMS 获取密钥，缓存在内存                                       │
+│       │ 2. Fetch key from KMS, pass to JuiceFS                             │
 │       ▼                                                                     │
-│  Volume 加密                                                                │
+│  JuiceFS Client-Side Encryption                                            │
 │       │                                                                     │
-│       │ 3. 每个 Volume 独立的 AES-256-GCM 密钥                              │
-│       │ 4. 每个 Layer 独立的 IV（初始化向量）                                │
+│       │ 3. Each volume uses independent AES-256-GCM key                    │
+│       │ 4. Data encrypted before upload to S3                              │
 │       ▼                                                                     │
-│  S3 加密存储                                                                │
+│  S3 Encrypted Storage                                                      │
 │                                                                             │
-│  安全策略：                                                                 │
-│  - 密钥不出 Procd 内存                                                     │
-│  - Procd 退出时密钥清空                                                     │
-│  - 支持密钥轮换                                                             │
+│  Security Policy:                                                           │
+│  - Keys are cached in Procd memory only                                    │
+│  - Keys are cleared on Procd exit                                          │
+│  - Support key rotation                                                    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 八、与 Manager 的交互
+## 八、Interaction with Manager
 
-### 8.1 Volume 元数据存储
+### 8.1 Volume Metadata Storage
 
-Volume 的元数据存储在 PGSQL 中，由 Manager 管理：
+Volume metadata is stored in PostgreSQL, managed by Manager.
+
+**Important**: JuiceFS also uses the **same PostgreSQL instance** for its internal metadata (inodes, dentries, chunks). This unifies all metadata storage.
 
 ```sql
--- Volumes 表（由 Manager 管理）
+-- Volumes table (managed by Manager, in sandbox0 database)
 CREATE TABLE volumes (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     team_id TEXT NOT NULL,
-    s3_bucket TEXT NOT NULL,
-    s3_prefix TEXT NOT NULL,
-    base_layer_id TEXT NOT NULL,
-    working_layer_id TEXT,
+    juicefs_config JSONB NOT NULL,  -- JuiceFSConfig as JSON
+    capacity TEXT NOT NULL,
     encryption_key_id TEXT,
-    ...
+    read_only BOOLEAN DEFAULT FALSE,
+    allowed_sandbox_ids TEXT[],
+    tags TEXT[],
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    last_accessed_at TIMESTAMP,
+    size_bytes BIGINT DEFAULT 0,
+    file_count INTEGER DEFAULT 0,
+    mount_count INTEGER DEFAULT 0
 );
+
+-- JuiceFS internal tables (created automatically by JuiceFS in the same database)
+-- These are managed by JuiceFS, not by Manager:
+-- - jfs_node (inodes)
+-- - jfs_edge (dentries/directory entries)
+-- - jfs_chunk (chunk references)
+-- - jfs_symlink (symbolic links)
+-- - jfs_xattr (extended attributes)
+-- - jfs_session (active sessions)
+-- - etc.
 ```
 
-### 8.2 Procd 调用流程
+### 8.2 Procd Call Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Manager → Procd Volume 挂载流程                          │
+│                    Manager → Procd Volume Mount Flow                        │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  1. Manager 从 PG 获取 Volume 元数据                                        │
+│  1. Manager fetches Volume metadata from PostgreSQL (sandbox0 database)    │
 │     SELECT * FROM volumes WHERE id = 'vol-123';                             │
 │                                                                             │
-│  2. Manager 调用 Procd API 挂载 Volume                                     │
+│  2. Manager calls Procd API to mount Volume                                │
 │     POST /api/v1/volumes/vol-123/mount                                      │
 │     {                                                                       │
 │         "sandbox_id": "sb-abc",                                            │
 │         "mount_point": "/workspace",                                        │
-│         "s3_bucket": "sandbox0-volumes",                                   │
-│         "s3_prefix": "volumes/vol-123",                                     │
-│         "base_layer_id": "base-py311",                                      │
+│         "juicefs_config": {                                                │
+│             "meta_url": "postgres://postgres:5432/sandbox0",               │
+│             "s3_bucket": "sandbox0-volumes",                               │
+│             "s3_prefix": "teams/team-456/volumes/vol-123",                 │
+│             "cache_size": "10Gi"                                           │
+│         },                                                                 │
 │         "snapshot_id": "snap-latest"                                        │
 │     }                                                                       │
 │                                                                             │
-│  3. Procd VolumeManager 处理挂载                                            │
-│     - 从 S3 下载 Layer（或使用缓存）                                        │
-│     - 创建 OverlayFS                                                       │
-│     - Bind mount 到指定路径                                                 │
+│  3. Procd VolumeManager processes mount                                    │
+│     - Initialize JuiceFS meta client (connects to PostgreSQL)              │
+│     - Initialize JuiceFS object storage client (S3)                        │
+│     - Start FUSE server in goroutine                                       │
+│     - Wait for mount point to be accessible                                │
 │                                                                             │
-│  4. 返回挂载结果                                                            │
+│  4. Return mount result                                                    │
 │     {                                                                       │
 │         "volume_id": "vol-123",                                             │
 │         "mount_point": "/workspace",                                        │
-│         "layer_chain": ["base-py311", "working-xyz"]                        │
+│         "juicefs_version": "1.1.0"                                          │
 │     }                                                                       │
+│                                                                             │
+│  Note: JuiceFS automatically creates its internal tables in PostgreSQL     │
+│        (jfs_node, jfs_edge, jfs_chunk, etc.) on first mount                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 九、HTTP API（Procd 提供的接口）
+## 九、HTTP API (Provided by Procd)
 
 ```http
-# 挂载 Volume
+# Mount Volume
 POST /api/v1/volumes/{volume_id}/mount
 {
     "sandbox_id": "sb-abc123",
     "mount_point": "/workspace",
     "read_only": false,
     "snapshot_id": "snap-001",
-    "warmup_config": {
-        "enabled": true,
-        "base_layer_ids": ["base-python-3.11"]
+    "juicefs_opts": {
+        "cache_size": "10Gi",
+        "prefetch": 3
     }
 }
 
-# 卸载 Volume
+# Unmount Volume
 POST /api/v1/volumes/{volume_id}/unmount
 
-# 获取 Volume 状态
+# Get Volume Status
 GET /api/v1/volumes/{volume_id}
 
-# 创建快照
+# Create Snapshot (S3 copy)
 POST /api/v1/volumes/{volume_id}/snapshots
+{
+    "name": "before-deploy",
+    "description": "Snapshot before deployment"
+}
 
-# 恢复快照
+# List Snapshots
+GET /api/v1/volumes/{volume_id}/snapshots
+
+# Restore Snapshot
 POST /api/v1/volumes/{volume_id}/restore
+{
+    "snapshot_id": "snap-001"
+}
+```
 
-# 预加载 Layer
-POST /api/v1/volumes/preload
+---
+
+## 十、Deployment Configuration
+
+### 10.1 Infrastructure Deployment
+
+#### k8s-plugin DaemonSet
+
+```yaml
+# Deploy k8s-plugin as DaemonSet
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k8s-plugin
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: k8s-plugin
+  template:
+    metadata:
+      labels:
+        name: k8s-plugin
+    spec:
+      hostNetwork: true
+      containers:
+      - name: k8s-plugin
+        image: ghcr.io/nextflow-io/k8s-plugin:latest
+        securityContext:
+          privileged: true  # DaemonSet needs privileged to expose /dev/fuse
+        volumeMounts:
+        - name: device-plugin
+          mountPath: /var/lib/kubelet/device-plugins
+        - name: dev
+          mountPath: /dev
+      volumes:
+      - name: device-plugin
+        hostPath:
+          path: /var/lib/kubelet/device-plugins
+      - name: dev
+        hostPath:
+          path: /dev
+```
+
+#### PostgreSQL Deployment
+
+```yaml
+# Deploy PostgreSQL (unified metadata storage)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: sandbox0-system
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: sandbox0-system
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: sandbox0
+        - name: POSTGRES_USER
+          value: sandbox0
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 100Gi
+```
+
+### 10.2 SandboxTemplate with JuiceFS Support
+
+```yaml
+apiVersion: sandbox0.ai/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: python-dev
+spec:
+  mainContainer:
+    image: sandbox0/procd:latest
+    securityContext:
+      capabilities:
+        add:
+          - NET_ADMIN  # For nftables only, no SYS_ADMIN needed
+    env:
+      - name: SANDBOX_ID
+        value: "sb-abc"
+      - name: JUICEFS_META_URL
+        value: "postgres://sandbox0:password@postgres.sandbox0-system.svc.cluster.local:5432/sandbox0?sslmode=disable"
+      - name: JUICEFS_S3_BUCKET
+        value: "sandbox0-volumes"
+      - name: JUICEFS_S3_REGION
+        value: "us-east-1"
+      - name: JUICEFS_CACHE_SIZE
+        value: "10Gi"
+    volumeMounts:
+      - name: juicefs-cache
+        mountPath: /var/lib/juicefs/cache
+    resources:
+      limits:
+        cpu: "2"
+        memory: "4Gi"
+        sandbox0.ai/fuse: 1  # Request /dev/fuse access
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+  
+  volumes:
+    - name: juicefs-cache
+      emptyDir:
+        sizeLimit: 10Gi
+  
+  pool:
+    minIdle: 3
+    maxIdle: 10
+```
+
+---
+
+## 十一、Comparison with Previous Design
+
+| Aspect | Previous (OverlayFS + Sidecar) | New (JuiceFS Embedded) |
+|--------|--------------------------------|------------------------|
+| **Architecture** | Procd + S3 Sync Sidecar | Procd only (embedded JuiceFS) |
+| **Privileges** | SYS_ADMIN (OverlayFS) + NET_ADMIN | NET_ADMIN only + k8s-plugin |
+| **Layer Management** | Complex (Base, Delta, Working layers) | Simple (S3-backed POSIX filesystem) |
+| **Snapshot** | Layer delta + S3 upload | S3 directory copy |
+| **Cache** | Shared emptyDir between containers | JuiceFS local cache |
+| **Mount Time** | ~100ms (OverlayFS + layer download) | ~50ms (FUSE mount + lazy load) |
+| **Dependencies** | Sidecar container | None (embedded library) |
+| **Complexity** | High (4 files: volume.md with 1200 lines) | Low (1 file, simpler logic) |
+
+---
+
+## 十二、Advantages
+
+1. **No Privileged Container**: Use k8s-plugin to expose `/dev/fuse`, no `privileged: true` required
+2. **Simplified Architecture**: No Sidecar, no complex layer management
+3. **Production-Ready**: JuiceFS is battle-tested, used in production by many companies
+4. **Deep Integration**: Embedded library allows fine-grained control and monitoring
+5. **POSIX Compliance**: Full POSIX filesystem semantics (better than object storage)
+6. **Efficient Snapshots**: S3 CopyObject is fast and atomic
+7. **Multi-Mount Support**: JuiceFS natively supports concurrent mounts (read-only)
+
+---
+
+## 十三、Limitations
+
+1. **PostgreSQL Dependency**: Requires PostgreSQL for metadata (unified with Manager's database)
+2. **Cache Warmup**: First file access may be slower (fetching from S3)
+3. **Snapshot Size**: Snapshots via S3 copy consume additional S3 storage
+4. **FUSE Overhead**: FUSE adds ~10-20% overhead compared to native filesystem
+5. **k8s-plugin Requirement**: Requires DaemonSet deployment in cluster
+
+## 十四、Unified PostgreSQL Architecture
+
+All metadata is stored in a single PostgreSQL instance:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Unified PostgreSQL Metadata Storage                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PostgreSQL (sandbox0 database)                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  Manager Tables (business metadata)                                   │  │
+│  │  ├── volumes - Volume configurations                                  │  │
+│  │  ├── snapshots - Snapshot metadata                                    │  │
+│  │  ├── teams - Team information                                         │  │
+│  │  └── ... - Other business tables                                      │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  JuiceFS Tables (filesystem metadata, auto-created)                   │  │
+│  │  ├── jfs_node - Inodes (files, directories)                           │  │
+│  │  ├── jfs_edge - Dentries (directory entries)                          │  │
+│  │  ├── jfs_chunk - Chunk references (S3 object keys)                    │  │
+│  │  ├── jfs_symlink - Symbolic links                                     │  │
+│  │  ├── jfs_xattr - Extended attributes                                  │  │
+│  │  ├── jfs_session - Active mount sessions                              │  │
+│  │  └── ... - Other JuiceFS internal tables                              │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  Benefits:                                                                  │
+│  - Single database to manage                                               │
+│  - No Redis dependency                                                     │
+│  - ACID transactions for metadata operations                               │
+│  - Easier backup and recovery                                              │
+│  - Better observability (SQL queries for debugging)                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```

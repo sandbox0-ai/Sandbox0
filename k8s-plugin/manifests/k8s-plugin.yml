@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sandbox0-plugin
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: sandbox0-plugin
+  template:
+    metadata:
+      labels:
+        name: sandbox0-plugin
+    spec:
+      hostNetwork: true
+      containers:
+      - image: sandbox0ai/k8s-plugin:latest
+        name: fuse-device-plugin-ctr
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: device-plugin
+            mountPath: /var/lib/kubelet/device-plugins
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins

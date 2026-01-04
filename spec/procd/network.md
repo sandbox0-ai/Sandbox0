@@ -17,46 +17,53 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Procd Network Architecture                               │
+│            Procd Network Architecture (Pod Level Isolation)                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│   Host Namespace (Procd作为PID=1运行在Host)                                  │
+│   Pod (由 CNI 配置，已有独立网络命名空间和 IP)                                │
 │   ┌───────────────────────────────────────────────────────────────────────┐  │
-│   │                         NetworkManager                                 │  │
-│   │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐     │  │
-│   │  │  Firewall   │ │  TCPProxy   │ │  DNSResolver│ │ IPSet Mgmt  │     │  │
-│   │  │ (nftables)  │ │  (SOCKS5)   │ │  (独立解析)  │ │  (动态更新)  │     │  │
-│   │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘     │  │
+│   │                    Pod Network Namespace                               │  │
+│   │                                                                       │  │
+│   │   用户进程/Procd 的出站流量                                            │  │
+│   │        │                                                              │  │
+│   │        ▼                                                              │  │
+│   │   ┌─────────────────────────────────────────────────────────────┐     │  │
+│   │   │  nftables OUTPUT chain (Procd 配置)                          │     │  │
+│   │   │  ┌───────────────────────────────────────────────────────┐  │     │  │
+│   │   │  │  1. whitelist 模式:                                     │  │     │  │
+│   │   │  │     - 允许白名单 IP (userAllowSet)                       │  │     │  │
+│   │   │  │     - TCP → REDIRECT to TCPProxy (127.0.0.1:1080)      │  │     │  │
+│   │   │  │     - 阻止其他                                           │  │     │  │
+│   │   │  │                                                       │  │     │  │
+│   │   │  │  2. allow-all 模式:                                    │  │     │  │
+│   │   │  │     - 直接放行，不经过 TCPProxy                         │  │     │  │
+│   │   │  └───────────────────────────────────────────────────────┘  │     │  │
+│   │   └─────────────────────────────────────────────────────────────┘     │  │
+│   │                                                                       │  │
+│   │   ┌─────────────────────────┐         ┌─────────────────────────┐       │  │
+│   │   │      Procd (PID=1)      │         │    用户进程 (子进程)     │       │  │
+│   │   │  ┌───────────────────┐  │         │  - REPL/Shell           │       │  │
+│   │   │  │  NetworkManager   │  │         │  - 所有出站流量        │       │  │
+│   │   │  │  ┌─────────────┐  │  │         │    受规则控制          │       │  │
+│   │   │  │  │ Firewall    │  │  │         │                         │       │  │
+│   │   │  │  │ (nftables)  │  │  │         │                         │       │  │
+│   │   │  │  │ TCPProxy    │  │  │         │                         │       │  │
+│   │   │  │  │ (SOCKS5)    │  │  │         │                         │       │  │
+│   │   │  │  │ DNSResolver │  │  │         │                         │       │  │
+│   │   │  │  └─────────────┘  │  │         │                         │       │  │
+│   │   │  │  HTTP API (8080)  │  │         │                         │       │  │
+│   │   │  └───────────────────┘  │         │                         │       │  │
+│   │   └─────────────────────────┘         └─────────────────────────┘       │  │
+│   │                                                                       │  │
+│   │                          ▼                                            │  │
+│   │              veth (CNI 配置，到 Host 网桥)                             │  │
 │   └───────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│   ┌───────────────────────────────────────────────────────────────────────┐  │
-│   │                      iptables/nftables 规则                             │  │
-│   │  ┌─────────────────────────────────────────────────────────────────┐  │  │
-│   │  │  PREROUTING (priority -150)                                      │  │  │
-│   │  │   1. ESTABLISHED/RELATED → mark(0x1) + accept                    │  │  │
-│   │  │   2. predefinedAllowSet → mark(0x1) + accept                      │  │  │
-│   │  │   3. predefinedDenySet → DROP (私有IP黑名单)                      │  │  │
-│   │  │   4. userAllowSet (非TCP) → mark(0x1) + accept                    │  │  │
-│   │  │   5. userDenySet (非TCP) → DROP                                  │  │  │
-│   │  │   6. TCP未标记 → REDIRECT to TCPProxy :<port>                    │  │  │
-│   │  └─────────────────────────────────────────────────────────────────┘  │  │
-│   └───────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│   ┌───────────────────────────────────────────────────────────────────────┐  │
-│   │                   Sandbox Network Namespace                          │  │
-│   │  ┌─────────────────────────────────────────────────────────────────┐   │  │
-│   │  │  veth_sb (sandbox内) ←──→ veth_host (host)                      │   │  │
-│   │  │                                                                 │   │  │
-│   │  │  ┌─────────────────────────────────────────────────────────┐   │   │  │
-│   │  │  │              Main Container (用户进程)                   │   │   │  │
-│   │  │  │   - 所有网络流量都经过veth对                             │   │   │  │
-│   │  │  │   - TCP流量被重定向到TCPProxy进行域名过滤                 │   │   │  │
-│   │  │  │   - UDP/ICMP等协议由nftables直接过滤                      │   │   │  │
-│   │  │  └─────────────────────────────────────────────────────────┘   │   │  │
-│   │  └─────────────────────────────────────────────────────────────────┘   │  │
-│   └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│   说明:                                                                      │
+│   1. Procd 运行在 Pod 内 (PID=1)，使用 Pod 的网络命名空间                     │
+│   2. nftables OUTPUT 链过滤 Pod 级别的出站流量                                │
+│   3. 需要 NET_ADMIN capability (配置防火墙)                                  │
+│   4. 推荐使用 Kata 运行时以提升安全性                                        │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -131,17 +138,12 @@ type NetworkConfig struct {
     // Sandbox ID
     SandboxID string
 
-    // 网络段配置
-    HostCIDR        string  // "192.168.127.0/24"
-    HostIP          string  // "192.168.127.1"
-    SandboxIP       string  // "192.168.127.2"
-
     // TCP代理配置
-    TCPProxyPort    int32   // 默认 0 (不启用)
+    TCPProxyPort    int32   // 默认 1080
     EnableTCPProxy  bool
 
     // DNS配置
-    DNServers       []string // ["8.8.8.8", "8.8.4.4"]
+    DNSServers      []string // ["8.8.8.8", "8.8.4.4"]
 
     // 预定义黑名单 (默认阻止的IP范围)
     DefaultDenyCIDRs []string
@@ -158,14 +160,6 @@ type NetworkConfig struct {
 // NetworkManager 网络管理器 (Procd核心组件)
 type NetworkManager struct {
     mu               sync.RWMutex
-
-    // 网络命名空间
-    sandboxNS       netns.NsHandle
-    hostNS          netns.NsHandle
-
-    // 网络设备
-    vethHost         string  // veth_sb_host (host侧)
-    vethSandbox      string  // veth_sb (sandbox内)
 
     // 防火墙
     firewall         *Firewall
@@ -188,34 +182,24 @@ type NetworkManager struct {
 // NewNetworkManager 创建网络管理器
 func NewNetworkManager(config *NetworkConfig) (*NetworkManager, error) {
     nm := &NetworkManager{
-        config:     config,
+        config:       config,
         tcpProxyPort: config.TCPProxyPort,
     }
 
-    // 1. 创建网络命名空间
-    if err := nm.createNetworkNamespace(); err != nil {
-        return nil, fmt.Errorf("create network namespace: %w", err)
-    }
-
-    // 2. 创建veth对
-    if err := nm.createVethPair(); err != nil {
-        return nil, fmt.Errorf("create veth pair: %w", err)
-    }
-
-    // 3. 初始化防火墙
-    firewall, err := NewFirewall(nm.vethHost, nm.config.DefaultDenyCIDRs)
+    // 1. 初始化防火墙 (在当前 Pod 网络命名空间)
+    firewall, err := NewFirewall(config.DefaultDenyCIDRs)
     if err != nil {
         return nil, fmt.Errorf("create firewall: %w", err)
     }
     nm.firewall = firewall
 
-    // 4. 初始化DNS解析器
-    nm.dnsResolver = NewDNSResolver(config.DNServers)
+    // 2. 初始化DNS解析器
+    nm.dnsResolver = NewDNSResolver(config.DNSServers)
 
-    // 5. 设置默认策略 (allow-all)
+    // 3. 设置默认策略 (allow-all)
     nm.currentPolicy = &NetworkPolicy{
-        Mode:    NetworkModeAllowAll,
-        Egress:  &NetworkEgressPolicy{},
+        Mode:     NetworkModeAllowAll,
+        Egress:   &NetworkEgressPolicy{},
         UpdatedAt: time.Now(),
     }
 
@@ -227,37 +211,41 @@ func (nm *NetworkManager) SetupNetwork() error {
     nm.mu.Lock()
     defer nm.mu.Unlock()
 
-    runtime.LockOSThread()
-    defer runtime.UnlockOSThread()
-
-    // 保存当前namespace
-    hostNS, err := netns.Get()
-    if err != nil {
-        return err
-    }
-    nm.hostNS = hostNS
-    defer hostNS.Close()
-
-    // 1. 创建sandbox网络命名空间
-    nm.sandboxNS, err = netns.NewNamed(fmt.Sprintf("sb-%s", nm.config.SandboxID))
-    if err != nil {
-        return err
-    }
-
-    // 2. 创建veth对
-    if err := nm.createVethPair(); err != nil {
-        return err
-    }
-
-    // 3. 配置路由和NAT
-    if err := nm.configureRouting(); err != nil {
-        return err
-    }
-
-    // 4. 初始化nftables规则
+    // 在当前 Pod 网络命名空间初始化 nftables 规则
     if err := nm.firewall.Initialize(); err != nil {
         return err
     }
+
+    return nil
+}
+
+// UpdatePolicy 更新网络策略 (动态调用)
+func (nm *NetworkManager) UpdatePolicy(policy *NetworkPolicy) error {
+    nm.mu.Lock()
+    defer nm.mu.Unlock()
+
+    // 1. 更新 Firewall 规则
+    if err := nm.firewall.UpdatePolicy(policy); err != nil {
+        return err
+    }
+
+    // 2. 更新 TCPProxy 白名单
+    if nm.tcpProxy != nil && policy.Egress != nil {
+        // 更新域名白名单
+        nm.tcpProxy.allowDomains = NewDomainMatcher(policy.Egress.AllowDomains)
+
+        // 更新 IP 白名单 (构建 ipnet.IPNetSet)
+        allowIPs := ipnet.NewIPNetSet()
+        for _, cidr := range policy.Egress.AllowCIDRs {
+            _, network, _ := net.ParseCIDR(cidr)
+            allowIPs.AddIPNet(network)
+        }
+        nm.tcpProxy.allowIPs = allowIPs
+    }
+
+    // 3. 保存当前策略
+    nm.currentPolicy = policy
+    nm.currentPolicy.UpdatedAt = time.Now()
 
     return nil
 }
@@ -270,7 +258,7 @@ func (nm *NetworkManager) SetupNetwork() error {
 type Firewall struct {
     conn              *nftables.Conn
     table             *nftables.Table
-    filterChain       *nftables.Chain
+    outputChain       *nftables.Chain
 
     // IP集合 (使用nftables sets)
     predefinedAllowSet set.Set  // 预定义允许集合 (通常为空)
@@ -279,15 +267,14 @@ type Firewall struct {
     userAllowSet       set.Set  // 用户定义允许集合
     userDenySet        set.Set  // 用户定义拒绝集合
 
-    // TCP标记 (用于识别是否已被处理)
-    allowedMark        uint32  // 0x1
-    tcpMarkRule        *nftables.Rule  // TCP标记规则 (可动态添加/删除)
+    // TCP重定向规则 (用于域名过滤)
+    tcpRedirectRule    *nftables.Rule
 
-    vethInterface      string
+    allowedMark        uint32  // 0x1
 }
 
 // NewFirewall 创建防火墙
-func NewFirewall(vethInterface string, defaultDenyCIDRs []string) (*Firewall, error) {
+func NewFirewall(defaultDenyCIDRs []string) (*Firewall, error) {
     conn, err := nftables.New(nftables.AsLasting)
     if err != nil {
         return nil, err
@@ -299,16 +286,16 @@ func NewFirewall(vethInterface string, defaultDenyCIDRs []string) (*Firewall, er
     }
     conn.AddTable(table)
 
-    // 创建PREROUTING filter链
-    filterChain := &nftables.Chain{
-        Name:     "PREROUTE_FILTER",
+    // 创建 OUTPUT filter 链 (用于过滤出站流量)
+    outputChain := &nftables.Chain{
+        Name:     "SANDBOX0_OUTPUT",
         Table:    table,
         Type:     nftables.ChainTypeFilter,
-        Hooknum:  nftables.ChainHookPrerouting,
-        Priority: nftables.ChainPriorityRef(-150),
-        Policy:   nftables.ChainPolicyAccept,
+        Hooknum:  nftables.ChainHookOutput,     // OUTPUT hook 用于出站流量
+        Priority: nftables.ChainPriorityFilter, // 标准优先级
+        Policy:   nftables.ChainPolicyAccept,   // 默认放行
     }
-    conn.AddChain(filterChain)
+    conn.AddChain(outputChain)
 
     // 创建IP集合
     predefinedAllowSet, _ := set.New(conn, table, "predef_allow", nftables.TypeIPAddr)
@@ -319,13 +306,12 @@ func NewFirewall(vethInterface string, defaultDenyCIDRs []string) (*Firewall, er
     fw := &Firewall{
         conn:               conn,
         table:              table,
-        filterChain:        filterChain,
+        outputChain:        outputChain,
         predefinedAllowSet: predefinedAllowSet,
         predefinedDenySet:  predefinedDenySet,
         userAllowSet:       userAllowSet,
         userDenySet:        userDenySet,
         allowedMark:        0x1,
-        vethInterface:      vethInterface,
     }
 
     // 初始化预定义黑名单
@@ -341,6 +327,60 @@ func NewFirewall(vethInterface string, defaultDenyCIDRs []string) (*Firewall, er
     return fw, nil
 }
 
+// installBaseRules 安装基础规则
+func (fw *Firewall) installBaseRules() error {
+    // Rule order is critical:
+    // 1. Predefined blacklist (private IPs) → drop
+    // 2. User deny list → drop
+    // 3. All TCP (except proxy port) → redirect to TCPProxy
+
+    // 1. 预定义黑名单规则 (私有IP)
+    fw.conn.AddRule(&nftables.Rule{
+        Table: fw.table,
+        Chain: fw.outputChain,
+        Expr: []nftables.Expr{
+            // match ip daddr @predef_deny
+            &nftables.Payload{
+                Operation: nftables.PayloadOperationLoad,
+                SourceRegister: true,
+                DestRegister:   1,
+            },
+            &nftables.Lookup{
+                SetName: "predef_deny",
+                SetID:   fw.predefinedDenySet.GetID(),
+            },
+            // verdict drop
+            &nftables.Verdict{
+                Kind: nftables.VerdictDrop,
+            },
+        },
+    })
+
+    // 2. 用户拒绝集合规则 (优先级最高)
+    fw.conn.AddRule(&nftables.Rule{
+        Table: fw.table,
+        Chain: fw.outputChain,
+        Expr: []nftables.Expr{
+            // match ip daddr @user_deny
+            &nftables.Payload{
+                Operation: nftables.PayloadOperationLoad,
+                SourceRegister: true,
+                DestRegister:   1,
+            },
+            &nftables.Lookup{
+                SetName: "user_deny",
+                SetID:   fw.userDenySet.GetID(),
+            },
+            // verdict drop
+            &nftables.Verdict{
+                Kind: nftables.VerdictDrop,
+            },
+        },
+    })
+
+    return fw.conn.Flush()
+}
+
 // UpdatePolicy 更新网络策略 (动态调用)
 func (fw *Firewall) UpdatePolicy(policy *NetworkPolicy) error {
     // 1. 清空用户集合
@@ -351,37 +391,45 @@ func (fw *Firewall) UpdatePolicy(policy *NetworkPolicy) error {
         return err
     }
 
-    // 2. 根据模式配置规则
+    // 2. 删除旧的 TCP 重定向规则
+    if fw.tcpRedirectRule != nil {
+        fw.conn.DelRule(fw.tcpRedirectRule)
+        fw.tcpRedirectRule = nil
+    }
+
+    // 3. 根据模式配置规则
     switch policy.Mode {
     case NetworkModeAllowAll:
-        // 移除TCP标记规则 (所有TCP不经过代理)
-        if err := fw.removeTCPMarkRule(); err != nil {
-            return err
-        }
+        // allow-all 模式: 不需要额外规则，直接放行
 
     case NetworkModeDenyAll:
-        // 添加TCP标记规则 (所有TCP需要代理，代理会拒绝所有)
-        if err := fw.addTCPMarkRuleIfNeeded(); err != nil {
-            return err
-        }
+        // deny-all 模式: 添加拒绝所有规则
+        fw.conn.AddRule(&nftables.Rule{
+            Table: fw.table,
+            Chain: fw.outputChain,
+            Expr: []nftables.Expr{
+                &nftables.Verdict{Kind: nftables.VerdictDrop},
+            },
+        })
 
     case NetworkModeWhitelist:
-        // 配置允许集合
-        if policy.Egress != nil {
-            // 添加允许的CIDRs
+        // whitelist 模式: 所有 TCP 流量重定向到 TCPProxy
+        // TCPProxy 内部检查 IP 白名单和域名白名单
+        if policy.Egress != nil && policy.Egress.TCPProxyPort > 0 {
+            // Store allowed CIDRs in userAllowSet for TCPProxy to check
             for _, cidr := range policy.Egress.AllowCIDRs {
                 if err := fw.userAllowSet.AddElement(fw.conn, cidr); err != nil {
                     return err
                 }
             }
-        }
-        // TCP需要代理 (用于域名过滤)
-        if err := fw.addTCPMarkRuleIfNeeded(); err != nil {
-            return err
+
+            // Store allowed domains in TCPProxy's DomainMatcher
+            // Add TCP redirect rule: all TCP → TCPProxy
+            fw.addTCPRedirectRule(policy.Egress.TCPProxyPort)
         }
     }
 
-    // 3. 配置拒绝集合 (优先级高于允许)
+    // 4. 配置拒绝集合 (优先级高于允许，在 installBaseRules 中已添加规则)
     if policy.Egress != nil {
         for _, cidr := range policy.Egress.DenyCIDRs {
             if err := fw.userDenySet.AddElement(fw.conn, cidr); err != nil {
@@ -391,6 +439,40 @@ func (fw *Firewall) UpdatePolicy(policy *NetworkPolicy) error {
     }
 
     return fw.conn.Flush()
+}
+
+// addTCPRedirectRule 添加 TCP 重定向到代理的规则
+func (fw *Firewall) addTCPRedirectRule(proxyPort int32) {
+    fw.tcpRedirectRule = &nftables.Rule{
+        Table: fw.table,
+        Chain: fw.outputChain,
+        Expr: []nftables.Expr{
+            // meta l4proto tcp
+            &nftables.Meta{Key: "l4proto", Register: 1},
+            &nftables.Cmp{Op: nftables.CmpOpEq, Register: 1, Data: []byte{6}}, // IPPROTO_TCP
+
+            // tcp dport != {proxyPort}
+            &nftables.Payload{
+                SourceRegister: 1,
+                DestRegister:   2,
+                Operation:      nftables.PayloadOperationLoad,
+                Field:          "tcp dport",
+            },
+            &nftables.Cmp{
+                Op:       nftables.CmpOpNeq,
+                Register: 2,
+                Data:     []byte{byte(proxyPort >> 8), byte(proxyPort)},
+            },
+
+            // redirect to 127.0.0.1:{proxyPort}
+            &nftables.Redirect{
+                Register: 1,
+                Address:  "127.0.0.1",
+                Port:     proxyPort,
+            },
+        },
+    }
+    fw.conn.AddRule(fw.tcpRedirectRule)
 }
 ```
 
@@ -402,6 +484,7 @@ type TCPProxy struct {
     listenAddr   string
     dnsResolver  *DNSResolver
     allowDomains *DomainMatcher  // 允许的域名列表
+    allowIPs     *ipnet.IPNetSet // 允许的IP/CIDR集合
 
     // 连接跟踪
     connections  sync.Map
@@ -477,7 +560,7 @@ func (p *TCPProxy) handleConnection(clientConn net.Conn) {
         targetIPs = resolvedIPs
     }
 
-    // 5. IP白名单检查 (在防火墙也已检查，这里再检查一遍)
+    // 5. IP白名单检查 (检查 userAllowSet)
     for _, ip := range targetIPs {
         if p.isIPAllowed(ip) {
             // 6. 建立到目标服务器的连接
@@ -500,12 +583,18 @@ func (p *TCPProxy) handleConnection(clientConn net.Conn) {
 func (p *TCPProxy) isIPAllowed(ipStr string) bool {
     ip := net.ParseIP(ipStr)
 
-    // 检查是否是私有IP (默认拒绝)
+    // 1. 检查是否是私有IP (默认拒绝)
     if isPrivateIP(ip) {
         return false
     }
 
-    return true
+    // 2. 检查用户白名单 IP 集合
+    if p.allowIPs != nil {
+        return p.allowIPs.Contains(ip)
+    }
+
+    // 3. 如果没有配置白名单，拒绝所有 (whitelist 模式)
+    return false
 }
 
 // isPrivateIP 检查是否是私有IP
@@ -730,7 +819,57 @@ func (s *SandboxService) updateNetworkPolicy(ctx context.Context, procdAddr stri
 
 ---
 
-## 七、与 E2B 功能对比
+## 七、安全与性能
+
+### 7.1 特权容器要求
+
+由于需要配置 nftables，Procd 容器需要以下权限：
+
+```yaml
+securityContext:
+  privileged: false
+  capabilities:
+    add:
+      - NET_ADMIN    # Configure nftables firewall rules
+
+# Note: SYS_ADMIN capability is only required for volume management (OverlayFS mounting),
+# not for network isolation. See volume.md for details.
+```
+
+### 7.2 推荐使用 Kata 运行时
+
+为了降低特权容器的安全风险，强烈推荐使用 Kata Containers：
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sandbox-pod
+spec:
+  runtimeClassName: kata  # 使用 Kata 运行时
+  containers:
+  - name: procd
+    securityContext:
+      privileged: true     # 在 VM 内安全
+```
+
+**Kata 的优势**：
+- 特权容器限制在轻量级 VM 内
+- VM 有独立的内核和网络栈
+- 容器逃逸只影响 VM，不影响主机
+- 网络策略更新速度相同 (~10ms)
+
+### 7.3 冷启动性能对比
+
+| 方案 | 冷启动延迟 | 安全性 |
+|------|-----------|--------|
+| K8s NetworkPolicy | ~100-200ms | 高 |
+| Procd + 特权容器 | ~10-20ms | 低 |
+| **Procd + Kata** | **~10-20ms** | **高** |
+
+---
+
+## 八、与 E2B 功能对比
 
 | 功能 | E2B | Sandbox0 (Procd层面) |
 |------|-----|---------------------|
@@ -746,10 +885,11 @@ func (s *SandboxService) updateNetworkPolicy(ctx context.Context, procdAddr stri
 
 ---
 
-## 八、优势总结
+## 九、优势总结
 
 1. **零冷启动延迟**：网络策略在Procd层面配置，Pod认领时无需与K8s交互
 2. **动态配置**：通过HTTP API随时修改网络策略
 3. **完整功能**：实现E2B所有网络隔离功能
 4. **简单部署**：无需复杂的网络slot池管理
 5. **K8s原生**：与ReplicaSet + Idle Pool完美配合
+6. **Kata友好**：配合Kata运行时实现高安全性

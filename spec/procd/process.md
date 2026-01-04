@@ -186,26 +186,17 @@ type ProcessConfig struct {
     EnvVars  map[string]string // 环境变量
 
     // 执行配置
-    Timeout  time.Duration     // 超时时间
     AutoRestart bool           // 自动重启
 
     // PTY配置（所有进程都支持PTY）
     PTYSize  *PTYSize          // PTY终端大小
     Term     string            // TERM类型，默认 xterm-256color
 
-    // 资源限制
-    Limits   *ResourceLimits   // 资源限制
 }
 
 type PTYSize struct {
     Rows uint16
     Cols uint16
-}
-
-type ResourceLimits struct {
-    MaxMemory    uint64  // 最大内存
-    MaxCPU       float64 // 最大CPU
-    MaxDuration  time.Duration // 最大运行时间
 }
 ```
 
@@ -820,16 +811,13 @@ func (ctx *Context) ExecuteCommand(cmd string) (<-chan ProcessOutput, error) {
      │
      ├─► Killed (被Kill)
      │
-     ├─► Crashed (崩溃)
-     │
-     └─► Timeout (超时)
+     └─► Crashed (崩溃)
 
 状态转换:
 - Starting → Running: 进程成功启动
 - Running → Stopped: 进程正常退出(exitCode = 0)
 - Running → Killed: 收到SIGKILL信号
 - Running → Crashed: 进程异常退出(exitCode != 0)
-- Running → Timeout: 超过配置的Timeout
 - Stopped → Running: Restart操作（变量/状态会丢失，需手动恢复）
 ```
 
@@ -918,111 +906,23 @@ ctx.ExecuteCommand("fg %1")  // 把后台任务调到前台
 
 ---
 
-## 八、资源管理
-
-### 8.1 资源限制
-
-```go
-type ResourceLimits struct {
-    MaxMemoryBytes uint64
-    MaxCPUPercent  float64
-    MaxDuration    time.Duration
-    MaxFDs         uint32
-}
-
-// 应用资源限制
-func (p *BaseProcess) applyLimits(limits *ResourceLimits) error {
-    if limits.MaxMemoryBytes > 0 {
-        setMemoryLimit(p.PID(), limits.MaxMemoryBytes)
-    }
-    if limits.MaxCPUPercent > 0 {
-        setCPULimit(p.PID(), limits.MaxCPUPercent)
-    }
-    if limits.MaxDuration > 0 {
-        go p.monitorTimeout(limits.MaxDuration)
-    }
-    return nil
-}
-```
-
-### 8.2 清理策略
+## 八、清理策略
 
 ```go
 // Context清理
 func (ctx *Context) Cleanup() error {
-    // 停止主进程
-    ctx.MainProcess.Stop()
-
-    // 清理临时文件
-    if ctx.CWD != "" {
-        os.RemoveAll(ctx.CWD)
-    }
-
-    return nil
-}
-
-// 自动清理超时Context
-func (m *ContextManager) StartCleanupWorker() {
-    ticker := time.NewTicker(1 * time.Minute)
-
-    go func() {
-        for range ticker.C {
-            m.contexts.Range(func(key, value interface{}) bool {
-                ctx := value.(*Context)
-                if time.Since(ctx.UpdatedAt) > 30*time.Minute {
-                    m.DeleteContext(ctx.ID)
-                }
-                return true
-            })
-        }
-    }()
+    // Stop main process
+    // Note: Do NOT clean files here. Pod deletion will handle cleanup.
+    // Persistent volume files must NOT be deleted.
+    return ctx.MainProcess.Stop()
 }
 ```
 
 ---
 
-## 九、状态持久化（可选）
+## 九、安全性考虑
 
-### 9.1 变量快照
-
-```go
-// Snapshot 捕获当前状态
-func (ctx *Context) Snapshot() (*ContextSnapshot, error) {
-    snapshot := &ContextSnapshot{
-        ID:        ctx.ID,
-        Timestamp: time.Now(),
-        CWD:       ctx.CWD,
-        EnvVars:   ctx.EnvVars,
-    }
-
-    // 如果是REPL，保存变量
-    if ctx.Type == ProcessTypeREPL {
-        repl := ctx.MainProcess.(interface{ GetVariables() map[string]interface{} })
-        snapshot.Variables = repl.GetVariables()
-    }
-
-    return snapshot, nil
-}
-
-// Restore 恢复状态（重启后）
-func (ctx *Context) Restore(snapshot *ContextSnapshot) error {
-    ctx.CWD = snapshot.CWD
-    ctx.EnvVars = snapshot.EnvVars
-
-    if ctx.Type == ProcessTypeREPL {
-        repl := ctx.MainProcess.(interface{ SetVariables(map[string]interface{}) error })
-        return repl.SetVariables(snapshot.Variables)
-    }
-
-    return nil
-}
-```
-
----
-
-## 十、安全性考虑
-
-### 10.1 命令验证
+### 9.1 命令验证
 
 ```go
 // 基本命令验证
@@ -1038,31 +938,9 @@ func validateCommand(cmd string) error {
 }
 ```
 
-### 10.2 资源隔离
-
-```go
-// 使用cgroup隔离
-func setupCgroup(pid int, limits *ResourceLimits) error {
-    cgroupPath := fmt.Sprintf("/sys/fs/cgroup/sandbox0/%d", pid)
-    os.MkdirAll(cgroupPath, 0755)
-
-    if limits.MaxMemoryBytes > 0 {
-        writeFile(cgroupPath+"/memory.max", fmt.Sprintf("%d", limits.MaxMemoryBytes))
-    }
-
-    if limits.MaxCPUPercent > 0 {
-        cpuQuota := int(limits.MaxCPUPercent * 100000)
-        writeFile(cgroupPath+"/cpu.max", fmt.Sprintf("%d 100000", cpuQuota))
-    }
-
-    writeFile(cgroupPath+"/cgroup.procs", fmt.Sprintf("%d", pid))
-    return nil
-}
-```
-
 ---
 
-## 十一、错误处理
+## 十、错误处理
 
 ```go
 type ProcessError struct {
@@ -1076,7 +954,6 @@ const (
     ErrProcessNotFound    = "PROCESS_NOT_FOUND"
     ErrProcessStartFailed = "PROCESS_START_FAILED"
     ErrProcessKilled      = "PROCESS_KILLED"
-    ErrProcessTimeout     = "PROCESS_TIMEOUT"
     ErrProcessCrashed     = "PROCESS_CRASHED"
     ErrInvalidCommand     = "INVALID_COMMAND"
     ErrPermissionDenied   = "PERMISSION_DENIED"
@@ -1085,7 +962,7 @@ const (
 
 ---
 
-## 十二、与 E2B 的兼容性
+## 十一、与 E2B 的兼容性
 
 | E2B概念 | Sandbox0对应 |
 |---------|--------------|
