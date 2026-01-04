@@ -1,0 +1,34 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Tests
+*_test.go
+test/
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Build artifacts
+bin/
+tmp/
+cache/
+
+# Kubernetes manifests
+deploy/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Logs
+*.log
+logs/
+

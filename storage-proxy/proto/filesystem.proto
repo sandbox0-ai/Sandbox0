@@ -1,0 +1,231 @@
+// pkg/proto/filesystem.proto
+
+syntax = "proto3";
+
+package sandbox0.fs;
+
+option go_package = "github.com/sandbox0/storage-proxy/proto/fs";
+
+// FileSystem service for remote file operations
+service FileSystem {
+  // File operations
+  rpc Read(ReadRequest) returns (ReadResponse);
+  rpc Write(WriteRequest) returns (WriteResponse);
+  rpc Create(CreateRequest) returns (NodeResponse);
+  rpc Mkdir(MkdirRequest) returns (NodeResponse);
+  rpc Unlink(UnlinkRequest) returns (Empty);
+
+  // Metadata operations
+  rpc GetAttr(GetAttrRequest) returns (GetAttrResponse);
+  rpc SetAttr(SetAttrRequest) returns (SetAttrResponse);
+  rpc Lookup(LookupRequest) returns (NodeResponse);
+  rpc ReadDir(ReadDirRequest) returns (ReadDirResponse);
+
+  // Extended operations
+  rpc Rename(RenameRequest) returns (Empty);
+  rpc Flush(FlushRequest) returns (Empty);
+  rpc Fsync(FsyncRequest) returns (Empty);
+  rpc Open(OpenRequest) returns (OpenResponse);
+  rpc Release(ReleaseRequest) returns (Empty);
+  
+  // Volume management
+  rpc MountVolume(MountVolumeRequest) returns (MountVolumeResponse);
+  rpc UnmountVolume(UnmountVolumeRequest) returns (Empty);
+}
+
+// Read request
+message ReadRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode identifier
+  int64 offset = 3;      // Read offset
+  int64 size = 4;        // Number of bytes to read
+  uint64 handle_id = 5;  // File handle from Open
+}
+
+message ReadResponse {
+  bytes data = 1;        // File data
+  bool eof = 2;          // End of file marker
+}
+
+// Write request
+message WriteRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode identifier
+  int64 offset = 3;      // Write offset
+  bytes data = 4;        // Data to write
+  uint64 handle_id = 5;  // File handle from Open
+}
+
+message WriteResponse {
+  int64 bytes_written = 1;  // Number of bytes written
+}
+
+// Open file
+message OpenRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode to open
+  uint32 flags = 3;      // Open flags
+}
+
+message OpenResponse {
+  uint64 handle_id = 1;  // File handle for operations
+}
+
+// Release (close) file
+message ReleaseRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 handle_id = 2;  // File handle to release
+}
+
+// Create file
+message CreateRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 parent = 2;     // Parent directory inode
+  string name = 3;       // File name
+  uint32 mode = 4;       // File mode (permissions)
+  uint32 flags = 5;      // Open flags
+}
+
+// Create directory
+message MkdirRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 parent = 2;     // Parent directory inode
+  string name = 3;       // Directory name
+  uint32 mode = 4;       // Directory mode
+}
+
+// Node response (for Create, Mkdir, Lookup)
+message NodeResponse {
+  uint64 inode = 1;          // Created/existing inode
+  uint64 generation = 2;     // Generation number
+  GetAttrResponse attr = 3;  // Node attributes
+  uint64 handle_id = 4;      // File handle for operations
+}
+
+// Get file/directory attributes
+message GetAttrRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode to query
+}
+
+message GetAttrResponse {
+  uint64 ino = 1;        // Inode number
+  uint32 mode = 2;       // File type and mode
+  uint32 nlink = 3;      // Number of hard links
+  uint32 uid = 4;        // Owner user ID
+  uint32 gid = 5;        // Owner group ID
+  uint64 rdev = 6;       // Device ID (if special file)
+  uint64 size = 7;       // Size in bytes
+  uint64 blocks = 8;     // Number of 512-byte blocks
+  int64 atime_sec = 9;   // Last access time (seconds)
+  int64 atime_nsec = 10; // Last access time (nanoseconds)
+  int64 mtime_sec = 11;  // Last modification time (seconds)
+  int64 mtime_nsec = 12; // Last modification time (nanoseconds)
+  int64 ctime_sec = 13;  // Last status change time (seconds)
+  int64 ctime_nsec = 14; // Last status change time (nanoseconds)
+}
+
+// Set attributes
+message SetAttrRequest {
+  string volume_id = 1;      // Volume identifier
+  uint64 inode = 2;          // Inode to modify
+  uint32 valid = 3;          // Mask of fields to set
+  GetAttrResponse attr = 4;  // Attributes to set
+}
+
+message SetAttrResponse {
+  GetAttrResponse attr = 1;  // Updated attributes
+}
+
+// Lookup entry in directory
+message LookupRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 parent = 2;     // Parent directory inode
+  string name = 3;       // Entry name to lookup
+}
+
+// Read directory
+message ReadDirRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Directory inode
+  uint64 handle_id = 3;  // Directory handle
+  int64 offset = 4;      // Read offset
+}
+
+message ReadDirResponse {
+  repeated DirEntry entries = 1;  // Directory entries
+  bool eof = 2;                   // End of directory marker
+}
+
+message DirEntry {
+  uint64 inode = 1;            // Entry inode
+  uint64 offset = 2;           // Entry offset
+  string name = 3;             // Entry name
+  uint32 type = 4;             // Entry type
+  GetAttrResponse attr = 5;    // Entry attributes
+}
+
+// Unlink (delete) file
+message UnlinkRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 parent = 2;     // Parent directory inode
+  string name = 3;       // File name to delete
+}
+
+// Rename entry
+message RenameRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 old_parent = 2; // Old parent directory inode
+  string old_name = 3;   // Old name
+  uint64 new_parent = 4; // New parent directory inode
+  string new_name = 5;   // New name
+  uint32 flags = 6;      // Rename flags
+}
+
+// Flush file
+message FlushRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 handle_id = 2;  // File handle to flush
+}
+
+// Synchronize file
+message FsyncRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 handle_id = 2;  // File handle to sync
+  bool datasync = 3;     // Sync only data
+}
+
+// Mount volume
+message MountVolumeRequest {
+  string volume_id = 1;
+  VolumeConfig config = 2;
+}
+
+message VolumeConfig {
+  string meta_url = 1;
+  string s3_bucket = 2;
+  string s3_prefix = 3;
+  string s3_region = 4;
+  string s3_endpoint = 5;
+  string s3_access_key = 6;
+  string s3_secret_key = 7;
+  string s3_session_token = 8;
+  string cache_dir = 9;
+  string cache_size = 10;
+  int32 prefetch = 11;
+  string buffer_size = 12;
+  bool writeback = 13;
+  bool read_only = 14;
+}
+
+message MountVolumeResponse {
+  string volume_id = 1;
+  int64 mounted_at = 2;
+}
+
+message UnmountVolumeRequest {
+  string volume_id = 1;
+}
+
+message Empty {}
+

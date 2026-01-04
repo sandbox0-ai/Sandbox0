@@ -1,0 +1,265 @@
+package volume
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/juicedata/juicefs/pkg/chunk"
+	"github.com/juicedata/juicefs/pkg/meta"
+	"github.com/juicedata/juicefs/pkg/object"
+	"github.com/juicedata/juicefs/pkg/vfs"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
+)
+
+// VolumeConfig holds the configuration for a volume
+type VolumeConfig struct {
+	MetaURL        string
+	S3Bucket       string
+	S3Prefix       string
+	S3Region       string
+	S3Endpoint     string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3SessionToken string
+	CacheDir       string
+	CacheSize      string
+	Prefetch       int
+	BufferSize     string
+	Writeback      bool
+	ReadOnly       bool
+}
+
+// VolumeContext holds JuiceFS VFS instance for a volume
+type VolumeContext struct {
+	VolumeID  string
+	Meta      meta.Meta
+	Store     chunk.ChunkStore
+	VFS       *vfs.Ik
+	Config    *VolumeConfig
+	MountedAt time.Time
+}
+
+// Manager manages JuiceFS volumes
+type Manager struct {
+	mu      sync.RWMutex
+	volumes map[string]*VolumeContext
+	logger  *logrus.Logger
+}
+
+// NewManager creates a new volume manager
+func NewManager(logger *logrus.Logger) *Manager {
+	return &Manager{
+		volumes: make(map[string]*VolumeContext),
+		logger:  logger,
+	}
+}
+
+// MountVolume mounts a JuiceFS volume using SDK mode (in-memory, no FUSE)
+func (m *Manager) MountVolume(ctx context.Context, volumeID string, config *VolumeConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if already mounted
+	if _, exists := m.volumes[volumeID]; exists {
+		return fmt.Errorf("volume %s already mounted", volumeID)
+	}
+
+	m.logger.WithField("volume_id", volumeID).Info("Mounting volume")
+
+	// 1. Initialize JuiceFS metadata client
+	metaConf := meta.DefaultConf()
+	metaConf.Retries = 10
+	metaConf.Strict = true
+	metaConf.ReadOnly = config.ReadOnly
+
+	metaClient, err := meta.NewClient(config.MetaURL, metaConf)
+	if err != nil {
+		return fmt.Errorf("failed to create meta client: %w", err)
+	}
+
+	// Load or create format
+	format, err := metaClient.Load(true)
+	if err != nil {
+		metaClient.CloseSession()
+		return fmt.Errorf("failed to load juicefs format: %w", err)
+	}
+
+	// 2. Initialize S3 object storage
+	blob, err := m.createS3Storage(config, format)
+	if err != nil {
+		metaClient.CloseSession()
+		return fmt.Errorf("failed to create S3 storage: %w", err)
+	}
+
+	// 3. Initialize chunk store with local cache
+	cacheDir := filepath.Join(config.CacheDir, volumeID)
+	chunkConf := chunk.Config{
+		BlockSize:     int(format.BlockSize) * 1024,
+		Compress:      format.Compression,
+		MaxUpload:     20,
+		MaxRetries:    10,
+		UploadLimit:   0,
+		DownloadLimit: 0,
+		Writeback:     config.Writeback,
+		Prefetch:      config.Prefetch,
+		BufferSize:    parseSizeString(config.BufferSize, 300<<20), // 300MB default
+		CacheDir:      cacheDir,
+		CacheSize:     parseSizeString(config.CacheSize, 10<<30), // 10GB default
+		FreeSpace:     0.1,
+		CacheMode:     0600,
+		AutoCreate:    true,
+	}
+
+	store := chunk.NewCachedStore(blob, chunkConf, prometheus.DefaultRegisterer, prometheus.DefaultGatherer)
+
+	// 4. Create JuiceFS VFS (in-memory, NO FUSE)
+	vfsInst := vfs.NewVFS(&vfs.Config{
+		Meta: &meta.Config{
+			IORetries: 10,
+		},
+		Format:          format,
+		Chunk:           &chunkConf,
+		AccessLog:       "",
+		AttrTimeout:     time.Second,
+		EntryTimeout:    time.Second,
+		DirEntryTimeout: time.Second,
+	}, metaClient, store)
+
+	// 5. Store volume context
+	m.volumes[volumeID] = &VolumeContext{
+		VolumeID:  volumeID,
+		Meta:      metaClient,
+		Store:     store,
+		VFS:       vfsInst,
+		Config:    config,
+		MountedAt: time.Now(),
+	}
+
+	m.logger.WithFields(logrus.Fields{
+		"volume_id": volumeID,
+		"cache_dir": cacheDir,
+		"read_only": config.ReadOnly,
+	}).Info("Volume mounted successfully")
+
+	return nil
+}
+
+// UnmountVolume unmounts a volume
+func (m *Manager) UnmountVolume(ctx context.Context, volumeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	volCtx, ok := m.volumes[volumeID]
+	if !ok {
+		return fmt.Errorf("volume %s not mounted", volumeID)
+	}
+
+	m.logger.WithField("volume_id", volumeID).Info("Unmounting volume")
+
+	// Flush all pending writes
+	if err := volCtx.VFS.FlushAll(); err != nil {
+		m.logger.WithError(err).Warn("Failed to flush volume")
+	}
+
+	// Close metadata session
+	if err := volCtx.Meta.CloseSession(); err != nil {
+		m.logger.WithError(err).Warn("Failed to close metadata session")
+	}
+
+	// Shutdown chunk store
+	if err := volCtx.Store.Shutdown(); err != nil {
+		m.logger.WithError(err).Warn("Failed to shutdown chunk store")
+	}
+
+	delete(m.volumes, volumeID)
+
+	m.logger.WithField("volume_id", volumeID).Info("Volume unmounted successfully")
+
+	return nil
+}
+
+// GetVolume retrieves volume context
+func (m *Manager) GetVolume(volumeID string) (*VolumeContext, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	volCtx, ok := m.volumes[volumeID]
+	if !ok {
+		return nil, fmt.Errorf("volume %s not mounted", volumeID)
+	}
+
+	return volCtx, nil
+}
+
+// ListVolumes returns all mounted volumes
+func (m *Manager) ListVolumes() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	volumes := make([]string, 0, len(m.volumes))
+	for volumeID := range m.volumes {
+		volumes = append(volumes, volumeID)
+	}
+
+	return volumes
+}
+
+// createS3Storage creates S3 object storage for JuiceFS
+func (m *Manager) createS3Storage(config *VolumeConfig, format *meta.Format) (object.ObjectStorage, error) {
+	// Determine endpoint
+	endpoint := config.S3Endpoint
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("https://s3.%s.amazonaws.com", config.S3Region)
+	}
+
+	// Build S3 URL for JuiceFS object store
+	// Format: s3://bucket/prefix?region=us-east-1&access-key=xxx&secret-key=xxx
+	bucket := config.S3Bucket
+	if config.S3Prefix != "" {
+		bucket = fmt.Sprintf("%s/%s", bucket, config.S3Prefix)
+	}
+
+	// Create object storage using JuiceFS object package
+	obj, err := object.CreateStorage("s3", bucket, config.S3AccessKey, config.S3SecretKey, config.S3SessionToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create S3 storage: %w", err)
+	}
+
+	return obj, nil
+}
+
+// parseSizeString parses size string like "10G", "100M" to bytes
+func parseSizeString(sizeStr string, defaultSize int64) int64 {
+	if sizeStr == "" {
+		return defaultSize
+	}
+
+	var multiplier int64 = 1
+	numStr := sizeStr
+
+	if len(sizeStr) > 0 {
+		lastChar := sizeStr[len(sizeStr)-1]
+		switch lastChar {
+		case 'K', 'k':
+			multiplier = 1 << 10
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'M', 'm':
+			multiplier = 1 << 20
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'G', 'g':
+			multiplier = 1 << 30
+			numStr = sizeStr[:len(sizeStr)-1]
+		case 'T', 't':
+			multiplier = 1 << 40
+			numStr = sizeStr[:len(sizeStr)-1]
+		}
+	}
+
+	var size int64
+	fmt.Sscanf(numStr, "%d", &size)
+	return size * multiplier
+}
