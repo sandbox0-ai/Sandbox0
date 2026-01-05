@@ -1,16 +1,16 @@
-# Sandbox0 Internal Gateway 设计规范
+# Sandbox0 Internal Gateway Design Specification
 
-## 一、设计目标
+## Overview
 
-Internal Gateway 是 sandbox0 的统一入口，负责：
-1. **鉴权认证**：验证客户端身份，支持多种认证方式
-2. **请求路由**：将请求转发到对应的内部服务（manager/procd）
-3. **协议转换**：统一外部API协议，屏蔽内部服务差异
-4. **流量控制**：限流、配额管理、熔断降级
+Internal Gateway is the unified entry point for sandbox0, responsible for:
+1. **Authentication**: Validate client identity, support API Key and JWT
+2. **Request Routing**: Forward requests to internal services (Manager/Procd/Storage Proxy)
+3. **Protocol Conversion**: Unified external API protocol, shield internal service differences
+4. **Traffic Control**: Rate limiting, quota management, circuit breaking
 
 ---
 
-## 二、架构概览
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -29,8 +29,8 @@ Internal Gateway 是 sandbox0 的统一入口，负责：
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                        Middleware Layer                               │  │
 │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐     │  │
-│  │  │    Auth     │ │   Rate      │ │   Request   │ │   Response  │     │  │
-│  │  │  Middleware │ │   Limit     │ │   Logging   │ │  Tracing    │     │  │
+│  │  │    Auth     │ │   Rate      │ │   Request   │ │   Recovery  │     │  │
+│  │  │  Middleware │ │   Limit     │ │   Logging   │ │  Middleware │     │  │
 │  │  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘     │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                                    │                                         │
@@ -53,8 +53,7 @@ Internal Gateway 是 sandbox0 的统一入口，负责：
 │                                                    │  - Teams/Users    │   │   │
 │                                                    │  - Quotas         │   │   │
 │                                                    │  - Audit Logs     │   │   │
-│                                                    │  - SandboxVolume  │   │   │
-│                                                    │    Metadata       │   │   │
+│                                                    │  - Sandboxes      │   │   │
 │                                                    └───────────────────┘   │   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -62,175 +61,105 @@ Internal Gateway 是 sandbox0 的统一入口，负责：
 
 ---
 
-## 三、API 路由表
+## API Routing Table
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           API Routing Table                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Sandbox Management (→ Manager)                                     │   │
-│  │  ├─ POST   /api/v1/sandboxes                          创建沙箱      │   │
-│  │  ├─ GET    /api/v1/sandboxes                          列出沙箱      │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}                     获取沙箱详情  │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}/status              获取状态      │   │
-│  │  ├─ PATCH  /api/v1/sandboxes/{id}                     更新配置      │   │
-│  │  ├─ DELETE /api/v1/sandboxes/{id}                     删除沙箱      │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/pause               暂停沙箱      │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/resume              恢复沙箱      │   │
-│  │  └─ POST   /api/v1/sandboxes/{id}/refresh             刷新TTL       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Process/Context Management (→ Procd)                               │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/contexts              创建上下文  │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}/contexts              列出上下文  │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}/contexts/{ctx_id}    获取上下文  │   │
-│  │  ├─ DELETE /api/v1/sandboxes/{id}/contexts/{ctx_id}    删除上下文  │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/contexts/{ctx_id}/restart  重启 │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/contexts/{ctx_id}/execute   执行  │   │
-│  │  └─ WS     /api/v1/sandboxes/{id}/contexts/{ctx_id}/ws        WebSocket│   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  File System (→ Procd)                                               │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}/files/*                 读文件     │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/files/*                 写文件     │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}/files/*?stat=true       文件信息   │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/files/*?mkdir=true       创建目录   │   │
-│  │  ├─ POST   /api/v1/sandboxes/{id}/files/move              移动文件   │   │
-│  │  ├─ DELETE /api/v1/sandboxes/{id}/files/*                 删除文件    │   │
-│  │  ├─ GET    /api/v1/sandboxes/{id}/files?list=true         列出目录    │   │
-│  │  └─ WS     /api/v1/sandboxes/{id}/files/watch             监听变化    │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Template Management (→ Manager)                                     │   │
-│  │  ├─ GET    /api/v1/templates                           列出模板     │   │
-│  │  ├─ GET    /api/v1/templates/{id}                      获取模板     │   │
-│  │  ├─ POST   /api/v1/templates                           创建模板     │   │
-│  │  ├─ PUT    /api/v1/templates/{id}                      更新模板     │   │
-│  │  ├─ DELETE /api/v1/templates/{id}                      删除模板     │   │
-│  │  └─ POST   /api/v1/templates/{id}/pool/warm            预热水池     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  SandboxVolume Management (→ Storage Proxy)                         │   │
-│  │  ├─ POST   /api/v1/sandboxvolumes                    创建持久卷      │   │
-│  │  ├─ GET    /api/v1/sandboxvolumes                    列出持久卷      │   │
-│  │  ├─ GET    /api/v1/sandboxvolumes/{id}               获取持久卷      │   │
-│  │  ├─ DELETE /api/v1/sandboxvolumes/{id}               删除持久卷      │   │
-│  │  ├─ POST   /api/v1/sandboxvolumes/{id}/attach        挂载到沙箱      │   │
-│  │  ├─ POST   /api/v1/sandboxvolumes/{id}/detach        卸载            │   │
-│  │  ├─ POST   /api/v1/sandboxvolumes/{id}/snapshot      创建快照       │   │
-│  │  └─ POST   /api/v1/sandboxvolumes/{id}/restore       恢复快照       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+| Route | Method | Target | Description |
+|-------|--------|--------|-------------|
+| **Sandbox Management** ||||
+| `/api/v1/sandboxes` | POST | Manager | Create sandbox |
+| `/api/v1/sandboxes` | GET | Manager | List sandboxes |
+| `/api/v1/sandboxes/{id}` | GET | Manager | Get sandbox |
+| `/api/v1/sandboxes/{id}` | PATCH | Manager | Update sandbox |
+| `/api/v1/sandboxes/{id}` | DELETE | Manager | Delete sandbox |
+| `/api/v1/sandboxes/{id}/status` | GET | Manager | Get status |
+| `/api/v1/sandboxes/{id}/pause` | POST | Manager | Pause sandbox |
+| `/api/v1/sandboxes/{id}/resume` | POST | Manager | Resume sandbox |
+| `/api/v1/sandboxes/{id}/refresh` | POST | Manager | Refresh TTL |
+| **Context/Process Management** ||||
+| `/api/v1/sandboxes/{id}/contexts` | POST | Procd | Create context |
+| `/api/v1/sandboxes/{id}/contexts` | GET | Procd | List contexts |
+| `/api/v1/sandboxes/{id}/contexts/{ctx_id}` | GET | Procd | Get context |
+| `/api/v1/sandboxes/{id}/contexts/{ctx_id}` | DELETE | Procd | Delete context |
+| `/api/v1/sandboxes/{id}/contexts/{ctx_id}/restart` | POST | Procd | Restart context |
+| `/api/v1/sandboxes/{id}/contexts/{ctx_id}/execute` | POST | Procd | Execute code |
+| `/api/v1/sandboxes/{id}/contexts/{ctx_id}/ws` | WS | Procd | WebSocket |
+| **File System** ||||
+| `/api/v1/sandboxes/{id}/files/*` | GET | Procd | Read file/stat/list |
+| `/api/v1/sandboxes/{id}/files/*` | POST | Procd | Write file/mkdir |
+| `/api/v1/sandboxes/{id}/files/*` | DELETE | Procd | Delete file |
+| `/api/v1/sandboxes/{id}/files/watch` | WS | Procd | Watch changes |
+| **Template Management** ||||
+| `/api/v1/templates` | GET | Manager | List templates |
+| `/api/v1/templates/{id}` | GET | Manager | Get template |
+| `/api/v1/templates` | POST | Manager | Create template |
+| `/api/v1/templates/{id}` | PUT | Manager | Update template |
+| `/api/v1/templates/{id}` | DELETE | Manager | Delete template |
+| `/api/v1/templates/{id}/pool/warm` | POST | Manager | Warm pool |
+| **SandboxVolume Management** ||||
+| `/api/v1/sandboxvolumes` | POST | Storage Proxy | Create volume |
+| `/api/v1/sandboxvolumes` | GET | Storage Proxy | List volumes |
+| `/api/v1/sandboxvolumes/{id}` | GET | Storage Proxy | Get volume |
+| `/api/v1/sandboxvolumes/{id}` | DELETE | Storage Proxy | Delete volume |
+| `/api/v1/sandboxvolumes/{id}/attach` | POST | **Coordinated** | Attach to sandbox |
+| `/api/v1/sandboxvolumes/{id}/detach` | POST | **Coordinated** | Detach from sandbox |
+| `/api/v1/sandboxvolumes/{id}/snapshot` | POST | Storage Proxy | Create snapshot |
+| `/api/v1/sandboxvolumes/{id}/restore` | POST | Storage Proxy | Restore snapshot |
 
 ---
 
-## 四、鉴权机制
+## Authentication
 
-### 4.1 认证方式
-
-```go
-// AuthContext 认证上下文
-type AuthContext struct {
-    // 认证方式
-    AuthMethod AuthMethod
-
-    // 团队ID
-    TeamID string
-
-    // 用户ID（可选，JWT认证时存在）
-    UserID string
-
-    // API Key ID（可选，API Key认证时存在）
-    APIKeyID string
-
-    // 角色
-    Roles []string
-
-    // 权限
-    Permissions []string
-}
-
-type AuthMethod string
-
-const (
-    AuthMethodAPIKey   AuthMethod = "api_key"
-    AuthMethodJWT      AuthMethod = "jwt"
-    AuthMethodInternal AuthMethod = "internal"
-)
-```
-
-### 4.2 API Key 认证
+### API Key Format
 
 ```
-Header: Authorization: Bearer <api_key>
-Format: sb0_<team_id>_<random_secret>
+Authorization: Bearer sb0_<team_id>_<random_secret>
 
 Examples:
 - sb0_team123_abc123def456789
 - sb0_team456_xyz789ghi012345
 ```
 
-### 4.3 权限控制
+### JWT Format (Optional)
 
-```go
-// 预定义权限
-const (
-    // 沙箱权限
-    PermSandboxCreate   = "sandbox:create"
-    PermSandboxRead     = "sandbox:read"
-    PermSandboxWrite    = "sandbox:write"
-    PermSandboxDelete   = "sandbox:delete"
+```
+Authorization: Bearer <jwt_token>
 
-    // 模板权限
-    PermTemplateCreate  = "template:create"
-    PermTemplateRead    = "template:read"
-    PermTemplateWrite   = "template:write"
-    PermTemplateDelete  = "template:delete"
-
-    // 持久卷权限
-    PermSandboxVolumeCreate    = "sandboxvolume:create"
-    PermSandboxVolumeRead      = "sandboxvolume:read"
-    PermSandboxVolumeWrite     = "sandboxvolume:write"
-    PermSandboxVolumeDelete    = "sandboxvolume:delete"
-)
-
-// 预定义角色
-var RolePermissions = map[string][]string{
-    "admin": {
-        "*:*", // 全部权限
-    },
-    "developer": {
-        PermSandboxCreate,
-        PermSandboxRead,
-        PermSandboxWrite,
-        PermSandboxDelete,
-        PermTemplateRead,
-        PermSandboxVolumeCreate,
-        PermSandboxVolumeRead,
-        PermSandboxVolumeWrite,
-        PermSandboxVolumeDelete,
-    },
-    "viewer": {
-        PermSandboxRead,
-        PermTemplateRead,
-        PermSandboxVolumeRead,
-    },
+JWT Claims:
+{
+  "team_id": "team-123",
+  "user_id": "user-456",
+  "roles": ["developer"],
+  "exp": 1706745600,
+  "iat": 1706659200
 }
 ```
 
+### AuthContext
+
+```go
+type AuthContext struct {
+    AuthMethod  AuthMethod // "api_key", "jwt", "internal"
+    TeamID      string
+    UserID      string     // JWT only
+    APIKeyID    string     // API Key only
+    Roles       []string
+    Permissions []string
+}
+```
+
+### Predefined Roles and Permissions
+
+| Role | Permissions |
+|------|-------------|
+| `admin` | `*:*` (all permissions) |
+| `developer` | `sandbox:*`, `template:read`, `sandboxvolume:*` |
+| `viewer` | `sandbox:read`, `template:read`, `sandboxvolume:read` |
+
 ---
 
-## 4.4 SandboxVolume Attach/Detach 协调流程
+## SandboxVolume Attach/Detach Coordination
 
-Internal Gateway 作为协调者，负责协调 Storage Proxy 和 Procd 完成 SandboxVolume 的挂载和卸载。
+Internal Gateway coordinates between Storage Proxy and Procd for volume operations.
 
 ### Attach Flow
 
@@ -248,7 +177,7 @@ Internal Gateway 作为协调者，负责协调 Storage Proxy 和 Procd 完成 S
 │     Response: { "token": "eyJ...", "storage_proxy_address": "..." }          │
 │                                                                              │
 │  3. Internal Gateway → Procd (mount with token)                             │
-│     POST http://procd-{pod-id}:8080/api/v1/sandboxvolumes/mount              │
+│     POST http://procd-{sandbox-id}:8080/api/v1/sandboxvolumes/mount          │
 │     {                                                                       │
 │       "sandboxvolume_id": "sbv-456",                                        │
 │       "sandbox_id": "sb-123",                                               │
@@ -256,10 +185,12 @@ Internal Gateway 作为协调者，负责协调 Storage Proxy 和 Procd 完成 S
 │       "token": "eyJ...",                                                     │
 │       "storage_proxy_address": "storage-proxy:8080"                         │
 │     }                                                                       │
-│     Response: { "mounted_at": "2024-01-01T00:00:00Z" }                       │
 │                                                                              │
-│  4. Return to Client                                                         │
-│     Response: 200 OK                                                         │
+│  4. If Procd mount fails → Rollback                                         │
+│     POST http://storage-proxy:8081/api/v1/sandboxvolumes/{id}/detach        │
+│                                                                              │
+│  5. Return to Client                                                         │
+│     Response: 200 OK or error                                                │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -276,12 +207,11 @@ Internal Gateway 作为协调者，负责协调 Storage Proxy 和 Procd 完成 S
 │     { "sandbox_id": "sb-123" }                                               │
 │                                                                              │
 │  2. Internal Gateway → Procd (unmount first)                                │
-│     POST http://procd-{pod-id}:8080/api/v1/sandboxvolumes/unmount            │
-│     Response: { "unmounted_at": "2024-01-01T00:00:00Z" }                     │
+│     POST http://procd-{sandbox-id}:8080/api/v1/sandboxvolumes/unmount        │
+│     (Continue even if fails - sandbox may be terminated)                    │
 │                                                                              │
 │  3. Internal Gateway → Storage Proxy (detach record)                        │
 │     POST http://storage-proxy:8081/api/v1/sandboxvolumes/{id}/detach        │
-│     Response: { "detached": true }                                           │
 │                                                                              │
 │  4. Return to Client                                                         │
 │     Response: 200 OK                                                         │
@@ -289,260 +219,157 @@ Internal Gateway 作为协调者，负责协调 Storage Proxy 和 Procd 完成 S
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**优势：**
-- **无循环依赖**：Storage Proxy 和 Procd 互不依赖
-- **清晰职责**：Internal Gateway 负责编排，Storage Proxy 管理元数据，Procd 管理挂载
-- **易于扩展**：未来可添加更多协调逻辑（如重试、回滚）
-
 ---
 
-## 五、路由与服务发现
+## Rate Limiting
 
-### 5.1 路由规则
+### Per-Team Token Bucket
 
-```go
-// RouteConfig 路由配置
-type RouteConfig struct {
-    // 路径前缀
-    PathPrefix string
+- Default: 100 RPS, 200 burst
+- In-memory token bucket with sync.Map
+- No external dependencies (Redis not required)
 
-    // 目标服务
-    TargetService string // "manager" or "procd"
+### Response Headers
 
-    // 目标地址（可选，用于静态路由）
-    TargetURL *url.URL
-
-    // 超时配置
-    Timeout time.Duration
-
-    // 重试配置
-    RetryPolicy *RetryPolicy
-
-    // 限流配置
-    RateLimit *RateLimitConfig
-}
-
-// Router 路由器
-type Router struct {
-    routes     map[string]*RouteConfig
-    managerURL *url.URL
-    procdResolver *ProcdResolver
-}
-
-// ProcdResolver Procd地址解析器
-type ProcdResolver struct {
-    // 从数据库获取Procd地址
-    pgClient *pgxpool.Pool
-}
-
-func (r *ProcdResolver) Resolve(sandboxID string) (*url.URL, error) {
-    // 直接查询数据库（PG索引查询足够快，无需额外缓存）
-    var procdAddr string
-    err := r.pgClient.QueryRow(
-        context.Background(),
-        "SELECT procd_address FROM sandboxes WHERE id = $1",
-        sandboxID,
-    ).Scan(&procdAddr)
-
-    if err != nil {
-        return nil, err
-    }
-
-    targetURL, err := url.Parse(procdAddr)
-    if err != nil {
-        return nil, err
-    }
-
-    return targetURL, nil
-}
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+Retry-After: 1
 ```
 
 ---
 
-## 六、限流与配额管理
+## Configuration
 
-### 6.1 限流策略
-
-```go
-// RateLimitConfig 限流配置
-type RateLimitConfig struct {
-    // 每秒请求数
-    RequestsPerSecond int
-
-    // 突发大小
-    Burst int
-
-    // 每小时请求数
-    RequestsPerHour *int
-
-    // 并发连接数
-    MaxConcurrent int
-}
-
-// TokenBucketLimiter 令牌桶限流器（基于PGSQL）
-type TokenBucketLimiter struct {
-    pgClient *pgxpool.Pool
-    logger   *zap.Logger
-}
-```
-
-### 6.2 配额管理
-
-```go
-// QuotaManager 配额管理器
-type QuotaManager struct {
-    pgClient *pgxpool.Pool
-}
-
-// QuotaType 配额类型
-type QuotaType string
-
-const (
-    QuotaSandboxCount        QuotaType = "sandbox_count"         // 沙箱数量
-    QuotaSandboxCPU          QuotaType = "sandbox_cpu"           // CPU配额
-    QuotaSandboxMemory       QuotaType = "sandbox_memory"        // 内存配额
-    QuotaSandboxVolumeStorage QuotaType = "sandboxvolume_storage" // 持久卷存储配额
-    QuotaAPICalls            QuotaType = "api_calls"             // API调用次数
-)
-```
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `GATEWAY_HTTP_PORT` | HTTP server port | 8443 |
+| `GATEWAY_LOG_LEVEL` | Log level | info |
+| `DATABASE_URL` | PostgreSQL connection string | required |
+| `MANAGER_URL` | Manager service URL | http://manager:8080 |
+| `STORAGE_PROXY_URL` | Storage Proxy URL | http://storage-proxy:8081 |
+| `JWT_SECRET` | JWT signing secret | optional |
+| `RATE_LIMIT_RPS` | Requests per second per team | 100 |
+| `RATE_LIMIT_BURST` | Burst size per team | 200 |
+| `ENABLE_METRICS` | Enable Prometheus metrics | true |
+| `ENABLE_AUDIT` | Enable audit logging | true |
 
 ---
 
-## 七、数据库 Schema
+## Database Schema
 
 ```sql
--- API Keys表
-CREATE TABLE api_keys (
-    id TEXT PRIMARY KEY,
-    key_value TEXT NOT NULL UNIQUE,
-
-    -- 关联
-    team_id TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-
-    -- 配置
-    name TEXT NOT NULL,
-    type TEXT NOT NULL, -- 'user', 'service', 'internal'
-    roles JSONB NOT NULL DEFAULT '[]',
-
-    -- 状态
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    expires_at TIMESTAMPTZ NOT NULL,
-
-    -- 使用统计
-    last_used_at TIMESTAMPTZ,
-    usage_count BIGINT DEFAULT 0,
-
-    -- 时间戳
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-);
-
--- Teams表
+-- Teams table
 CREATE TABLE teams (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-
-    -- 配额
     quota JSONB NOT NULL,
-
-    -- 状态
     is_active BOOLEAN NOT NULL DEFAULT true,
-
-    -- 时间戳
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Users表
+-- Users table
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
-
-    -- 外部身份（SSO）
     external_id TEXT,
-    provider TEXT, -- 'google', 'github', etc.
-
-    -- 基本信息
+    provider TEXT,
     email TEXT NOT NULL,
     name TEXT,
-
-    -- 团队关联
-    primary_team_id TEXT,
-
-    -- 权限
+    primary_team_id TEXT REFERENCES teams(id),
     roles JSONB NOT NULL DEFAULT '[]',
     permissions JSONB NOT NULL DEFAULT '[]',
-
-    -- 状态
     is_active BOOLEAN NOT NULL DEFAULT true,
-
-    -- 时间戳
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    FOREIGN KEY (primary_team_id) REFERENCES teams(id) ON DELETE SET NULL
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Audit Log表
+-- API Keys table
+CREATE TABLE api_keys (
+    id TEXT PRIMARY KEY,
+    key_value TEXT NOT NULL UNIQUE,
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    created_by TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    type TEXT NOT NULL, -- 'user', 'service', 'internal'
+    roles JSONB NOT NULL DEFAULT '[]',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    usage_count BIGINT DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Sandboxes table (for routing)
+CREATE TABLE sandboxes (
+    id TEXT PRIMARY KEY,
+    template_id TEXT NOT NULL,
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    procd_address TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Audit Logs table
 CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY,
-
-    -- 关联
     team_id TEXT NOT NULL,
     user_id TEXT,
     api_key_id TEXT,
-
-    -- 请求信息
     request_id TEXT NOT NULL,
     method TEXT NOT NULL,
     path TEXT NOT NULL,
-
-    -- 响应信息
     status_code INTEGER NOT NULL,
     latency_ms INTEGER,
-
-    -- 元数据
     user_agent TEXT,
     client_ip TEXT,
     metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-    -- 时间戳
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-    FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
+-- Rate Limits table
+CREATE TABLE rate_limits (
+    team_id TEXT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (team_id, window_start)
 );
 ```
 
 ---
 
-## 八、与 E2B 功能对比
+## Metrics
 
-| 功能 | E2B | Sandbox0 | 说明 |
-|------|-----|----------|------|
-| API认证 | 5种认证方式 | API Key + JWT (可选) | 简化但足够 |
-| 团队隔离 | Team | Team + RBAC | 更细粒度 |
-| 沙箱API | `/sandboxes` | `/api/v1/sandboxes` | RESTful |
-| 进程/执行 | `/sandboxes/{id}/execute` | `/sandboxes/{id}/contexts` | 支持多Context |
-| 文件操作 | `/files` | `/sandboxes/{id}/files` | 路径更清晰 |
-| WebSocket | 支持 | 支持 | 实时通信 |
-| 限流 | 内置 | PGSQL行级锁 | 无额外依赖 |
-| 配额 | 基于模板 | 独立配额系统 | 更灵活 |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `gateway_http_requests_total` | Counter | method, path, status | Total HTTP requests |
+| `gateway_http_request_duration_seconds` | Histogram | method, path | Request latency |
+| `gateway_proxy_requests_total` | Counter | target, status | Proxied requests |
+| `gateway_auth_failures_total` | Counter | reason | Authentication failures |
+| `gateway_rate_limit_hits_total` | Counter | team_id | Rate limit hits |
+| `gateway_sandboxvolume_operations_total` | Counter | operation, status | SandboxVolume operations |
 
 ---
 
-## 九、总结
+## Health Endpoints
 
-### 设计优势
+| Endpoint | Description |
+|----------|-------------|
+| `/healthz` | Liveness probe |
+| `/readyz` | Readiness probe (includes database check) |
+| `/metrics` | Prometheus metrics |
 
-1. **统一入口**：所有外部请求统一经过gateway，便于管理
-2. **简化认证**：主要使用API Key，JWT为可选SSO支持
-3. **清晰路由**：Manager管理沙箱/模板，Storage Proxy管理持久卷，Procd管理进程/文件
-4. **灵活扩展**：中间件模式，易于添加新功能
-5. **完整可观测**：Metrics、Tracing、Logging全覆盖
-6. **低依赖**：仅依赖PGSQL，无额外中间件
-7. **E2B兼容**：所有E2B功能都有对应实现
+---
+
+## Design Advantages
+
+1. **Unified Entry Point**: All external requests go through gateway
+2. **Simple Authentication**: API Key primary, JWT optional for SSO
+3. **Clear Routing**: Manager for sandbox/template, Storage Proxy for volumes, Procd for process/file
+4. **Coordinated Operations**: SandboxVolume attach/detach with rollback support
+5. **Full Observability**: Metrics, Tracing, Audit Logging
+6. **Low Dependencies**: Only PostgreSQL, no Redis required
+7. **High Availability**: Stateless design, horizontal scaling, PodDisruptionBudget
+8. **E2B Compatible**: All E2B features have corresponding implementations
