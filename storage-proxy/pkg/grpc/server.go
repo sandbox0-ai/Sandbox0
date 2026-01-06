@@ -599,6 +599,144 @@ func (s *FileSystemServer) Access(ctx context.Context, req *pb.AccessRequest) (*
 	return &pb.Empty{}, nil
 }
 
+// Fallocate preallocates or deallocates space for a file
+func (s *FileSystemServer) Fallocate(ctx context.Context, req *pb.FallocateRequest) (*pb.Empty, error) {
+	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, err.Error())
+	}
+
+	// Call JuiceFS VFS Fallocate
+	vfsCtx := vfs.NewLogContext(meta.Background())
+	inode := meta.Ino(req.Inode)
+	st := volCtx.VFS.Fallocate(vfsCtx, inode, uint8(req.Mode), req.Offset, req.Length, req.HandleId)
+	if st != 0 {
+		s.logger.WithFields(logrus.Fields{
+			"volume_id": req.VolumeId,
+			"inode":     req.Inode,
+			"mode":      req.Mode,
+			"offset":    req.Offset,
+			"length":    req.Length,
+			"error":     st,
+		}).Error("Fallocate failed")
+		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
+	}
+
+	s.logger.WithFields(logrus.Fields{
+		"volume_id": req.VolumeId,
+		"inode":     req.Inode,
+		"mode":      req.Mode,
+		"offset":    req.Offset,
+		"length":    req.Length,
+	}).Debug("Fallocate succeeded")
+
+	return &pb.Empty{}, nil
+}
+
+// GetXattr gets an extended attribute
+func (s *FileSystemServer) GetXattr(ctx context.Context, req *pb.GetXattrRequest) (*pb.GetXattrResponse, error) {
+	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, err.Error())
+	}
+
+	// Call JuiceFS VFS GetXattr
+	vfsCtx := vfs.NewLogContext(meta.Background())
+	inode := meta.Ino(req.Inode)
+	value, st := volCtx.VFS.GetXattr(vfsCtx, inode, req.Name, req.Size)
+	if st != 0 {
+		// ENODATA/ENOATTR is not an error, just means attribute doesn't exist
+		if st == syscall.ENODATA || st == meta.ENOATTR {
+			return nil, status.Error(codes.NotFound, "attribute not found")
+		}
+		s.logger.WithFields(logrus.Fields{
+			"volume_id": req.VolumeId,
+			"inode":     req.Inode,
+			"name":      req.Name,
+			"error":     st,
+		}).Error("GetXattr failed")
+		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
+	}
+
+	return &pb.GetXattrResponse{
+		Value: value,
+	}, nil
+}
+
+// SetXattr sets an extended attribute
+func (s *FileSystemServer) SetXattr(ctx context.Context, req *pb.SetXattrRequest) (*pb.Empty, error) {
+	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, err.Error())
+	}
+
+	// Call JuiceFS VFS SetXattr
+	vfsCtx := vfs.NewLogContext(meta.Background())
+	inode := meta.Ino(req.Inode)
+	st := volCtx.VFS.SetXattr(vfsCtx, inode, req.Name, req.Value, req.Flags)
+	if st != 0 {
+		s.logger.WithFields(logrus.Fields{
+			"volume_id": req.VolumeId,
+			"inode":     req.Inode,
+			"name":      req.Name,
+			"flags":     req.Flags,
+			"error":     st,
+		}).Error("SetXattr failed")
+		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
+	}
+
+	return &pb.Empty{}, nil
+}
+
+// ListXattr lists all extended attributes
+func (s *FileSystemServer) ListXattr(ctx context.Context, req *pb.ListXattrRequest) (*pb.ListXattrResponse, error) {
+	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, err.Error())
+	}
+
+	// Call JuiceFS VFS ListXattr
+	vfsCtx := vfs.NewLogContext(meta.Background())
+	inode := meta.Ino(req.Inode)
+	data, st := volCtx.VFS.ListXattr(vfsCtx, inode, int(req.Size))
+	if st != 0 {
+		s.logger.WithFields(logrus.Fields{
+			"volume_id": req.VolumeId,
+			"inode":     req.Inode,
+			"error":     st,
+		}).Error("ListXattr failed")
+		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
+	}
+
+	return &pb.ListXattrResponse{
+		Data: data,
+	}, nil
+}
+
+// RemoveXattr removes an extended attribute
+func (s *FileSystemServer) RemoveXattr(ctx context.Context, req *pb.RemoveXattrRequest) (*pb.Empty, error) {
+	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, err.Error())
+	}
+
+	// Call JuiceFS VFS RemoveXattr
+	vfsCtx := vfs.NewLogContext(meta.Background())
+	inode := meta.Ino(req.Inode)
+	st := volCtx.VFS.RemoveXattr(vfsCtx, inode, req.Name)
+	if st != 0 {
+		s.logger.WithFields(logrus.Fields{
+			"volume_id": req.VolumeId,
+			"inode":     req.Inode,
+			"name":      req.Name,
+			"error":     st,
+		}).Error("RemoveXattr failed")
+		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
+	}
+
+	return &pb.Empty{}, nil
+}
+
 // Helper: convert meta.Attr to protobuf GetAttrResponse
 func convertAttr(attr *meta.Attr) *pb.GetAttrResponse {
 	return &pb.GetAttrResponse{

@@ -606,6 +606,142 @@ func (fs *RemoteFS) Access(cancel <-chan struct{}, input *fuse.AccessIn) fuse.St
 	return fuse.OK
 }
 
+// Fallocate preallocates or deallocates space for a file.
+func (fs *RemoteFS) Fallocate(cancel <-chan struct{}, input *fuse.FallocateIn) fuse.Status {
+	ctx := fs.newContext(cancel)
+
+	fs.handleMu.RLock()
+	handle, exists := fs.openHandles[input.Fh]
+	fs.handleMu.RUnlock()
+
+	if !exists {
+		return fuse.EBADF
+	}
+
+	_, err := fs.client.Fallocate(ctx, &pb.FallocateRequest{
+		VolumeId: fs.volumeID,
+		Inode:    handle.inode,
+		Mode:     uint32(input.Mode),
+		Offset:   int64(input.Offset),
+		Length:   int64(input.Length),
+		HandleId: handle.handleID,
+	})
+	if err != nil {
+		fs.logger.Error("Fallocate failed",
+			zap.Error(err),
+			zap.Uint64("inode", handle.inode),
+			zap.Uint32("mode", uint32(input.Mode)),
+			zap.Uint64("offset", input.Offset),
+			zap.Uint64("length", input.Length))
+		return grpcErrToFuseStatus(err)
+	}
+
+	return fuse.OK
+}
+
+// GetXAttr gets an extended attribute.
+func (fs *RemoteFS) GetXAttr(cancel <-chan struct{}, header *fuse.InHeader, attr string, dest []byte) (uint32, fuse.Status) {
+	ctx := fs.newContext(cancel)
+
+	resp, err := fs.client.GetXattr(ctx, &pb.GetXattrRequest{
+		VolumeId: fs.volumeID,
+		Inode:    header.NodeId,
+		Name:     attr,
+		Size:     uint32(len(dest)),
+	})
+	if err != nil {
+		fs.logger.Debug("GetXAttr failed",
+			zap.Error(err),
+			zap.Uint64("inode", header.NodeId),
+			zap.String("attr", attr))
+		return 0, grpcErrToFuseStatus(err)
+	}
+
+	if len(dest) == 0 {
+		// Query size
+		return uint32(len(resp.Value)), fuse.OK
+	}
+
+	if len(resp.Value) > len(dest) {
+		return 0, fuse.Status(syscall.ERANGE)
+	}
+
+	copy(dest, resp.Value)
+	return uint32(len(resp.Value)), fuse.OK
+}
+
+// SetXAttr sets an extended attribute.
+func (fs *RemoteFS) SetXAttr(cancel <-chan struct{}, input *fuse.SetXAttrIn, attr string, data []byte) fuse.Status {
+	ctx := fs.newContext(cancel)
+
+	_, err := fs.client.SetXattr(ctx, &pb.SetXattrRequest{
+		VolumeId: fs.volumeID,
+		Inode:    input.NodeId,
+		Name:     attr,
+		Value:    data,
+		Flags:    input.Flags,
+	})
+	if err != nil {
+		fs.logger.Error("SetXAttr failed",
+			zap.Error(err),
+			zap.Uint64("inode", input.NodeId),
+			zap.String("attr", attr),
+			zap.Uint32("flags", input.Flags))
+		return grpcErrToFuseStatus(err)
+	}
+
+	return fuse.OK
+}
+
+// ListXAttr lists all extended attributes.
+func (fs *RemoteFS) ListXAttr(cancel <-chan struct{}, header *fuse.InHeader, dest []byte) (uint32, fuse.Status) {
+	ctx := fs.newContext(cancel)
+
+	resp, err := fs.client.ListXattr(ctx, &pb.ListXattrRequest{
+		VolumeId: fs.volumeID,
+		Inode:    header.NodeId,
+		Size:     int32(len(dest)),
+	})
+	if err != nil {
+		fs.logger.Error("ListXAttr failed",
+			zap.Error(err),
+			zap.Uint64("inode", header.NodeId))
+		return 0, grpcErrToFuseStatus(err)
+	}
+
+	if len(dest) == 0 {
+		// Query size
+		return uint32(len(resp.Data)), fuse.OK
+	}
+
+	if len(resp.Data) > len(dest) {
+		return 0, fuse.Status(syscall.ERANGE)
+	}
+
+	copy(dest, resp.Data)
+	return uint32(len(resp.Data)), fuse.OK
+}
+
+// RemoveXAttr removes an extended attribute.
+func (fs *RemoteFS) RemoveXAttr(cancel <-chan struct{}, header *fuse.InHeader, attr string) fuse.Status {
+	ctx := fs.newContext(cancel)
+
+	_, err := fs.client.RemoveXattr(ctx, &pb.RemoveXattrRequest{
+		VolumeId: fs.volumeID,
+		Inode:    header.NodeId,
+		Name:     attr,
+	})
+	if err != nil {
+		fs.logger.Error("RemoveXAttr failed",
+			zap.Error(err),
+			zap.Uint64("inode", header.NodeId),
+			zap.String("attr", attr))
+		return grpcErrToFuseStatus(err)
+	}
+
+	return fuse.OK
+}
+
 // grpcErrToFuseStatus converts gRPC error to FUSE status with proper error codes.
 func grpcErrToFuseStatus(err error) fuse.Status {
 	if err == nil {

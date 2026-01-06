@@ -35,6 +35,13 @@ service FileSystem {
   rpc Fsync(FsyncRequest) returns (Empty);
   rpc Open(OpenRequest) returns (OpenResponse);
   rpc Release(ReleaseRequest) returns (Empty);
+  rpc Fallocate(FallocateRequest) returns (Empty);
+  
+  // Extended attributes (xattr)
+  rpc GetXattr(GetXattrRequest) returns (GetXattrResponse);
+  rpc SetXattr(SetXattrRequest) returns (Empty);
+  rpc ListXattr(ListXattrRequest) returns (ListXattrResponse);
+  rpc RemoveXattr(RemoveXattrRequest) returns (Empty);
   
   // Volume management
   rpc MountVolume(MountVolumeRequest) returns (MountVolumeResponse);
@@ -291,6 +298,52 @@ message AccessRequest {
   uint32 mask = 3;       // Access mode mask (R_OK=4, W_OK=2, X_OK=1, F_OK=0)
   uint32 uid = 4;        // User ID making the request
   repeated uint32 gids = 5;  // Group IDs of the user
+}
+
+// Fallocate - preallocate or deallocate space
+message FallocateRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode to allocate space for
+  uint32 mode = 3;       // Fallocate mode (0=default, 1=KEEP_SIZE, 2=PUNCH_HOLE, etc.)
+  int64 offset = 4;      // Offset to start allocation
+  int64 length = 5;      // Length to allocate
+  uint64 handle_id = 6;  // File handle from Open
+}
+
+// Extended attributes (xattr)
+message GetXattrRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode identifier
+  string name = 3;       // Attribute name
+  uint32 size = 4;       // Buffer size (0 to query size)
+}
+
+message GetXattrResponse {
+  bytes value = 1;       // Attribute value
+}
+
+message SetXattrRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode identifier
+  string name = 3;       // Attribute name
+  bytes value = 4;       // Attribute value
+  uint32 flags = 5;      // XATTR_CREATE=1, XATTR_REPLACE=2
+}
+
+message ListXattrRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode identifier
+  int32 size = 3;        // Buffer size (0 to query size)
+}
+
+message ListXattrResponse {
+  bytes data = 1;        // Null-terminated attribute names
+}
+
+message RemoveXattrRequest {
+  string volume_id = 1;  // Volume identifier
+  uint64 inode = 2;      // Inode identifier
+  string name = 3;       // Attribute name to remove
 }
 
 message Empty {}
