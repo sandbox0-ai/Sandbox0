@@ -8,7 +8,7 @@ Storage Proxy is a secure, high-performance service that manages all persistent 
 - **Zero JuiceFS Modifications**: Uses official JuiceFS Go SDK without any source code changes
 - **Network Security**: Compatible with network isolation through packet marking
 - **High Performance**: gRPC over HTTP/2 with streaming support
-- **JWT Authentication**: Token-based authentication with volume access control
+- **Internal Authentication**: Ed25519-based token authentication with service-to-service verification
 - **Audit Logging**: Complete audit trail of all file operations
 - **Prometheus Metrics**: Comprehensive metrics for monitoring
 - **Kubernetes Native**: Designed to run in Kubernetes with IRSA support
@@ -70,7 +70,13 @@ make test
 
 ```bash
 # Set required environment variables
-export JWT_SECRET="your-secret-key-here"
+
+# New: Internal Auth (recommended)
+export INTERNAL_AUTH_PUBLIC_KEY="base64-encoded-ed25519-public-key"
+
+# Legacy: JWT Secret (deprecated)
+# export JWT_SECRET="your-secret-key-here"
+
 export DEFAULT_META_URL="postgres://user:pass@localhost:5432/juicefs"
 export AWS_ACCESS_KEY_ID="your-aws-access-key"
 export AWS_SECRET_ACCESS_KEY="your-aws-secret-key"
@@ -80,17 +86,25 @@ export AWS_REGION="us-east-1"
 make run
 ```
 
+> **Note**: For internal authentication setup, see [INTERNAL_AUTH.md](./INTERNAL_AUTH.md)
+
 ### Docker Build
 
 ```bash
 # Build Docker image
 docker build -t sandbox0/storage-proxy:latest .
 
-# Run container
+# Run container (with internal auth)
 docker run -p 8080:8080 -p 8081:8081 \
-  -e JWT_SECRET="your-secret" \
+  -e INTERNAL_AUTH_PUBLIC_KEY="base64-public-key" \
   -e DEFAULT_META_URL="postgres://..." \
   sandbox0/storage-proxy:latest
+
+# Or with legacy JWT (deprecated)
+# docker run -p 8080:8080 -p 8081:8081 \
+#   -e JWT_SECRET="your-secret" \
+#   -e DEFAULT_META_URL="postgres://..." \
+#   sandbox0/storage-proxy:latest
 ```
 
 ## Kubernetes Deployment

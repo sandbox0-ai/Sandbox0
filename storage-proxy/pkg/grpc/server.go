@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/audit"
-	"github.com/sandbox0-ai/infra/storage-proxy/pkg/auth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
 	"github.com/sirupsen/logrus"
@@ -34,6 +34,17 @@ func NewFileSystemServer(volMgr *volume.Manager, auditor *audit.Logger, logger *
 		auditor: auditor,
 		logger:  logger,
 	}
+}
+
+// getAuditInfo extracts audit information from context claims
+// In internalauth, UserID represents the sandbox ID making the request
+func getAuditInfo(ctx context.Context) (sandboxID, teamID string) {
+	claims := internalauth.ClaimsFromContext(ctx)
+	if claims == nil {
+		return "", ""
+	}
+	// In storage-proxy context, UserID represents the SandboxID
+	return claims.UserID, claims.TeamID
 }
 
 // MountVolume mounts a volume
@@ -80,8 +91,8 @@ func (s *FileSystemServer) UnmountVolume(ctx context.Context, req *pb.UnmountVol
 
 // GetAttr implements FUSE getattr
 func (s *FileSystemServer) GetAttr(ctx context.Context, req *pb.GetAttrRequest) (*pb.GetAttrResponse, error) {
-	// Extract claims for audit logging
-	claims, _ := auth.GetClaims(ctx)
+	// Extract audit info from context
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	// Get volume context
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
@@ -104,10 +115,11 @@ func (s *FileSystemServer) GetAttr(ctx context.Context, req *pb.GetAttrRequest) 
 	}
 
 	// Audit log
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "getattr",
 			Inode:     uint64(inode),
 			Status:    "success",
@@ -119,7 +131,7 @@ func (s *FileSystemServer) GetAttr(ctx context.Context, req *pb.GetAttrRequest) 
 
 // Lookup implements FUSE lookup
 func (s *FileSystemServer) Lookup(ctx context.Context, req *pb.LookupRequest) (*pb.NodeResponse, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -139,10 +151,11 @@ func (s *FileSystemServer) Lookup(ctx context.Context, req *pb.LookupRequest) (*
 		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "lookup",
 			Inode:     uint64(parent),
 			Path:      req.Name,
@@ -159,7 +172,7 @@ func (s *FileSystemServer) Lookup(ctx context.Context, req *pb.LookupRequest) (*
 
 // Open implements FUSE open using JuiceFS VFS layer
 func (s *FileSystemServer) Open(ctx context.Context, req *pb.OpenRequest) (*pb.OpenResponse, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -183,10 +196,11 @@ func (s *FileSystemServer) Open(ctx context.Context, req *pb.OpenRequest) (*pb.O
 		return nil, status.Error(codes.Internal, syscall.Errno(errno).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "open",
 			Inode:     uint64(entry.Inode),
 			Status:    "success",
@@ -201,7 +215,7 @@ func (s *FileSystemServer) Open(ctx context.Context, req *pb.OpenRequest) (*pb.O
 // Read implements FUSE read using JuiceFS VFS layer
 func (s *FileSystemServer) Read(ctx context.Context, req *pb.ReadRequest) (*pb.ReadResponse, error) {
 	startTime := time.Now()
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -226,10 +240,11 @@ func (s *FileSystemServer) Read(ctx context.Context, req *pb.ReadRequest) (*pb.R
 			"error":     errno,
 		}).Error("Read failed")
 
-		if claims != nil {
+		if sandboxID != "" {
 			s.auditor.Log(ctx, audit.Event{
 				VolumeID:  req.VolumeId,
-				SandboxID: claims.SandboxID,
+				SandboxID: sandboxID,
+				TeamID:    teamID,
 				Operation: "read",
 				Inode:     req.Inode,
 				Size:      0,
@@ -248,10 +263,11 @@ func (s *FileSystemServer) Read(ctx context.Context, req *pb.ReadRequest) (*pb.R
 	}
 
 	// Audit log
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "read",
 			Inode:     req.Inode,
 			Size:      int64(n),
@@ -269,7 +285,7 @@ func (s *FileSystemServer) Read(ctx context.Context, req *pb.ReadRequest) (*pb.R
 // Write implements FUSE write using JuiceFS VFS layer
 func (s *FileSystemServer) Write(ctx context.Context, req *pb.WriteRequest) (*pb.WriteResponse, error) {
 	startTime := time.Now()
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -291,10 +307,11 @@ func (s *FileSystemServer) Write(ctx context.Context, req *pb.WriteRequest) (*pb
 			"error":     errno,
 		}).Error("Write failed")
 
-		if claims != nil {
+		if sandboxID != "" {
 			s.auditor.Log(ctx, audit.Event{
 				VolumeID:  req.VolumeId,
-				SandboxID: claims.SandboxID,
+				SandboxID: sandboxID,
+				TeamID:    teamID,
 				Operation: "write",
 				Inode:     req.Inode,
 				Size:      0,
@@ -306,10 +323,11 @@ func (s *FileSystemServer) Write(ctx context.Context, req *pb.WriteRequest) (*pb
 	}
 
 	// Audit log
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "write",
 			Inode:     req.Inode,
 			Size:      int64(len(req.Data)),
@@ -325,7 +343,7 @@ func (s *FileSystemServer) Write(ctx context.Context, req *pb.WriteRequest) (*pb
 
 // Create implements FUSE create using JuiceFS VFS layer
 func (s *FileSystemServer) Create(ctx context.Context, req *pb.CreateRequest) (*pb.NodeResponse, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -349,10 +367,11 @@ func (s *FileSystemServer) Create(ctx context.Context, req *pb.CreateRequest) (*
 		return nil, status.Error(codes.Internal, syscall.Errno(errno).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "create",
 			Inode:     uint64(parent),
 			Path:      req.Name,
@@ -370,7 +389,7 @@ func (s *FileSystemServer) Create(ctx context.Context, req *pb.CreateRequest) (*
 
 // Mkdir implements FUSE mkdir
 func (s *FileSystemServer) Mkdir(ctx context.Context, req *pb.MkdirRequest) (*pb.NodeResponse, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -388,10 +407,11 @@ func (s *FileSystemServer) Mkdir(ctx context.Context, req *pb.MkdirRequest) (*pb
 		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "mkdir",
 			Inode:     uint64(parent),
 			Path:      req.Name,
@@ -408,7 +428,7 @@ func (s *FileSystemServer) Mkdir(ctx context.Context, req *pb.MkdirRequest) (*pb
 
 // Unlink implements FUSE unlink
 func (s *FileSystemServer) Unlink(ctx context.Context, req *pb.UnlinkRequest) (*pb.Empty, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -423,10 +443,11 @@ func (s *FileSystemServer) Unlink(ctx context.Context, req *pb.UnlinkRequest) (*
 		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "unlink",
 			Inode:     uint64(parent),
 			Path:      req.Name,
@@ -439,7 +460,7 @@ func (s *FileSystemServer) Unlink(ctx context.Context, req *pb.UnlinkRequest) (*
 
 // ReadDir implements FUSE readdir
 func (s *FileSystemServer) ReadDir(ctx context.Context, req *pb.ReadDirRequest) (*pb.ReadDirResponse, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -467,10 +488,11 @@ func (s *FileSystemServer) ReadDir(ctx context.Context, req *pb.ReadDirRequest) 
 		})
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "readdir",
 			Inode:     uint64(inode),
 			Status:    "success",
@@ -485,7 +507,7 @@ func (s *FileSystemServer) ReadDir(ctx context.Context, req *pb.ReadDirRequest) 
 
 // Rename implements FUSE rename
 func (s *FileSystemServer) Rename(ctx context.Context, req *pb.RenameRequest) (*pb.Empty, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -504,10 +526,11 @@ func (s *FileSystemServer) Rename(ctx context.Context, req *pb.RenameRequest) (*
 		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "rename",
 			Inode:     uint64(oldParent),
 			Path:      fmt.Sprintf("%s -> %s", req.OldName, req.NewName),
@@ -520,7 +543,7 @@ func (s *FileSystemServer) Rename(ctx context.Context, req *pb.RenameRequest) (*
 
 // SetAttr implements FUSE setattr
 func (s *FileSystemServer) SetAttr(ctx context.Context, req *pb.SetAttrRequest) (*pb.SetAttrResponse, error) {
-	claims, _ := auth.GetClaims(ctx)
+	sandboxID, teamID := getAuditInfo(ctx)
 
 	volCtx, err := s.volMgr.GetVolume(req.VolumeId)
 	if err != nil {
@@ -537,10 +560,11 @@ func (s *FileSystemServer) SetAttr(ctx context.Context, req *pb.SetAttrRequest) 
 		return nil, status.Error(codes.Internal, syscall.Errno(st).Error())
 	}
 
-	if claims != nil {
+	if sandboxID != "" {
 		s.auditor.Log(ctx, audit.Event{
 			VolumeID:  req.VolumeId,
-			SandboxID: claims.SandboxID,
+			SandboxID: sandboxID,
+			TeamID:    teamID,
 			Operation: "setattr",
 			Inode:     uint64(inode),
 			Status:    "success",

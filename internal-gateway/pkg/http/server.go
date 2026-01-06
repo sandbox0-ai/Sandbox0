@@ -13,21 +13,19 @@ import (
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/db"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/middleware"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/proxy"
-	"github.com/sandbox0-ai/infra/internal-gateway/pkg/service"
 	"go.uber.org/zap"
 )
 
 // Server represents the HTTP server for internal-gateway
 type Server struct {
-	router               *gin.Engine
-	cfg                  *config.Config
-	repo                 *db.Repository
-	router_proxy         *proxy.Router
-	sandboxVolumeService *service.SandboxVolumeService
-	authMiddleware       *middleware.AuthMiddleware
-	rateLimiter          *middleware.RateLimiter
-	requestLogger        *middleware.RequestLogger
-	logger               *zap.Logger
+	router         *gin.Engine
+	cfg            *config.Config
+	repo           *db.Repository
+	router_proxy   *proxy.Router
+	authMiddleware *middleware.AuthMiddleware
+	rateLimiter    *middleware.RateLimiter
+	requestLogger  *middleware.RequestLogger
+	logger         *zap.Logger
 }
 
 // NewServer creates a new HTTP server
@@ -54,24 +52,20 @@ func NewServer(
 		return nil, fmt.Errorf("create proxy router: %w", err)
 	}
 
-	// Create services
-	sandboxVolumeService := service.NewSandboxVolumeService(repo, cfg.StorageProxyURL, logger)
-
 	// Create middleware
 	authMiddleware := middleware.NewAuthMiddleware(repo, cfg.JWTSecret, logger)
 	rateLimiter := middleware.NewRateLimiter(repo, cfg.RateLimitRPS, cfg.RateLimitBurst, logger)
 	requestLogger := middleware.NewRequestLogger(repo, logger, cfg.EnableAudit)
 
 	server := &Server{
-		router:               router,
-		cfg:                  cfg,
-		repo:                 repo,
-		router_proxy:         proxyRouter,
-		sandboxVolumeService: sandboxVolumeService,
-		authMiddleware:       authMiddleware,
-		rateLimiter:          rateLimiter,
-		requestLogger:        requestLogger,
-		logger:               logger,
+		router:         router,
+		cfg:            cfg,
+		repo:           repo,
+		router_proxy:   proxyRouter,
+		authMiddleware: authMiddleware,
+		rateLimiter:    rateLimiter,
+		requestLogger:  requestLogger,
+		logger:         logger,
 	}
 
 	server.setupRoutes()
@@ -146,20 +140,20 @@ func (s *Server) setupRoutes() {
 			templates.POST("/:id/pool/warm", s.authMiddleware.RequirePermission(auth.PermTemplateWrite), s.warmPool)
 		}
 
-		// === SandboxVolume Management (→ Storage Proxy, with coordination) ===
-		sandboxvolumes := v1.Group("/sandboxvolumes")
-		{
-			sandboxvolumes.POST("", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeCreate), s.createSandboxVolume)
-			sandboxvolumes.GET("", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeRead), s.listSandboxVolumes)
-			sandboxvolumes.GET("/:id", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeRead), s.getSandboxVolume)
-			sandboxvolumes.DELETE("/:id", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeDelete), s.deleteSandboxVolume)
-			// Attach/Detach use coordination service
-			sandboxvolumes.POST("/:id/attach", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.attachSandboxVolume)
-			sandboxvolumes.POST("/:id/detach", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.detachSandboxVolume)
-			// Snapshot/Restore (→ Storage Proxy)
-			sandboxvolumes.POST("/:id/snapshot", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.createSnapshot)
-			sandboxvolumes.POST("/:id/restore", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.restoreSnapshot)
-		}
+		//// === SandboxVolume Management (→ Storage Proxy, with coordination) ===
+		//sandboxvolumes := v1.Group("/sandboxvolumes")
+		//{
+		//	sandboxvolumes.POST("", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeCreate), s.createSandboxVolume)
+		//	sandboxvolumes.GET("", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeRead), s.listSandboxVolumes)
+		//	sandboxvolumes.GET("/:id", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeRead), s.getSandboxVolume)
+		//	sandboxvolumes.DELETE("/:id", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeDelete), s.deleteSandboxVolume)
+		//	// Attach/Detach use coordination service
+		//	sandboxvolumes.POST("/:id/attach", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.attachSandboxVolume)
+		//	sandboxvolumes.POST("/:id/detach", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.detachSandboxVolume)
+		//	// Snapshot/Restore (→ Storage Proxy)
+		//	sandboxvolumes.POST("/:id/snapshot", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.createSnapshot)
+		//	sandboxvolumes.POST("/:id/restore", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeWrite), s.restoreSnapshot)
+		//}
 	}
 }
 
