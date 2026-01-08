@@ -42,13 +42,42 @@ func NewSandboxNetworkPolicyService(
 	}, nil
 }
 
+// SandboxNetworkPolicyConfig defines network policy (template-level default)
+type SandboxNetworkPolicy struct {
+	Mode    NetworkPolicyMode     `json:"mode"`
+	Egress  *NetworkEgressPolicy  `json:"egress,omitempty"`
+	Ingress *NetworkIngressPolicy `json:"ingress,omitempty"`
+}
+
+// NetworkPolicyMode defines network policy mode
+type NetworkPolicyMode string
+
+const (
+	NetworkModeAllowAll NetworkPolicyMode = "allow-all"
+	NetworkModeBlockAll NetworkPolicyMode = "block-all"
+	NetworkModeCustom   NetworkPolicyMode = "custom"
+)
+
+// NetworkEgressPolicy defines egress policy
+type NetworkEgressPolicy struct {
+	AllowedIPs     []string `json:"allowedIPs,omitempty"`
+	AllowedDomains []string `json:"allowedDomains,omitempty"`
+	BlockedIPs     []string `json:"blockedIPs,omitempty"`
+	BlockedDomains []string `json:"blockedDomains,omitempty"`
+}
+
+// NetworkIngressPolicy defines ingress policy
+type NetworkIngressPolicy struct {
+	AllowedIPs []string `json:"allowedIPs,omitempty"`
+	BlockedIPs []string `json:"blockedIPs,omitempty"`
+}
+
 // CreateSandboxNetworkPolicyRequest contains the request to create a network policy
 type CreateSandboxNetworkPolicyRequest struct {
-	SandboxID    string
-	TeamID       string
-	Namespace    string
-	TemplateSpec *v1alpha1.TplSandboxNetworkPolicy // From template
-	RequestSpec  *v1alpha1.TplSandboxNetworkPolicy // From claim request (overrides template)
+	SandboxID   string
+	TeamID      string
+	Namespace   string
+	RequestSpec *SandboxNetworkPolicy
 }
 
 // CreateOrUpdateSandboxNetworkPolicy creates or updates a SandboxNetworkPolicy for a sandbox
@@ -58,15 +87,12 @@ func (s *SandboxNetworkPolicyService) CreateOrUpdateSandboxNetworkPolicy(
 ) error {
 	policyName := fmt.Sprintf("sandbox-%s-network", req.SandboxID)
 
-	// Merge template and request specs
-	mergedSpec := s.mergeNetworkPolicies(req.TemplateSpec, req.RequestSpec)
-
 	// Build the policy spec
 	policySpec := &v1alpha1.SandboxNetworkPolicySpec{
 		SandboxID: req.SandboxID,
 		TeamID:    req.TeamID,
-		Egress:    s.buildEgressSpec(mergedSpec),
-		Ingress:   s.buildIngressSpec(mergedSpec),
+		Egress:    s.buildEgressSpec(req.RequestSpec),
+		Ingress:   s.buildIngressSpec(req.RequestSpec),
 		Audit: &v1alpha1.AuditSpec{
 			Level:      "basic",
 			SampleRate: "1.0",
@@ -373,62 +399,8 @@ func (s *SandboxNetworkPolicyService) GetBandwidthPolicy(ctx context.Context, na
 	return policy, nil
 }
 
-// mergeNetworkPolicies merges template and request network policies
-// Request values override template values
-func (s *SandboxNetworkPolicyService) mergeNetworkPolicies(
-	template *v1alpha1.TplSandboxNetworkPolicy,
-	request *v1alpha1.TplSandboxNetworkPolicy,
-) *v1alpha1.TplSandboxNetworkPolicy {
-	if template == nil && request == nil {
-		return &v1alpha1.TplSandboxNetworkPolicy{
-			Mode: v1alpha1.NetworkModeBlockAll, // Default to block all
-		}
-	}
-
-	if template == nil {
-		return request
-	}
-
-	if request == nil {
-		return template
-	}
-
-	// Merge: request overrides template
-	merged := template.DeepCopy()
-
-	// Mode from request takes precedence
-	if request.Mode != "" {
-		merged.Mode = request.Mode
-	}
-
-	// Merge egress
-	if request.Egress != nil {
-		if merged.Egress == nil {
-			merged.Egress = request.Egress
-		} else {
-			// Append allowed IPs and domains
-			merged.Egress.AllowedIPs = append(merged.Egress.AllowedIPs, request.Egress.AllowedIPs...)
-			merged.Egress.AllowedDomains = append(merged.Egress.AllowedDomains, request.Egress.AllowedDomains...)
-			merged.Egress.BlockedIPs = append(merged.Egress.BlockedIPs, request.Egress.BlockedIPs...)
-			merged.Egress.BlockedDomains = append(merged.Egress.BlockedDomains, request.Egress.BlockedDomains...)
-		}
-	}
-
-	// Merge ingress
-	if request.Ingress != nil {
-		if merged.Ingress == nil {
-			merged.Ingress = request.Ingress
-		} else {
-			merged.Ingress.AllowedIPs = append(merged.Ingress.AllowedIPs, request.Ingress.AllowedIPs...)
-			merged.Ingress.BlockedIPs = append(merged.Ingress.BlockedIPs, request.Ingress.BlockedIPs...)
-		}
-	}
-
-	return merged
-}
-
 // buildEgressSpec builds EgressPolicySpec from SandboxNetworkPolicy
-func (s *SandboxNetworkPolicyService) buildEgressSpec(policy *v1alpha1.TplSandboxNetworkPolicy) *v1alpha1.EgressPolicySpec {
+func (s *SandboxNetworkPolicyService) buildEgressSpec(policy *SandboxNetworkPolicy) *v1alpha1.EgressPolicySpec {
 	if policy == nil {
 		return &v1alpha1.EgressPolicySpec{
 			DefaultAction:     "deny",
@@ -443,11 +415,11 @@ func (s *SandboxNetworkPolicyService) buildEgressSpec(policy *v1alpha1.TplSandbo
 	}
 
 	switch policy.Mode {
-	case v1alpha1.NetworkModeAllowAll:
+	case NetworkModeAllowAll:
 		spec.DefaultAction = "allow"
-	case v1alpha1.NetworkModeBlockAll:
+	case NetworkModeBlockAll:
 		spec.DefaultAction = "deny"
-	case v1alpha1.NetworkModeCustom:
+	case NetworkModeCustom:
 		spec.DefaultAction = "deny" // Custom defaults to deny
 	default:
 		spec.DefaultAction = "deny"
@@ -464,7 +436,7 @@ func (s *SandboxNetworkPolicyService) buildEgressSpec(policy *v1alpha1.TplSandbo
 }
 
 // buildIngressSpec builds IngressPolicySpec from SandboxNetworkPolicy
-func (s *SandboxNetworkPolicyService) buildIngressSpec(policy *v1alpha1.TplSandboxNetworkPolicy) *v1alpha1.IngressPolicySpec {
+func (s *SandboxNetworkPolicyService) buildIngressSpec(policy *SandboxNetworkPolicy) *v1alpha1.IngressPolicySpec {
 	spec := &v1alpha1.IngressPolicySpec{
 		DefaultAction: "deny", // Always default deny for ingress
 		// Allow procd port from internal-gateway
