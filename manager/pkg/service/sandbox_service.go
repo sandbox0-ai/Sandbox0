@@ -55,9 +55,9 @@ type ClaimRequest struct {
 
 // SandboxConfig represents sandbox configuration
 type SandboxConfig struct {
-	EnvVars map[string]string     `json:"env_vars,omitempty"`
-	TTL     int32                 `json:"ttl,omitempty"` // Time-to-live in seconds
-	Network *SandboxNetworkPolicy `json:"network,omitempty"`
+	EnvVars map[string]string                 `json:"env_vars,omitempty"`
+	TTL     int32                             `json:"ttl,omitempty"` // Time-to-live in seconds
+	Network *v1alpha1.TplSandboxNetworkPolicy `json:"network,omitempty"`
 }
 
 // ClaimResponse represents a sandbox claim response
@@ -107,16 +107,17 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 	// Create network and bandwidth policies for the sandbox
 	if s.SandboxNetworkPolicyService != nil {
 		// Create network policy
-		var requestNetwork *SandboxNetworkPolicy
+		var requestNetwork *v1alpha1.TplSandboxNetworkPolicy
 		if req.Config != nil {
 			requestNetwork = req.Config.Network
 		}
 
 		if err := s.SandboxNetworkPolicyService.CreateOrUpdateSandboxNetworkPolicy(ctx, &CreateSandboxNetworkPolicyRequest{
-			SandboxID:   req.SandboxID,
-			TeamID:      req.TeamID,
-			Namespace:   pod.Namespace,
-			RequestSpec: requestNetwork,
+			SandboxID:    req.SandboxID,
+			TeamID:       req.TeamID,
+			Namespace:    pod.Namespace,
+			TemplateSpec: template.Spec.Network,
+			RequestSpec:  requestNetwork,
 		}); err != nil {
 			s.logger.Error("Failed to create network policy",
 				zap.String("sandboxID", req.SandboxID),
@@ -253,7 +254,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 				controller.AnnotationClaimedAt: time.Now().Format(time.RFC3339),
 			},
 		},
-		Spec: template.Spec.Pod,
+		Spec: s.buildPodSpec(template),
 	}
 
 	// Set expiration time
@@ -286,6 +287,103 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 	)
 
 	return createdPod, nil
+}
+
+// buildPodSpec builds a pod spec from a template
+func (s *SandboxService) buildPodSpec(template *v1alpha1.SandboxTemplate) corev1.PodSpec {
+	spec := corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyNever,
+		Containers:    s.buildContainers(template),
+	}
+
+	// Apply runtime class if specified
+	if template.Spec.RuntimeClassName != nil {
+		spec.RuntimeClassName = template.Spec.RuntimeClassName
+	}
+
+	// Apply pod-level overrides
+	if template.Spec.Pod != nil {
+		if template.Spec.Pod.NodeSelector != nil {
+			spec.NodeSelector = template.Spec.Pod.NodeSelector
+		}
+		if template.Spec.Pod.ServiceAccountName != "" {
+			spec.ServiceAccountName = template.Spec.Pod.ServiceAccountName
+		}
+	}
+
+	return spec
+}
+
+// buildContainers builds containers from template
+func (s *SandboxService) buildContainers(template *v1alpha1.SandboxTemplate) []corev1.Container {
+	containers := []corev1.Container{
+		s.buildContainer(&template.Spec.MainContainer, template, true),
+	}
+
+	for i := range template.Spec.Sidecars {
+		containers = append(containers, s.buildContainer(&template.Spec.Sidecars[i], template, false))
+	}
+
+	return containers
+}
+
+// buildContainer builds a single container
+func (s *SandboxService) buildContainer(spec *v1alpha1.ContainerSpec, template *v1alpha1.SandboxTemplate, isMain bool) corev1.Container {
+	name := "procd"
+	if !isMain {
+		name = fmt.Sprintf("sidecar-%s", spec.Image)
+	}
+
+	container := corev1.Container{
+		Name:            name,
+		Image:           spec.Image,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         spec.Command,
+		Args:            spec.Args,
+	}
+
+	if spec.ImagePullPolicy != "" {
+		container.ImagePullPolicy = corev1.PullPolicy(spec.ImagePullPolicy)
+	}
+
+	// Environment variables
+	var envVars []corev1.EnvVar
+	for k, v := range template.Spec.EnvVars {
+		envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
+	}
+	for _, ev := range spec.Env {
+		envVars = append(envVars, corev1.EnvVar{Name: ev.Name, Value: ev.Value})
+	}
+	container.Env = envVars
+
+	// Security context
+	if spec.SecurityContext != nil {
+		container.SecurityContext = &corev1.SecurityContext{}
+		if spec.SecurityContext.RunAsUser != nil {
+			container.SecurityContext.RunAsUser = spec.SecurityContext.RunAsUser
+		}
+		if spec.SecurityContext.RunAsGroup != nil {
+			container.SecurityContext.RunAsGroup = spec.SecurityContext.RunAsGroup
+		}
+		if spec.SecurityContext.Capabilities != nil {
+			container.SecurityContext.Capabilities = &corev1.Capabilities{
+				Drop: convertCapabilities(spec.SecurityContext.Capabilities.Drop),
+			}
+		}
+	}
+
+	return container
+}
+
+func convertCapabilities(caps []string) []corev1.Capability {
+	if caps == nil {
+		return nil
+	}
+	result := make([]corev1.Capability, len(caps))
+	for i, cap := range caps {
+		result[i] = corev1.Capability(cap)
+	}
+	return result
 }
 
 // TerminateSandbox terminates a sandbox
