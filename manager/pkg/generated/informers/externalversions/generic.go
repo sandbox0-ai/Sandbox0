@@ -41,7 +41,7 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=sandbox0, Version=v1alpha1
+	// Group=sandbox0.ai, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithResource("sandboxbandwidthpolicies"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Sandbox0().V1alpha1().SandboxBandwidthPolicies().Informer()}, nil
 	case v1alpha1.SchemeGroupVersion.WithResource("sandboxnetworkpolicies"):

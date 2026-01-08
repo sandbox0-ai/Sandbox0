@@ -168,7 +168,7 @@ spec:
                 - image
                 type: object
               network:
-                description: Network policy (template-level default)
+                description: Template Sandbox Network policy (template-level default)
                 properties:
                   egress:
                     description: NetworkEgressPolicy defines egress policy

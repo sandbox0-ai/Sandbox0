@@ -39,6 +39,9 @@ type Config struct {
 	// Rate limiting
 	MaxOpsPerSecond   int
 	MaxBytesPerSecond int64
+
+	// Kubernetes
+	KubeconfigPath string // Path to kubeconfig file (empty for in-cluster config)
 }
 
 // LoadFromEnv loads configuration from environment variables
@@ -69,6 +72,8 @@ func LoadFromEnv() *Config {
 
 		MaxOpsPerSecond:   env.GetEnvInt("MAX_OPS_PER_SECOND", 10000),
 		MaxBytesPerSecond: env.GetEnvInt64("MAX_BYTES_PER_SECOND", 1<<30), // 1GB/s
+
+		KubeconfigPath: env.GetEnv("KUBECONFIG_PATH", ""),
 	}
 }
 

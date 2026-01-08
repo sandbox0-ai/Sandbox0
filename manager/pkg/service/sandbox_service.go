@@ -19,11 +19,11 @@ import (
 
 // SandboxService handles sandbox operations
 type SandboxService struct {
-	k8sClient            kubernetes.Interface
-	podLister            corelisters.PodLister
-	templateLister       controller.TemplateLister
-	networkPolicyService *NetworkPolicyService
-	logger               *zap.Logger
+	k8sClient                   kubernetes.Interface
+	podLister                   corelisters.PodLister
+	templateLister              controller.TemplateLister
+	SandboxNetworkPolicyService *SandboxNetworkPolicyService
+	logger                      *zap.Logger
 }
 
 // NewSandboxService creates a new SandboxService
@@ -31,15 +31,15 @@ func NewSandboxService(
 	k8sClient kubernetes.Interface,
 	podLister corelisters.PodLister,
 	templateLister controller.TemplateLister,
-	networkPolicyService *NetworkPolicyService,
+	SandboxNetworkPolicyService *SandboxNetworkPolicyService,
 	logger *zap.Logger,
 ) *SandboxService {
 	return &SandboxService{
-		k8sClient:            k8sClient,
-		podLister:            podLister,
-		templateLister:       templateLister,
-		networkPolicyService: networkPolicyService,
-		logger:               logger,
+		k8sClient:                   k8sClient,
+		podLister:                   podLister,
+		templateLister:              templateLister,
+		SandboxNetworkPolicyService: SandboxNetworkPolicyService,
+		logger:                      logger,
 	}
 }
 
@@ -54,9 +54,9 @@ type ClaimRequest struct {
 
 // SandboxConfig represents sandbox configuration
 type SandboxConfig struct {
-	EnvVars map[string]string       `json:"env_vars,omitempty"`
-	TTL     int32                   `json:"ttl,omitempty"` // Time-to-live in seconds
-	Network *v1alpha1.NetworkPolicy `json:"network,omitempty"`
+	EnvVars map[string]string                 `json:"env_vars,omitempty"`
+	TTL     int32                             `json:"ttl,omitempty"` // Time-to-live in seconds
+	Network *v1alpha1.TplSandboxNetworkPolicy `json:"network,omitempty"`
 }
 
 // ClaimResponse represents a sandbox claim response
@@ -107,14 +107,14 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 	procdAddress := fmt.Sprintf("%s.%s.svc.cluster.local:8080", pod.Name, pod.Namespace)
 
 	// Create network and bandwidth policies for the sandbox
-	if s.networkPolicyService != nil {
+	if s.SandboxNetworkPolicyService != nil {
 		// Create network policy
-		var requestNetwork *v1alpha1.NetworkPolicy
+		var requestNetwork *v1alpha1.TplSandboxNetworkPolicy
 		if req.Config != nil {
 			requestNetwork = req.Config.Network
 		}
 
-		if err := s.networkPolicyService.CreateOrUpdateNetworkPolicy(ctx, &CreateNetworkPolicyRequest{
+		if err := s.SandboxNetworkPolicyService.CreateOrUpdateSandboxNetworkPolicy(ctx, &CreateSandboxNetworkPolicyRequest{
 			SandboxID:    req.SandboxID,
 			TeamID:       req.TeamID,
 			Namespace:    pod.Namespace,
@@ -129,7 +129,7 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 		}
 
 		// Create bandwidth policy with defaults
-		if err := s.networkPolicyService.CreateOrUpdateBandwidthPolicy(ctx, &CreateBandwidthPolicyRequest{
+		if err := s.SandboxNetworkPolicyService.CreateOrUpdateBandwidthPolicy(ctx, &CreateBandwidthPolicyRequest{
 			SandboxID:         req.SandboxID,
 			TeamID:            req.TeamID,
 			Namespace:         pod.Namespace,
@@ -407,15 +407,15 @@ func (s *SandboxService) TerminateSandbox(ctx context.Context, sandboxID string)
 	pod := pods[0]
 
 	// Delete network and bandwidth policies
-	if s.networkPolicyService != nil {
-		if err := s.networkPolicyService.DeleteNetworkPolicy(ctx, pod.Namespace, sandboxID); err != nil {
+	if s.SandboxNetworkPolicyService != nil {
+		if err := s.SandboxNetworkPolicyService.DeleteSandboxNetworkPolicy(ctx, pod.Namespace, sandboxID); err != nil {
 			s.logger.Warn("Failed to delete network policy",
 				zap.String("sandboxID", sandboxID),
 				zap.Error(err),
 			)
 		}
 
-		if err := s.networkPolicyService.DeleteBandwidthPolicy(ctx, pod.Namespace, sandboxID); err != nil {
+		if err := s.SandboxNetworkPolicyService.DeleteBandwidthPolicy(ctx, pod.Namespace, sandboxID); err != nil {
 			s.logger.Warn("Failed to delete bandwidth policy",
 				zap.String("sandboxID", sandboxID),
 				zap.Error(err),

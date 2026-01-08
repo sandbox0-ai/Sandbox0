@@ -44,18 +44,20 @@ type VolumeContext struct {
 
 // Manager manages JuiceFS volumes
 type Manager struct {
-	mu           sync.RWMutex
-	volumes      map[string]*VolumeContext
-	logger       *logrus.Logger
-	baseCacheDir string
+	mu               sync.RWMutex
+	volumes          map[string]*VolumeContext
+	sandboxToVolumes map[string]map[string]struct{} // sandboxID -> set of volumeIDs
+	logger           *logrus.Logger
+	baseCacheDir     string
 }
 
 // NewManager creates a new volume manager
 func NewManager(logger *logrus.Logger, baseCacheDir string) *Manager {
 	return &Manager{
-		volumes:      make(map[string]*VolumeContext),
-		logger:       logger,
-		baseCacheDir: baseCacheDir,
+		volumes:          make(map[string]*VolumeContext),
+		sandboxToVolumes: make(map[string]map[string]struct{}),
+		logger:           logger,
+		baseCacheDir:     baseCacheDir,
 	}
 }
 
@@ -168,6 +170,14 @@ func (m *Manager) UnmountVolume(ctx context.Context, volumeID string) error {
 		m.logger.WithError(err).Warn("Failed to close metadata session")
 	}
 
+	// Remove from sandbox tracking
+	for sandboxID, volumes := range m.sandboxToVolumes {
+		delete(volumes, volumeID)
+		if len(volumes) == 0 {
+			delete(m.sandboxToVolumes, sandboxID)
+		}
+	}
+
 	// Note: ChunkStore doesn't have Shutdown method.
 	// In writeback mode, background uploader goroutines in ChunkStore will continue
 	// until all staging chunks are uploaded, as long as the process is running.
@@ -204,6 +214,65 @@ func (m *Manager) ListVolumes() []string {
 	}
 
 	return volumes
+}
+
+// TrackVolume associates a volume with a sandbox for automatic cleanup
+func (m *Manager) TrackVolume(sandboxID, volumeID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sandboxToVolumes[sandboxID] == nil {
+		m.sandboxToVolumes[sandboxID] = make(map[string]struct{})
+	}
+	m.sandboxToVolumes[sandboxID][volumeID] = struct{}{}
+
+	m.logger.WithFields(logrus.Fields{
+		"sandbox_id": sandboxID,
+		"volume_id":  volumeID,
+	}).Debug("Tracking volume for sandbox")
+}
+
+// UnmountSandboxVolumes unmounts all volumes associated with a sandbox
+// This is called automatically when a sandbox pod is deleted
+func (m *Manager) UnmountSandboxVolumes(ctx context.Context, sandboxID string) []error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	volumes, ok := m.sandboxToVolumes[sandboxID]
+	if !ok {
+		return nil // No volumes for this sandbox
+	}
+
+	var errs []error
+	for volumeID := range volumes {
+		m.logger.WithFields(logrus.Fields{
+			"sandbox_id": sandboxID,
+			"volume_id":  volumeID,
+		}).Info("Auto-unmounting volume for deleted sandbox")
+
+		if volCtx, exists := m.volumes[volumeID]; exists {
+			// Flush all buffered data in VFS
+			if err := volCtx.VFS.FlushAll(""); err != nil {
+				m.logger.WithError(err).Warn("Failed to flush VFS data")
+			}
+
+			// Close metadata session
+			if err := volCtx.Meta.CloseSession(); err != nil {
+				m.logger.WithError(err).Warn("Failed to close metadata session")
+			}
+
+			delete(m.volumes, volumeID)
+		}
+
+		delete(m.sandboxToVolumes[sandboxID], volumeID)
+	}
+
+	// Clean up empty sandbox entry
+	if len(m.sandboxToVolumes[sandboxID]) == 0 {
+		delete(m.sandboxToVolumes, sandboxID)
+	}
+
+	return errs
 }
 
 // createS3Storage creates S3 object storage for JuiceFS

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	grpcserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/grpc"
 	httpserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/http"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/watcher"
 	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
@@ -27,6 +29,9 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func main() {
@@ -73,6 +78,44 @@ func main() {
 
 	// Create volume manager
 	volMgr := volume.NewManager(logrusLogger, cfg.DefaultCacheDir)
+
+	// Create Kubernetes client for pod watching
+	k8sClient, err := createKubernetesClient(cfg.KubeconfigPath)
+	if err != nil {
+		zapLogger.Warn("Failed to create Kubernetes client, pod watcher disabled",
+			zap.Error(err),
+		)
+	} else {
+		// Create and start sandbox watcher
+		podWatcher := watcher.NewWatcher(
+			k8sClient,
+			"", // Watch all namespaces
+			10*time.Minute,
+			zapLogger,
+		)
+
+		// Set up delete handler to auto-unmount volumes
+		podWatcher.SetPodDeleteHandler(func(info *watcher.SandboxInfo) {
+			zapLogger.Info("Sandbox pod deleted, unmounting volumes",
+				zap.String("sandbox_id", info.SandboxID),
+			)
+			if errs := volMgr.UnmountSandboxVolumes(context.Background(), info.SandboxID); errs != nil {
+				zapLogger.Error("Errors unmounting sandbox volumes",
+					zap.String("sandbox_id", info.SandboxID),
+					zap.Int("error_count", len(errs)),
+				)
+			}
+		})
+
+		// Start watcher in background
+		go func() {
+			if err := podWatcher.Start(context.Background()); err != nil {
+				zapLogger.Error("Watcher failed", zap.Error(err))
+			}
+		}()
+
+		zapLogger.Info("Sandbox watcher started")
+	}
 
 	// Create authenticator based on config
 	var grpcInterceptor grpc.UnaryServerInterceptor
@@ -189,4 +232,39 @@ func main() {
 	}
 
 	zapLogger.Info("Shutdown complete")
+}
+
+// createKubernetesClient creates a Kubernetes client using in-cluster config or kubeconfig
+func createKubernetesClient(kubeconfigPath string) (kubernetes.Interface, error) {
+	var config *rest.Config
+	var err error
+
+	// Try in-cluster config first
+	if kubeconfigPath == "" {
+		config, err = rest.InClusterConfig()
+		if err == nil {
+			// Successfully loaded in-cluster config
+			return kubernetes.NewForConfig(config)
+		}
+		// Fall through to kubeconfig
+	}
+
+	// Use kubeconfig path if provided, or default locations
+	if kubeconfigPath == "" {
+		// Try default kubeconfig locations
+		home, err := os.UserHomeDir()
+		if err == nil {
+			kubeconfigPath = filepath.Join(home, ".kube", "config")
+		}
+	}
+
+	if kubeconfigPath != "" {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("build kubeconfig: %w", err)
+		}
+		return kubernetes.NewForConfig(config)
+	}
+
+	return nil, fmt.Errorf("no Kubernetes config found")
 }

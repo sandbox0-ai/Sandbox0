@@ -44,8 +44,8 @@ type SandboxTemplateSpec struct {
 	// Resource quota
 	Resources ResourceQuota `json:"resources"`
 
-	// Network policy (template-level default)
-	Network *NetworkPolicy `json:"network,omitempty"`
+	// Template Sandbox Network policy (template-level default)
+	Network *TplSandboxNetworkPolicy `json:"network,omitempty"`
 
 	// Pool strategy
 	Pool PoolStrategy `json:"pool"`
@@ -212,8 +212,8 @@ type PoolStrategy struct {
 	MaxIdle int32 `json:"maxIdle"` // Maximum idle pods (enforced by CleanupController)
 }
 
-// NetworkPolicy defines network policy (template-level default)
-type NetworkPolicy struct {
+// TplSandboxNetworkPolicy defines network policy (template-level default)
+type TplSandboxNetworkPolicy struct {
 	Mode    NetworkPolicyMode     `json:"mode"`
 	Egress  *NetworkEgressPolicy  `json:"egress,omitempty"`
 	Ingress *NetworkIngressPolicy `json:"ingress,omitempty"`
