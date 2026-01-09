@@ -571,6 +571,7 @@ type PauseSandboxResponse struct {
 	Paused        bool                  `json:"paused"`
 	ResourceUsage *SandboxResourceUsage `json:"resource_usage,omitempty"`
 	UpdatedMemory string                `json:"updated_memory,omitempty"`
+	UpdatedCPU    string                `json:"updated_cpu,omitempty"`
 }
 
 // ResumeSandboxResponse represents the response from resuming a sandbox.
@@ -643,18 +644,38 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 		return nil, fmt.Errorf("marshal original resources: %w", err)
 	}
 
-	// Calculate new memory request based on working set + buffer
-	var newMemory resource.Quantity
+	// Calculate new memory request and limit
+	// Request: Actual usage from procd (WorkingSet)
+	// Limit: Usage + Buffer (current buffer algorithm: 10% buffer, min 32Mi)
+	var newRequestMemory resource.Quantity
+	var newLimitMemory resource.Quantity
+
 	if pauseResp.ResourceUsage != nil && pauseResp.ResourceUsage.ContainerMemoryWorkingSet > 0 {
-		// Add 20% buffer to working set for safety
 		workingSet := pauseResp.ResourceUsage.ContainerMemoryWorkingSet
-		newMemoryBytes := int64(float64(workingSet) * 1.2)
-		// Minimum 64Mi to avoid too aggressive scaling
-		if newMemoryBytes < 64*1024*1024 {
-			newMemoryBytes = 64 * 1024 * 1024
+
+		// Request = Actual Usage
+		// Ensure a minimum safety baseline (e.g. 10Mi) to prevent container crash/instability
+		// slightly lower than the buffer minimum
+		reqBytes := int64(workingSet)
+		if reqBytes < 10*1024*1024 {
+			reqBytes = 10 * 1024 * 1024
 		}
-		newMemory = *resource.NewQuantity(newMemoryBytes, resource.BinarySI)
+		newRequestMemory = *resource.NewQuantity(reqBytes, resource.BinarySI)
+
+		// Limit = Usage * 1.1 (Buffer)
+		// Minimum 32Mi to avoid too aggressive scaling
+		limitBytes := int64(float64(workingSet) * 1.1)
+		if limitBytes < 32*1024*1024 {
+			limitBytes = 32 * 1024 * 1024
+		}
+		newLimitMemory = *resource.NewQuantity(limitBytes, resource.BinarySI)
 	}
+
+	// Minimal CPU resources for paused state
+	// Since processes are SIGSTOP'ed, they consume negligible CPU.
+	// We reduce requests to release node capacity for other workloads.
+	// K8s doesn't allow 0 CPU, so we use a minimal value (e.g., 10m).
+	minCPU := resource.MustParse("10m")
 
 	// Update pod with reduced resources (in-place update)
 	podCopy := pod.DeepCopy()
@@ -667,20 +688,40 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 	podCopy.Annotations[controller.AnnotationPausedAt] = time.Now().Format(time.RFC3339)
 	podCopy.Annotations[controller.AnnotationOriginalResources] = string(originalResourcesJSON)
 
-	// Update container resources if we have a valid new memory size
-	if !newMemory.IsZero() {
+	// Update container resources
+	// We update if we have new memory values OR we want to reduce CPU
+	if !newLimitMemory.IsZero() || !minCPU.IsZero() {
+		found := false
 		for i := range podCopy.Spec.Containers {
 			container := &podCopy.Spec.Containers[i]
+			// Only update the main container "procd"
+			// Updating all containers with the same memory value is a bug, as sidecars have different requirements
+			if container.Name != "procd" {
+				continue
+			}
+			found = true
+
 			if container.Resources.Requests == nil {
 				container.Resources.Requests = make(corev1.ResourceList)
 			}
-			container.Resources.Requests[corev1.ResourceMemory] = newMemory
-			// Also update limits if set
-			if container.Resources.Limits != nil {
-				if _, hasMemLimit := container.Resources.Limits[corev1.ResourceMemory]; hasMemLimit {
-					container.Resources.Limits[corev1.ResourceMemory] = newMemory
-				}
+			if !newRequestMemory.IsZero() {
+				container.Resources.Requests[corev1.ResourceMemory] = newRequestMemory
 			}
+			container.Resources.Requests[corev1.ResourceCPU] = minCPU
+
+			// Always set the limit as per requirements
+			if container.Resources.Limits == nil {
+				container.Resources.Limits = make(corev1.ResourceList)
+			}
+			if !newLimitMemory.IsZero() {
+				container.Resources.Limits[corev1.ResourceMemory] = newLimitMemory
+			}
+			container.Resources.Limits[corev1.ResourceCPU] = minCPU
+		}
+
+		if !found {
+			s.logger.Warn("Main container 'procd' not found during pause resource update",
+				zap.String("sandboxID", sandboxID))
 		}
 	}
 
@@ -697,7 +738,8 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 
 	s.logger.Info("Sandbox paused successfully",
 		zap.String("sandboxID", sandboxID),
-		zap.String("newMemory", newMemory.String()),
+		zap.String("newRequest", newRequestMemory.String()),
+		zap.String("newLimit", newLimitMemory.String()),
 		zap.Int64("workingSet", pauseResp.ResourceUsage.ContainerMemoryWorkingSet),
 	)
 
@@ -705,7 +747,8 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 		SandboxID:     sandboxID,
 		Paused:        true,
 		ResourceUsage: pauseResp.ResourceUsage,
-		UpdatedMemory: newMemory.String(),
+		UpdatedMemory: newLimitMemory.String(),
+		UpdatedCPU:    minCPU.String(),
 	}, nil
 }
 
