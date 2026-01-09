@@ -109,6 +109,7 @@ func (s *Server) setupRoutes() {
 	sandboxHandler := handlers.NewSandboxHandler(s.contextManager, s.logger)
 	api.HandleFunc("/sandbox/pause", sandboxHandler.Pause).Methods("POST")
 	api.HandleFunc("/sandbox/resume", sandboxHandler.Resume).Methods("POST")
+	api.HandleFunc("/sandbox/stats", sandboxHandler.Stats).Methods("GET")
 
 	// Context/Process handlers
 	contextHandler := handlers.NewContextHandler(s.contextManager, s.logger)
@@ -118,6 +119,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/contexts/{id}", contextHandler.Delete).Methods("DELETE")
 	api.HandleFunc("/contexts/{id}/restart", contextHandler.Restart).Methods("POST")
 	api.HandleFunc("/contexts/{id}/input", contextHandler.WriteInput).Methods("POST")
+	api.HandleFunc("/contexts/{id}/stats", contextHandler.Stats).Methods("GET")
 	api.HandleFunc("/contexts/{id}/ws", contextHandler.WebSocket).Methods("GET")
 
 	// SandboxVolume handlers

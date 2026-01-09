@@ -113,6 +113,14 @@ func (ctx *Context) Resume() error {
 	return nil
 }
 
+// ResourceUsage returns the resource usage of this context's process tree.
+func (ctx *Context) ResourceUsage() process.ResourceUsage {
+	if ctx.MainProcess != nil {
+		return ctx.MainProcess.ResourceUsage()
+	}
+	return process.ResourceUsage{}
+}
+
 // Manager manages contexts in the sandbox.
 type Manager struct {
 	mu       sync.RWMutex
@@ -281,4 +289,118 @@ func (m *Manager) Cleanup() {
 	}
 
 	m.contexts = make(map[string]*Context)
+}
+
+// ContextResourceUsage represents resource usage for a single context.
+type ContextResourceUsage struct {
+	ContextID string                `json:"context_id"`
+	Type      process.ProcessType   `json:"type"`
+	Language  string                `json:"language"`
+	Running   bool                  `json:"running"`
+	Paused    bool                  `json:"paused"`
+	Usage     process.ResourceUsage `json:"usage"`
+}
+
+// SandboxResourceUsage represents aggregated resource usage for the entire sandbox.
+type SandboxResourceUsage struct {
+	// Container-level stats (from cgroup)
+	ContainerMemoryUsage      int64 `json:"container_memory_usage"`
+	ContainerMemoryLimit      int64 `json:"container_memory_limit"`
+	ContainerMemoryWorkingSet int64 `json:"container_memory_working_set"`
+
+	// Aggregated process stats across all contexts
+	TotalMemoryRSS    int64 `json:"total_memory_rss"`
+	TotalMemoryVMS    int64 `json:"total_memory_vms"`
+	TotalOpenFiles    int   `json:"total_open_files"`
+	TotalThreadCount  int   `json:"total_thread_count"`
+	TotalIOReadBytes  int64 `json:"total_io_read_bytes"`
+	TotalIOWriteBytes int64 `json:"total_io_write_bytes"`
+
+	// Context count
+	ContextCount        int `json:"context_count"`
+	RunningContextCount int `json:"running_context_count"`
+	PausedContextCount  int `json:"paused_context_count"`
+
+	// Per-context breakdown
+	Contexts []ContextResourceUsage `json:"contexts"`
+}
+
+// GetResourceUsage returns resource usage for a specific context.
+func (m *Manager) GetResourceUsage(contextID string) (*ContextResourceUsage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ctx, exists := m.contexts[contextID]
+	if !exists {
+		return nil, ErrContextNotFound
+	}
+
+	return &ContextResourceUsage{
+		ContextID: ctx.ID,
+		Type:      ctx.Type,
+		Language:  ctx.Language,
+		Running:   ctx.IsRunning(),
+		Paused:    ctx.IsPaused(),
+		Usage:     ctx.ResourceUsage(),
+	}, nil
+}
+
+// GetAllResourceUsage returns aggregated resource usage for the entire sandbox.
+func (m *Manager) GetAllResourceUsage() *SandboxResourceUsage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := &SandboxResourceUsage{
+		Contexts: make([]ContextResourceUsage, 0, len(m.contexts)),
+	}
+
+	for _, ctx := range m.contexts {
+		usage := ctx.ResourceUsage()
+
+		ctxUsage := ContextResourceUsage{
+			ContextID: ctx.ID,
+			Type:      ctx.Type,
+			Language:  ctx.Language,
+			Running:   ctx.IsRunning(),
+			Paused:    ctx.IsPaused(),
+			Usage:     usage,
+		}
+		result.Contexts = append(result.Contexts, ctxUsage)
+
+		// Aggregate stats
+		result.TotalMemoryRSS += usage.MemoryRSS
+		result.TotalMemoryVMS += usage.MemoryVMS
+		result.TotalOpenFiles += usage.OpenFiles
+		result.TotalThreadCount += usage.ThreadCount
+		result.TotalIOReadBytes += usage.IOReadBytes
+		result.TotalIOWriteBytes += usage.IOWriteBytes
+
+		// Use container-level stats from the first context (they're the same for all)
+		if result.ContainerMemoryUsage == 0 {
+			result.ContainerMemoryUsage = usage.ContainerMemoryUsage
+			result.ContainerMemoryLimit = usage.ContainerMemoryLimit
+			result.ContainerMemoryWorkingSet = usage.ContainerMemoryWorkingSet
+		}
+
+		// Count states
+		result.ContextCount++
+		if ctx.IsRunning() {
+			result.RunningContextCount++
+		}
+		if ctx.IsPaused() {
+			result.PausedContextCount++
+		}
+	}
+
+	// If no contexts, still try to get container-level stats
+	if result.ContextCount == 0 {
+		containerStats, err := process.GetContainerResourceUsage()
+		if err == nil {
+			result.ContainerMemoryUsage = containerStats.Usage
+			result.ContainerMemoryLimit = containerStats.Limit
+			result.ContainerMemoryWorkingSet = containerStats.WorkingSet
+		}
+	}
+
+	return result
 }

@@ -24,8 +24,9 @@ func NewSandboxHandler(manager *ctxpkg.Manager, logger *zap.Logger) *SandboxHand
 
 // PauseAllResponse is the response body for pause all operation.
 type PauseAllResponse struct {
-	Paused bool   `json:"paused"`
-	Error  string `json:"error,omitempty"`
+	Paused        bool                         `json:"paused"`
+	Error         string                       `json:"error,omitempty"`
+	ResourceUsage *ctxpkg.SandboxResourceUsage `json:"resource_usage,omitempty"`
 }
 
 // ResumeAllResponse is the response body for resume all operation.
@@ -34,24 +35,49 @@ type ResumeAllResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// SandboxStatsResponse is the response body for sandbox resource stats.
+type SandboxStatsResponse struct {
+	*ctxpkg.SandboxResourceUsage
+}
+
 // Pause pauses all running contexts and their child processes.
 // This sends SIGSTOP to all process groups managed by procd.
+// Returns resource usage statistics after pausing.
 func (h *SandboxHandler) Pause(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("Pausing all contexts")
+
+	// Get resource usage before pausing (while processes are still running)
+	resourceUsage := h.manager.GetAllResourceUsage()
 
 	err := h.manager.PauseAll()
 	if err != nil {
 		h.logger.Error("Failed to pause all contexts", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, PauseAllResponse{
-			Paused: false,
-			Error:  err.Error(),
+			Paused:        false,
+			Error:         err.Error(),
+			ResourceUsage: resourceUsage,
 		})
 		return
 	}
 
-	h.logger.Info("All contexts paused successfully")
+	h.logger.Info("All contexts paused successfully",
+		zap.Int64("memory_usage", resourceUsage.ContainerMemoryUsage),
+		zap.Int64("memory_working_set", resourceUsage.ContainerMemoryWorkingSet),
+	)
 	writeJSON(w, http.StatusOK, PauseAllResponse{
-		Paused: true,
+		Paused:        true,
+		ResourceUsage: resourceUsage,
+	})
+}
+
+// Stats returns resource usage statistics for the entire sandbox.
+func (h *SandboxHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	h.logger.Debug("Getting sandbox resource stats")
+
+	usage := h.manager.GetAllResourceUsage()
+
+	writeJSON(w, http.StatusOK, SandboxStatsResponse{
+		SandboxResourceUsage: usage,
 	})
 }
 

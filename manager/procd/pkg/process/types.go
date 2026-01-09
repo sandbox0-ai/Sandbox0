@@ -74,11 +74,35 @@ type ExecutionResult struct {
 }
 
 // ResourceUsage represents resource consumption of a process.
+// All fields are best-effort; unavailable stats will be zero or -1 for CPU percent.
 type ResourceUsage struct {
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemoryBytes int64   `json:"memory_bytes"`
-	OpenFiles   int     `json:"open_files"`
-	ThreadCount int     `json:"thread_count"`
+	// Process-level stats (from /proc/[pid]/*)
+	// CPUPercent is the CPU usage percentage since last sample.
+	// Returns -1 on first call (no previous sample available).
+	CPUPercent float64 `json:"cpu_percent"`
+	// MemoryRSS is the Resident Set Size - actual physical memory used by process tree.
+	MemoryRSS int64 `json:"memory_rss"`
+	// MemoryVMS is the Virtual Memory Size - total virtual address space.
+	MemoryVMS int64 `json:"memory_vms"`
+	// OpenFiles is the number of open file descriptors.
+	OpenFiles int `json:"open_files"`
+	// ThreadCount is the number of threads in the process tree.
+	ThreadCount int `json:"thread_count"`
+
+	// Container-level stats (from cgroup, if available)
+	// ContainerMemoryUsage is the total memory used by the container.
+	ContainerMemoryUsage int64 `json:"container_memory_usage,omitempty"`
+	// ContainerMemoryLimit is the memory limit for the container, 0 if unlimited.
+	ContainerMemoryLimit int64 `json:"container_memory_limit,omitempty"`
+	// ContainerMemoryWorkingSet is the non-reclaimable memory (used for OOM decisions).
+	ContainerMemoryWorkingSet int64 `json:"container_memory_working_set,omitempty"`
+
+	// I/O stats (from /proc/[pid]/io, may be unavailable)
+	IOReadBytes  int64 `json:"io_read_bytes,omitempty"`
+	IOWriteBytes int64 `json:"io_write_bytes,omitempty"`
+
+	// Deprecated: Use MemoryRSS instead. Kept for backward compatibility.
+	MemoryBytes int64 `json:"memory_bytes"`
 }
 
 // Process interface defines the contract for all process types.
@@ -222,6 +246,9 @@ type BaseProcess struct {
 	pty             *os.File
 	outputMultiplex *MultiplexedChannel[ProcessOutput]
 
+	// cpuTracker tracks CPU time between samples for percentage calculation
+	cpuTracker *cpuTracker
+
 	mu sync.RWMutex
 }
 
@@ -233,6 +260,7 @@ func NewBaseProcess(id string, processType ProcessType, config ProcessConfig) *B
 		config:          config,
 		state:           ProcessStateCreated,
 		outputMultiplex: NewMultiplexedChannel[ProcessOutput](64),
+		cpuTracker:      newCPUTracker(),
 	}
 }
 
@@ -334,9 +362,52 @@ func (bp *BaseProcess) ExitCode() (int, error) {
 }
 
 // ResourceUsage returns resource usage statistics.
+// This method reads from /proc and /sys/fs/cgroup pseudo-filesystems,
+// which are available even in scratch containers as they are provided by the kernel.
+// All stats are best-effort; failures are silently ignored and result in zero values.
 func (bp *BaseProcess) ResourceUsage() ResourceUsage {
-	// TODO: Implement actual resource monitoring
-	return ResourceUsage{}
+	bp.mu.RLock()
+	pid := bp.pid
+	bp.mu.RUnlock()
+
+	usage := ResourceUsage{
+		CPUPercent: -1, // Indicates no sample available
+	}
+
+	// If process is not running, return empty stats
+	if pid <= 0 {
+		return usage
+	}
+
+	// Aggregate stats for the process and all its children
+	memStats, cpuStats, threads, openFiles, err := AggregateProcessTreeStats(pid)
+	if err == nil {
+		usage.MemoryRSS = memStats.RSS
+		usage.MemoryVMS = memStats.VMS
+		usage.MemoryBytes = memStats.RSS // Backward compatibility
+		usage.ThreadCount = threads
+		usage.OpenFiles = openFiles
+	}
+
+	// Calculate CPU percentage from delta since last sample
+	if cpuStats != nil && bp.cpuTracker != nil {
+		usage.CPUPercent = bp.cpuTracker.CalculateCPUPercent(cpuStats)
+	}
+
+	// Try to read I/O stats (may fail due to permissions)
+	if ioStats, err := defaultProcReader.ReadIOStats(pid); err == nil {
+		usage.IOReadBytes = ioStats.ReadBytes
+		usage.IOWriteBytes = ioStats.WriteBytes
+	}
+
+	// Read container-level stats from cgroup (works in both runc and Kata)
+	if containerMem, err := defaultCgroupReader.ReadContainerMemoryStats(); err == nil {
+		usage.ContainerMemoryUsage = containerMem.Usage
+		usage.ContainerMemoryLimit = containerMem.Limit
+		usage.ContainerMemoryWorkingSet = containerMem.WorkingSet
+	}
+
+	return usage
 }
 
 // ReadOutput returns a channel for reading process output.

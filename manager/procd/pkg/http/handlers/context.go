@@ -56,6 +56,16 @@ type ContextResponse struct {
 	CreatedAt string            `json:"created_at"`
 }
 
+// ContextStatsResponse is the response body for context resource stats.
+type ContextStatsResponse struct {
+	ContextID string                `json:"context_id"`
+	Type      string                `json:"type"`
+	Language  string                `json:"language"`
+	Running   bool                  `json:"running"`
+	Paused    bool                  `json:"paused"`
+	Usage     process.ResourceUsage `json:"usage"`
+}
+
 // List lists all contexts.
 func (h *ContextHandler) List(w http.ResponseWriter, r *http.Request) {
 	contexts := h.manager.ListContexts()
@@ -220,6 +230,31 @@ func (h *ContextHandler) WriteInput(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"written": true})
+}
+
+// Stats returns resource usage statistics for a context.
+func (h *ContextHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	id := vars["id"]
+
+	usage, err := h.manager.GetResourceUsage(id)
+	if err != nil {
+		if err == ctxpkg.ErrContextNotFound {
+			writeError(w, http.StatusNotFound, "context_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "stats_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ContextStatsResponse{
+		ContextID: usage.ContextID,
+		Type:      string(usage.Type),
+		Language:  usage.Language,
+		Running:   usage.Running,
+		Paused:    usage.Paused,
+		Usage:     usage.Usage,
+	})
 }
 
 // WebSocket handles WebSocket connections for context I/O.
