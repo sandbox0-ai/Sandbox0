@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/manager/pkg/config"
 	"github.com/sandbox0-ai/infra/manager/pkg/service"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
@@ -21,33 +22,28 @@ func (s *Server) claimSandbox(c *gin.Context) {
 	}
 
 	// Validate required fields
-	if req.TemplateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "template_id is required",
-		})
-		return
-	}
-	if req.SandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "sandbox_id is required",
-		})
-		return
-	}
 	if req.TeamID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "team_id is required",
 		})
 		return
 	}
-	if req.Namespace == "" {
-		req.Namespace = req.TeamID
+	if req.Template == "" || req.Namespace == "" {
+		cfg := config.LoadConfig()
+		if req.Template == "" {
+			req.Template = cfg.DefaultTemplate
+		}
+		if req.Namespace == "" {
+			req.Namespace = cfg.DefaultTemplateNamespace
+		}
 	}
 
 	resp, err := s.sandboxService.ClaimSandbox(c.Request.Context(), &req)
 	if err != nil {
 		s.logger.Error("Failed to claim sandbox",
-			zap.String("templateID", req.TemplateID),
-			zap.String("sandboxID", req.SandboxID),
+			zap.String("template", req.Template),
+			zap.String("namespace", req.Namespace),
+			zap.String("teamID", req.TeamID),
 			zap.Error(err),
 		)
 		c.JSON(http.StatusInternalServerError, gin.H{

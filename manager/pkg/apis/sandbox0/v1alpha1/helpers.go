@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sandbox0-ai/infra/manager/pkg/config"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-// TODO add k8s webhook
 func CheckTemplate(template *SandboxTemplate) error {
 	if strings.Contains(template.Namespace, "-") ||
 		strings.Contains(template.Name, "-") ||
@@ -28,14 +28,15 @@ func CheckTemplate(template *SandboxTemplate) error {
 }
 
 func GenReplicasetName(template *SandboxTemplate) string {
+	cfg := config.LoadConfig()
 	var clusterId, namespace string
 	if template.Spec.ClusterId != nil && *template.Spec.ClusterId != "" {
 		clusterId = *template.Spec.ClusterId
 	} else {
-		clusterId = "default"
+		clusterId = cfg.DefaultClusterId
 	}
 	if template.Namespace == "" {
-		namespace = "default"
+		namespace = cfg.DefaultTemplateNamespace
 	} else {
 		namespace = template.Namespace
 	}

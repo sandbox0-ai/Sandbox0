@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 )
@@ -60,12 +62,11 @@ func NewSandboxService(
 
 // ClaimRequest represents a sandbox claim request
 type ClaimRequest struct {
-	Namespace  string         `json:"namespace"`
-	TemplateID string         `json:"template_id"`
-	TeamID     string         `json:"team_id"`
-	UserID     string         `json:"user_id"`
-	SandboxID  string         `json:"sandbox_id"`
-	Config     *SandboxConfig `json:"config,omitempty"`
+	TeamID    string         `json:"team_id"`
+	UserID    string         `json:"user_id"`
+	Namespace string         `json:"namespace"`
+	Template  string         `json:"template"`
+	Config    *SandboxConfig `json:"config,omitempty"`
 }
 
 // SandboxConfig represents sandbox configuration
@@ -77,32 +78,34 @@ type SandboxConfig struct {
 
 // ClaimResponse represents a sandbox claim response
 type ClaimResponse struct {
-	SandboxID    string `json:"sandbox_id"`
-	TemplateID   string `json:"template_id"`
-	Status       string `json:"status"`
-	ProcdAddress string `json:"procd_address"`
-	PodName      string `json:"pod_name"`
-	Namespace    string `json:"namespace"`
+	SandboxID    string  `json:"sandbox_id"`
+	Status       string  `json:"status"`
+	ProcdAddress string  `json:"procd_address"`
+	PodName      string  `json:"pod_name"`
+	Template     string  `json:"template"`
+	Namespace    string  `json:"namespace"`
+	ClusterId    *string `json:"cluster_id,omitempty"`
 }
 
 // ClaimSandbox claims a sandbox from the idle pool or creates a new one
 func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*ClaimResponse, error) {
 	s.logger.Info("Claiming sandbox",
-		zap.String("templateID", req.TemplateID),
-		zap.String("sandboxID", req.SandboxID),
+		zap.String("namespace", req.Namespace),
+		zap.String("template", req.Template),
 		zap.String("teamID", req.TeamID),
 	)
 
 	// Get the template
-	template, err := s.templateLister.Get(req.Namespace, req.TemplateID)
+	template, err := s.templateLister.Get(req.Namespace, req.Template)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			return nil, fmt.Errorf("template %s not found in namespace %s", req.TemplateID, req.Namespace)
+			return nil, fmt.Errorf("template %s not found in namespace %s", req.Template, req.Namespace)
 		}
 		return nil, fmt.Errorf("get template: %w", err)
 	}
 
 	// Try to claim an idle pod first
+	// TODO retry to avoid condition where multiple requests claim the same pod
 	pod, err := s.claimIdlePod(ctx, template, req)
 	if err != nil {
 		return nil, fmt.Errorf("claim idle pod: %w", err)
@@ -111,7 +114,7 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 	// If no idle pod available, create a new one (cold start)
 	if pod == nil {
 		s.logger.Info("No idle pod available, creating new pod",
-			zap.String("templateID", req.TemplateID),
+			zap.String("template", req.Template),
 		)
 		pod, err = s.createNewPod(ctx, template, req)
 		if err != nil {
@@ -133,7 +136,7 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 		}
 
 		if err := s.SandboxNetworkPolicyService.CreateOrUpdateSandboxNetworkPolicy(ctx, &CreateSandboxNetworkPolicyRequest{
-			SandboxID:       req.SandboxID,
+			SandboxID:       pod.Name,
 			TeamID:          req.TeamID,
 			Namespace:       pod.Namespace,
 			TemplateSpec:    template.Spec.Network,
@@ -141,7 +144,7 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 			OwnerReferences: ownerRefs,
 		}); err != nil {
 			s.logger.Error("Failed to create network policy",
-				zap.String("sandboxID", req.SandboxID),
+				zap.String("sandboxID", pod.Name),
 				zap.Error(err),
 			)
 			// Don't fail the claim, but log the error
@@ -149,7 +152,7 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 
 		// Create bandwidth policy with defaults
 		if err := s.SandboxNetworkPolicyService.CreateOrUpdateBandwidthPolicy(ctx, &CreateBandwidthPolicyRequest{
-			SandboxID:         req.SandboxID,
+			SandboxID:         pod.Name,
 			TeamID:            req.TeamID,
 			Namespace:         pod.Namespace,
 			EgressRateBps:     100 * 1000 * 1000, // 100 Mbps
@@ -158,7 +161,7 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 			OwnerReferences:   ownerRefs,
 		}); err != nil {
 			s.logger.Error("Failed to create bandwidth policy",
-				zap.String("sandboxID", req.SandboxID),
+				zap.String("sandboxID", pod.Name),
 				zap.Error(err),
 			)
 			// Don't fail the claim, but log the error
@@ -166,12 +169,13 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 	}
 
 	return &ClaimResponse{
-		SandboxID:    req.SandboxID,
-		TemplateID:   req.TemplateID,
+		SandboxID:    pod.Name,
 		Status:       "starting",
 		ProcdAddress: s.prodAddress(pod.Name, pod.Namespace),
 		PodName:      pod.Name,
+		Template:     req.Template,
 		Namespace:    pod.Namespace,
+		ClusterId:    template.Spec.ClusterId,
 	}, nil
 }
 
@@ -198,12 +202,12 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 		return nil, nil // No idle pod available
 	}
 
-	// Claim the first available pod
-	pod := runningPods[0]
+	// Claim an available pod
+	pod := runningPods[rand.Intn(len(runningPods))]
 
 	s.logger.Info("Claiming idle pod",
 		zap.String("pod", pod.Name),
-		zap.String("sandboxID", req.SandboxID),
+		zap.String("sandboxID", pod.Name),
 	)
 
 	// Update pod labels and annotations
@@ -211,7 +215,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 
 	// Change pool type from idle to active
 	pod.Labels[controller.LabelPoolType] = controller.PoolTypeActive
-	pod.Labels[controller.LabelSandboxID] = req.SandboxID
+	pod.Labels[controller.LabelSandboxID] = pod.Name
 
 	// Remove owner reference (so it's no longer managed by ReplicaSet)
 	pod.OwnerReferences = nil
@@ -225,7 +229,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	pod.Annotations[controller.AnnotationClaimedAt] = time.Now().Format(time.RFC3339)
 
 	// Set expiration time
-	ttl := int32(3600) // Default 1 hour
+	ttl := int32(300) // Default 5 minutes
 	if req.Config != nil && req.Config.TTL > 0 {
 		ttl = req.Config.TTL
 	}
@@ -249,7 +253,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 
 	s.logger.Info("Successfully claimed idle pod",
 		zap.String("pod", updatedPod.Name),
-		zap.String("sandboxID", req.SandboxID),
+		zap.String("sandboxID", updatedPod.Name),
 		zap.Time("expiresAt", expiresAt),
 	)
 
@@ -258,11 +262,9 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 
 // createNewPod creates a new pod for cold start
 func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.SandboxTemplate, req *ClaimRequest) (*corev1.Pod, error) {
-	suffix := req.SandboxID
-	if len(suffix) >= 8 {
-		suffix = suffix[:8]
-	}
-	podName := fmt.Sprintf("%s-%s", req.TemplateID, suffix)
+	rs := v1alpha1.GenReplicasetName(template)
+	// Simulate K8s pod name generation: rs-name + "-" + 5 random chars
+	podName := fmt.Sprintf("%s-%s", rs, utilrand.String(5))
 
 	// Build pod spec from template
 	pod := &corev1.Pod{
@@ -272,7 +274,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 			Labels: map[string]string{
 				controller.LabelTemplateID: template.ObjectMeta.Name,
 				controller.LabelPoolType:   controller.PoolTypeActive,
-				controller.LabelSandboxID:  req.SandboxID,
+				controller.LabelSandboxID:  podName,
 			},
 			Annotations: map[string]string{
 				controller.AnnotationTeamID:    req.TeamID,
@@ -308,7 +310,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 
 	s.logger.Info("Created new pod for cold start",
 		zap.String("pod", createdPod.Name),
-		zap.String("sandboxID", req.SandboxID),
+		zap.String("sandboxID", createdPod.Name),
 		zap.Time("expiresAt", expiresAt),
 	)
 

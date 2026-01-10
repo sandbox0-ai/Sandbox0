@@ -11,6 +11,11 @@ type Config struct {
 	// HTTP Server
 	HTTPPort int
 
+	// template
+	DefaultTemplate          string
+	DefaultTemplateNamespace string
+	DefaultClusterId         string
+
 	// Kubernetes
 	KubeConfig     string
 	Namespace      string
@@ -43,6 +48,9 @@ type Config struct {
 func LoadConfig() *Config {
 	return &Config{
 		HTTPPort:                   env.GetEnvInt("HTTP_PORT", 8080),
+		DefaultTemplate:            env.GetEnv("DEFAULT_TEMPLATE", "default"),
+		DefaultTemplateNamespace:   env.GetEnv("DEFAULT_TEMPLATE_NAMESPACE", "sb0"),
+		DefaultClusterId:           env.GetEnv("DEFAULT_CLUSTER_ID", "default"),
 		KubeConfig:                 env.GetEnv("KUBECONFIG", ""),
 		Namespace:                  env.GetEnv("NAMESPACE", "default"),
 		LeaderElection:             env.GetEnvBool("LEADER_ELECTION", true),
