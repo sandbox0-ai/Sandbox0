@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
+	clientset "github.com/sandbox0-ai/infra/manager/pkg/generated/clientset/versioned"
+	"github.com/sandbox0-ai/infra/manager/pkg/metrics"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -27,9 +29,11 @@ const (
 // Operator is the main controller for SandboxTemplate CRD
 type Operator struct {
 	k8sClient   kubernetes.Interface
+	crdClient   clientset.Interface
 	podLister   corelisters.PodLister
 	podsSynced  cache.InformerSynced
 	poolManager *PoolManager
+	autoScaler  *AutoScaler
 	recorder    record.EventRecorder
 	logger      *zap.Logger
 
@@ -71,6 +75,7 @@ func (t *TemplateListerImpl) Get(namespace, name string) (*v1alpha1.SandboxTempl
 // NewOperator creates a new Operator
 func NewOperator(
 	k8sClient kubernetes.Interface,
+	crdClient clientset.Interface,
 	podInformer cache.SharedIndexInformer,
 	templateInformer cache.SharedIndexInformer,
 	recorder record.EventRecorder,
@@ -78,12 +83,15 @@ func NewOperator(
 ) *Operator {
 	podLister := corelisters.NewPodLister(podInformer.GetIndexer())
 	poolManager := NewPoolManager(k8sClient, podLister, recorder, logger)
+	autoScaler := NewAutoScaler(crdClient, podLister, logger)
 
 	op := &Operator{
 		k8sClient:        k8sClient,
+		crdClient:        crdClient,
 		podLister:        podLister,
 		podsSynced:       podInformer.HasSynced,
 		poolManager:      poolManager,
+		autoScaler:       autoScaler,
 		recorder:         recorder,
 		logger:           logger,
 		workqueue:        workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
@@ -212,6 +220,18 @@ func (op *Operator) syncHandler(ctx context.Context, key string) error {
 		return fmt.Errorf("update status: %w", err)
 	}
 
+	// Autoscale (may update template.spec.pool.minIdle, which will trigger another reconcile)
+	if template.Spec.Pool.AutoScale && op.autoScaler != nil {
+		if err := op.autoScaler.ReconcileAutoScale(ctx, template, time.Now()); err != nil {
+			op.logger.Warn("Autoscale reconcile failed",
+				zap.String("template", template.Name),
+				zap.String("namespace", template.Namespace),
+				zap.Error(err),
+			)
+			// Don't fail the reconcile; pool + status are still correct.
+		}
+	}
+
 	return nil
 }
 
@@ -249,6 +269,9 @@ func (op *Operator) updateTemplateStatus(ctx context.Context, template *v1alpha1
 			activeCount++
 		}
 	}
+
+	metrics.IdlePodsTotal.WithLabelValues(template.Name).Set(float64(idleCount))
+	metrics.ActivePodsTotal.WithLabelValues(template.Name).Set(float64(activeCount))
 
 	// Update status if changed
 	if template.Status.IdleCount != idleCount || template.Status.ActiveCount != activeCount {

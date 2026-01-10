@@ -10,6 +10,7 @@ import (
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"github.com/sandbox0-ai/infra/manager/pkg/controller"
 	"github.com/sandbox0-ai/infra/manager/pkg/db"
+	"github.com/sandbox0-ai/infra/manager/pkg/metrics"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -89,6 +90,7 @@ type ClaimResponse struct {
 
 // ClaimSandbox claims a sandbox from the idle pool or creates a new one
 func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*ClaimResponse, error) {
+	start := time.Now()
 	s.logger.Info("Claiming sandbox",
 		zap.String("namespace", req.Namespace),
 		zap.String("template", req.Template),
@@ -105,22 +107,43 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 	}
 
 	// Try to claim an idle pod first
-	// TODO retry to avoid condition where multiple requests claim the same pod
-	pod, err := s.claimIdlePod(ctx, template, req)
-	if err != nil {
-		return nil, fmt.Errorf("claim idle pod: %w", err)
+	var pod *corev1.Pod
+	claimType := "hot"
+	for i := 0; i < 2; i++ {
+		pod, err = s.claimIdlePod(ctx, template, req)
+		if err != nil && !errors.IsConflict(err) {
+			metrics.SandboxClaimsTotal.WithLabelValues(req.Template, "error").Inc()
+			return nil, fmt.Errorf("claim idle pod: %w", err)
+		}
+		if errors.IsConflict(err) {
+			s.logger.Info("Idle pod is already claimed, trying again",
+				zap.String("namespace", req.Namespace),
+				zap.String("template", req.Template),
+				zap.String("teamID", req.TeamID),
+				zap.Error(err),
+			)
+			continue
+		}
+		if err == nil {
+			break
+		}
 	}
 
 	// If no idle pod available, create a new one (cold start)
 	if pod == nil {
+		claimType = "cold"
 		s.logger.Info("No idle pod available, creating new pod",
 			zap.String("template", req.Template),
 		)
 		pod, err = s.createNewPod(ctx, template, req)
 		if err != nil {
+			metrics.SandboxClaimsTotal.WithLabelValues(req.Template, "error").Inc()
 			return nil, fmt.Errorf("create new pod: %w", err)
 		}
 	}
+
+	metrics.SandboxClaimsTotal.WithLabelValues(req.Template, "success").Inc()
+	metrics.SandboxClaimDuration.WithLabelValues(req.Template, claimType).Observe(time.Since(start).Seconds())
 
 	// Create network and bandwidth policies for the sandbox
 	if s.SandboxNetworkPolicyService != nil {
@@ -227,6 +250,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	pod.Annotations[controller.AnnotationTeamID] = req.TeamID
 	pod.Annotations[controller.AnnotationUserID] = req.UserID
 	pod.Annotations[controller.AnnotationClaimedAt] = time.Now().Format(time.RFC3339)
+	pod.Annotations[controller.AnnotationClaimType] = "hot"
 
 	// Set expiration time
 	ttl := int32(300) // Default 5 minutes
@@ -280,6 +304,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 				controller.AnnotationTeamID:    req.TeamID,
 				controller.AnnotationUserID:    req.UserID,
 				controller.AnnotationClaimedAt: time.Now().Format(time.RFC3339),
+				controller.AnnotationClaimType: "cold",
 			},
 		},
 		Spec: v1alpha1.BuildPodSpec(template),

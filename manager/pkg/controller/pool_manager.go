@@ -29,6 +29,7 @@ const (
 	AnnotationTeamID            = "sandbox0.ai/team-id"
 	AnnotationUserID            = "sandbox0.ai/user-id"
 	AnnotationClaimedAt         = "sandbox0.ai/claimed-at"
+	AnnotationClaimType         = "sandbox0.ai/claim-type" // "hot" or "cold"
 	AnnotationExpiresAt         = "sandbox0.ai/expires-at"
 	AnnotationConfig            = "sandbox0.ai/config"
 	AnnotationPaused            = "sandbox0.ai/paused"
