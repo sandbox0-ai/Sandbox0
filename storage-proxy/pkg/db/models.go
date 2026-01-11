@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -19,4 +20,75 @@ type SandboxVolume struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Snapshot represents a point-in-time copy of a SandboxVolume
+type Snapshot struct {
+	ID       string `json:"id"`
+	VolumeID string `json:"volume_id"`
+	TeamID   string `json:"team_id"`
+	UserID   string `json:"user_id"`
+
+	// JuiceFS metadata
+	RootInode   int64 `json:"root_inode"`   // Snapshot root directory inode
+	SourceInode int64 `json:"source_inode"` // Source volume root inode at snapshot time
+
+	// Metadata
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	SizeBytes   int64  `json:"size_bytes"`
+
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// VolumeMount represents a volume mount point for cross-cluster coordination
+type VolumeMount struct {
+	ID        string `json:"id"`
+	VolumeID  string `json:"volume_id"`
+	ClusterID string `json:"cluster_id"`
+	PodID     string `json:"pod_id"`
+
+	LastHeartbeat time.Time        `json:"last_heartbeat"`
+	MountedAt     time.Time        `json:"mounted_at"`
+	MountOptions  *json.RawMessage `json:"mount_options,omitempty"`
+}
+
+// SnapshotCoordination tracks the state of a snapshot creation across clusters
+type SnapshotCoordination struct {
+	ID       string `json:"id"`
+	VolumeID string `json:"volume_id"`
+
+	// Will be filled after successful snapshot creation
+	SnapshotID *string `json:"snapshot_id,omitempty"`
+
+	// Coordination state
+	Status         string `json:"status"` // pending, flushing, completed, failed, timeout
+	ExpectedNodes  int    `json:"expected_nodes"`
+	CompletedNodes int    `json:"completed_nodes"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// Coordination status constants
+const (
+	CoordStatusPending   = "pending"
+	CoordStatusFlushing  = "flushing"
+	CoordStatusCompleted = "completed"
+	CoordStatusFailed    = "failed"
+	CoordStatusTimeout   = "timeout"
+)
+
+// FlushResponse represents a node's response to a flush request
+type FlushResponse struct {
+	ID        string `json:"id"`
+	CoordID   string `json:"coord_id"`
+	ClusterID string `json:"cluster_id"`
+	PodID     string `json:"pod_id"`
+
+	Success      bool       `json:"success"`
+	FlushedAt    *time.Time `json:"flushed_at,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
 }

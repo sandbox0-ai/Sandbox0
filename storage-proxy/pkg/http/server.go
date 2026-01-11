@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/auth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,15 +18,17 @@ type Server struct {
 	mux           *http.ServeMux
 	repo          *db.Repository
 	authenticator *auth.HTTPAuthenticator
+	snapshotMgr   *snapshot.Manager
 }
 
 // NewServer creates a new HTTP server
-func NewServer(logger *logrus.Logger, repo *db.Repository, authenticator *auth.HTTPAuthenticator) *Server {
+func NewServer(logger *logrus.Logger, repo *db.Repository, authenticator *auth.HTTPAuthenticator, snapshotMgr *snapshot.Manager) *Server {
 	s := &Server{
 		logger:        logger,
 		mux:           http.NewServeMux(),
 		repo:          repo,
 		authenticator: authenticator,
+		snapshotMgr:   snapshotMgr,
 	}
 
 	// Register handlers
@@ -37,6 +40,13 @@ func NewServer(logger *logrus.Logger, repo *db.Repository, authenticator *auth.H
 	s.mux.HandleFunc("POST /sandboxvolumes", s.createSandboxVolume)
 	s.mux.HandleFunc("GET /sandboxvolumes", s.listSandboxVolumes)
 	s.mux.HandleFunc("GET /sandboxvolumes/{id}", s.getSandboxVolume)
+
+	// Snapshot handlers
+	s.mux.HandleFunc("POST /sandboxvolumes/{volume_id}/snapshots", s.createSnapshot)
+	s.mux.HandleFunc("GET /sandboxvolumes/{volume_id}/snapshots", s.listSnapshots)
+	s.mux.HandleFunc("GET /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}", s.getSnapshot)
+	s.mux.HandleFunc("POST /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}/restore", s.restoreSnapshot)
+	s.mux.HandleFunc("DELETE /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}", s.deleteSnapshot)
 
 	return s
 }

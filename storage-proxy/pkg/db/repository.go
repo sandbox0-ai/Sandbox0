@@ -139,3 +139,386 @@ func (r *Repository) ListSandboxVolumesByTeam(ctx context.Context, teamID string
 
 	return volumes, nil
 }
+
+// ============================================================
+// Snapshot Repository Methods
+// ============================================================
+
+// CreateSnapshot creates a new snapshot record
+func (r *Repository) CreateSnapshot(ctx context.Context, snapshot *Snapshot) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO sandbox_volume_snapshots (
+			id, volume_id, team_id, user_id,
+			root_inode, source_inode,
+			name, description, size_bytes,
+			created_at, expires_at
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6,
+			$7, $8, $9,
+			$10, $11
+		)
+	`,
+		snapshot.ID, snapshot.VolumeID, snapshot.TeamID, snapshot.UserID,
+		snapshot.RootInode, snapshot.SourceInode,
+		snapshot.Name, snapshot.Description, snapshot.SizeBytes,
+		snapshot.CreatedAt, snapshot.ExpiresAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("create snapshot: %w", err)
+	}
+
+	return nil
+}
+
+// GetSnapshot retrieves a snapshot by ID
+func (r *Repository) GetSnapshot(ctx context.Context, id string) (*Snapshot, error) {
+	var s Snapshot
+
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			id, volume_id, team_id, user_id,
+			root_inode, source_inode,
+			name, description, size_bytes,
+			created_at, expires_at
+		FROM sandbox_volume_snapshots
+		WHERE id = $1
+	`, id).Scan(
+		&s.ID, &s.VolumeID, &s.TeamID, &s.UserID,
+		&s.RootInode, &s.SourceInode,
+		&s.Name, &s.Description, &s.SizeBytes,
+		&s.CreatedAt, &s.ExpiresAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("query snapshot: %w", err)
+	}
+
+	return &s, nil
+}
+
+// ListSnapshotsByVolume retrieves all snapshots for a volume
+func (r *Repository) ListSnapshotsByVolume(ctx context.Context, volumeID string) ([]*Snapshot, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			id, volume_id, team_id, user_id,
+			root_inode, source_inode,
+			name, description, size_bytes,
+			created_at, expires_at
+		FROM sandbox_volume_snapshots
+		WHERE volume_id = $1
+		ORDER BY created_at DESC
+	`, volumeID)
+	if err != nil {
+		return nil, fmt.Errorf("query snapshots: %w", err)
+	}
+	defer rows.Close()
+
+	var snapshots []*Snapshot
+	for rows.Next() {
+		var s Snapshot
+		err := rows.Scan(
+			&s.ID, &s.VolumeID, &s.TeamID, &s.UserID,
+			&s.RootInode, &s.SourceInode,
+			&s.Name, &s.Description, &s.SizeBytes,
+			&s.CreatedAt, &s.ExpiresAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan snapshot: %w", err)
+		}
+		snapshots = append(snapshots, &s)
+	}
+
+	return snapshots, nil
+}
+
+// DeleteSnapshot deletes a snapshot record
+func (r *Repository) DeleteSnapshot(ctx context.Context, id string) error {
+	cmdTag, err := r.pool.Exec(ctx, `
+		DELETE FROM sandbox_volume_snapshots WHERE id = $1
+	`, id)
+
+	if err != nil {
+		return fmt.Errorf("delete snapshot: %w", err)
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// ============================================================
+// Volume Mount Repository Methods (for cross-cluster coordination)
+// ============================================================
+
+// CreateMount creates a volume mount record
+func (r *Repository) CreateMount(ctx context.Context, mount *VolumeMount) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO sandbox_volume_mounts (
+			id, volume_id, cluster_id, pod_id,
+			last_heartbeat, mounted_at, mount_options
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6, $7
+		)
+		ON CONFLICT (volume_id, cluster_id, pod_id) 
+		DO UPDATE SET last_heartbeat = $5
+	`,
+		mount.ID, mount.VolumeID, mount.ClusterID, mount.PodID,
+		mount.LastHeartbeat, mount.MountedAt, mount.MountOptions,
+	)
+
+	if err != nil {
+		return fmt.Errorf("create mount: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateMountHeartbeat updates the heartbeat for a mount
+func (r *Repository) UpdateMountHeartbeat(ctx context.Context, volumeID, clusterID, podID string) error {
+	cmdTag, err := r.pool.Exec(ctx, `
+		UPDATE sandbox_volume_mounts 
+		SET last_heartbeat = NOW()
+		WHERE volume_id = $1 AND cluster_id = $2 AND pod_id = $3
+	`, volumeID, clusterID, podID)
+
+	if err != nil {
+		return fmt.Errorf("update mount heartbeat: %w", err)
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// DeleteMount deletes a mount record
+func (r *Repository) DeleteMount(ctx context.Context, volumeID, clusterID, podID string) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM sandbox_volume_mounts 
+		WHERE volume_id = $1 AND cluster_id = $2 AND pod_id = $3
+	`, volumeID, clusterID, podID)
+
+	if err != nil {
+		return fmt.Errorf("delete mount: %w", err)
+	}
+
+	return nil
+}
+
+// GetActiveMounts retrieves active mounts for a volume (heartbeat within threshold)
+func (r *Repository) GetActiveMounts(ctx context.Context, volumeID string, heartbeatTimeout int) ([]*VolumeMount, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			id, volume_id, cluster_id, pod_id,
+			last_heartbeat, mounted_at, mount_options
+		FROM sandbox_volume_mounts
+		WHERE volume_id = $1 
+			AND last_heartbeat > NOW() - INTERVAL '1 second' * $2
+		ORDER BY mounted_at DESC
+	`, volumeID, heartbeatTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("query active mounts: %w", err)
+	}
+	defer rows.Close()
+
+	var mounts []*VolumeMount
+	for rows.Next() {
+		var m VolumeMount
+		err := rows.Scan(
+			&m.ID, &m.VolumeID, &m.ClusterID, &m.PodID,
+			&m.LastHeartbeat, &m.MountedAt, &m.MountOptions,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan mount: %w", err)
+		}
+		mounts = append(mounts, &m)
+	}
+
+	return mounts, nil
+}
+
+// DeleteStaleMounts deletes mounts with expired heartbeats
+func (r *Repository) DeleteStaleMounts(ctx context.Context, heartbeatTimeout int) (int64, error) {
+	cmdTag, err := r.pool.Exec(ctx, `
+		DELETE FROM sandbox_volume_mounts 
+		WHERE last_heartbeat < NOW() - INTERVAL '1 second' * $1
+	`, heartbeatTimeout)
+
+	if err != nil {
+		return 0, fmt.Errorf("delete stale mounts: %w", err)
+	}
+
+	return cmdTag.RowsAffected(), nil
+}
+
+// ============================================================
+// Snapshot Coordination Repository Methods
+// ============================================================
+
+// CreateCoordination creates a snapshot coordination record
+func (r *Repository) CreateCoordination(ctx context.Context, coord *SnapshotCoordination) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO snapshot_coordinations (
+			id, volume_id, snapshot_id,
+			status, expected_nodes, completed_nodes,
+			created_at, updated_at, expires_at
+		) VALUES (
+			$1, $2, $3,
+			$4, $5, $6,
+			$7, $8, $9
+		)
+	`,
+		coord.ID, coord.VolumeID, coord.SnapshotID,
+		coord.Status, coord.ExpectedNodes, coord.CompletedNodes,
+		coord.CreatedAt, coord.UpdatedAt, coord.ExpiresAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("create coordination: %w", err)
+	}
+
+	return nil
+}
+
+// GetCoordination retrieves a coordination by ID
+func (r *Repository) GetCoordination(ctx context.Context, id string) (*SnapshotCoordination, error) {
+	var c SnapshotCoordination
+
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			id, volume_id, snapshot_id,
+			status, expected_nodes, completed_nodes,
+			created_at, updated_at, expires_at
+		FROM snapshot_coordinations
+		WHERE id = $1
+	`, id).Scan(
+		&c.ID, &c.VolumeID, &c.SnapshotID,
+		&c.Status, &c.ExpectedNodes, &c.CompletedNodes,
+		&c.CreatedAt, &c.UpdatedAt, &c.ExpiresAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("query coordination: %w", err)
+	}
+
+	return &c, nil
+}
+
+// UpdateCoordinationStatus updates the status of a coordination
+func (r *Repository) UpdateCoordinationStatus(ctx context.Context, id, status string) error {
+	cmdTag, err := r.pool.Exec(ctx, `
+		UPDATE snapshot_coordinations 
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`, id, status)
+
+	if err != nil {
+		return fmt.Errorf("update coordination status: %w", err)
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateCoordinationSnapshotID sets the snapshot ID after successful creation
+func (r *Repository) UpdateCoordinationSnapshotID(ctx context.Context, coordID, snapshotID string) error {
+	cmdTag, err := r.pool.Exec(ctx, `
+		UPDATE snapshot_coordinations 
+		SET snapshot_id = $2, status = $3, updated_at = NOW()
+		WHERE id = $1
+	`, coordID, snapshotID, CoordStatusCompleted)
+
+	if err != nil {
+		return fmt.Errorf("update coordination snapshot_id: %w", err)
+	}
+
+	if cmdTag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// CreateFlushResponse creates a flush response record
+func (r *Repository) CreateFlushResponse(ctx context.Context, resp *FlushResponse) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO snapshot_flush_responses (
+			id, coord_id, cluster_id, pod_id,
+			success, flushed_at, error_message
+		) VALUES (
+			$1, $2, $3, $4,
+			$5, $6, $7
+		)
+		ON CONFLICT (coord_id, cluster_id, pod_id) 
+		DO UPDATE SET success = $5, flushed_at = $6, error_message = $7
+	`,
+		resp.ID, resp.CoordID, resp.ClusterID, resp.PodID,
+		resp.Success, resp.FlushedAt, resp.ErrorMessage,
+	)
+
+	if err != nil {
+		return fmt.Errorf("create flush response: %w", err)
+	}
+
+	return nil
+}
+
+// CountCompletedFlushes counts successful flush responses for a coordination
+func (r *Repository) CountCompletedFlushes(ctx context.Context, coordID string) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM snapshot_flush_responses 
+		WHERE coord_id = $1 AND success = true
+	`, coordID).Scan(&count)
+
+	if err != nil {
+		return 0, fmt.Errorf("count completed flushes: %w", err)
+	}
+
+	return count, nil
+}
+
+// GetFlushResponses retrieves all flush responses for a coordination
+func (r *Repository) GetFlushResponses(ctx context.Context, coordID string) ([]*FlushResponse, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			id, coord_id, cluster_id, pod_id,
+			success, flushed_at, error_message
+		FROM snapshot_flush_responses
+		WHERE coord_id = $1
+	`, coordID)
+	if err != nil {
+		return nil, fmt.Errorf("query flush responses: %w", err)
+	}
+	defer rows.Close()
+
+	var responses []*FlushResponse
+	for rows.Next() {
+		var r FlushResponse
+		err := rows.Scan(
+			&r.ID, &r.CoordID, &r.ClusterID, &r.PodID,
+			&r.Success, &r.FlushedAt, &r.ErrorMessage,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan flush response: %w", err)
+		}
+		responses = append(responses, &r)
+	}
+
+	return responses, nil
+}

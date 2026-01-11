@@ -22,6 +22,7 @@ import (
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 	grpcserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/grpc"
 	httpserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/http"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/watcher"
 	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
@@ -206,8 +207,11 @@ func main() {
 		}
 	}()
 
+	// Create snapshot manager
+	snapshotMgr := snapshot.NewManager(repo, volMgr, cfg, logrusLogger)
+
 	// Create HTTP server
-	httpSrv := httpserver.NewServer(logrusLogger, repo, httpAuthenticator)
+	httpSrv := httpserver.NewServer(logrusLogger, repo, httpAuthenticator, snapshotMgr)
 	httpAddr := fmt.Sprintf("%s:%d", cfg.HTTPAddr, cfg.HTTPPort)
 	httpServer := &http.Server{
 		Addr:         httpAddr,

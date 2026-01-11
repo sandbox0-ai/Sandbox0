@@ -57,3 +57,61 @@ func (s *Server) getSandboxVolume(c *gin.Context) {
 	c.Request.URL.Path = "/sandboxvolumes/" + id
 	s.proxyToStorageProxy(c)
 }
+
+// createSandboxVolumeSnapshot creates a snapshot of a volume
+func (s *Server) createSandboxVolumeSnapshot(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id is required"})
+		return
+	}
+	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots"
+	s.proxyToStorageProxy(c)
+}
+
+// listSandboxVolumeSnapshots lists snapshots of a volume
+func (s *Server) listSandboxVolumeSnapshots(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id is required"})
+		return
+	}
+	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots"
+	s.proxyToStorageProxy(c)
+}
+
+// getSandboxVolumeSnapshot gets a snapshot by ID
+func (s *Server) getSandboxVolumeSnapshot(c *gin.Context) {
+	id := c.Param("id")
+	snapshotID := c.Param("snapshot_id")
+	if id == "" || snapshotID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id and snapshot id are required"})
+		return
+	}
+	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots/" + snapshotID
+	s.proxyToStorageProxy(c)
+}
+
+// restoreSandboxVolumeSnapshot restores a volume to a snapshot
+func (s *Server) restoreSandboxVolumeSnapshot(c *gin.Context) {
+	id := c.Param("id")
+	snapshotID := c.Param("snapshot_id")
+	if id == "" || snapshotID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id and snapshot id are required"})
+		return
+	}
+	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots/" + snapshotID + "/restore"
+	s.proxyToStorageProxy(c)
+}
+
+// deleteSandboxVolumeSnapshot deletes a snapshot
+func (s *Server) deleteSandboxVolumeSnapshot(c *gin.Context) {
+	id := c.Param("id")
+	snapshotID := c.Param("snapshot_id")
+	if id == "" || snapshotID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id and snapshot id are required"})
+		return
+	}
+	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots/" + snapshotID
+	s.proxyToStorageProxy(c)
+}
