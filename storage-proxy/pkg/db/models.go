@@ -6,10 +6,9 @@ import (
 
 // SandboxVolume represents a sandbox volume metadata stored in the database
 type SandboxVolume struct {
-	ID        string `json:"id"`
-	TeamID    string `json:"team_id"`
-	UserID    string `json:"user_id"`
-	ClusterID string `json:"cluster_id"`
+	ID     string `json:"id"`
+	TeamID string `json:"team_id"`
+	UserID string `json:"user_id"`
 
 	// Volume Configuration
 	CacheSize  string `json:"cache_size"`

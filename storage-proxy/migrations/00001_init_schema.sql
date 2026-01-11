@@ -6,8 +6,7 @@ CREATE TABLE IF NOT EXISTS sandbox_volumes (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    cluster_id TEXT NOT NULL DEFAULT 'default',
-    
+
     -- Volume Configuration
     cache_size TEXT NOT NULL DEFAULT '1G',
     prefetch INTEGER NOT NULL DEFAULT 0,
