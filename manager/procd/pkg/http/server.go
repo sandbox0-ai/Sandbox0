@@ -122,6 +122,11 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/contexts/{id}/stats", contextHandler.Stats).Methods("GET")
 	api.HandleFunc("/contexts/{id}/ws", contextHandler.WebSocket).Methods("GET")
 
+	// Exec handlers (synchronous execution)
+	execHandler := handlers.NewExecHandler(s.logger)
+	api.HandleFunc("/exec", execHandler.Exec).Methods("POST")
+	api.HandleFunc("/exec/stream", execHandler.ExecStream).Methods("POST")
+
 	// SandboxVolume handlers
 	volumeHandler := handlers.NewVolumeHandler(s.volumeManager, s.logger)
 	api.HandleFunc("/sandboxvolumes/mount", volumeHandler.Mount).Methods("POST")
@@ -143,7 +148,7 @@ func (s *Server) Start() error {
 		Addr:         addr,
 		Handler:      s.router,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0, // Disabled for SSE streaming support
 		IdleTimeout:  120 * time.Second,
 	}
 

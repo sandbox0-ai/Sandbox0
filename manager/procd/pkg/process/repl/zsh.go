@@ -209,4 +209,5 @@ func (z *ZshREPL) monitorProcess() {
 	}
 
 	z.CloseOutput()
+	z.TriggerExitHandler()
 }

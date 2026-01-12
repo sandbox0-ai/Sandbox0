@@ -24,7 +24,7 @@ type Context struct {
 }
 
 // NewContext creates a new context with the given configuration.
-func NewContext(config process.ProcessConfig) (*Context, error) {
+func NewContext(config process.ProcessConfig, exitHandler process.ExitHandler) (*Context, error) {
 	id := "ctx-" + uuid.New().String()[:8]
 
 	var proc process.Process
@@ -44,6 +44,10 @@ func NewContext(config process.ProcessConfig) (*Context, error) {
 
 	if err != nil {
 		return nil, err
+	}
+
+	if exitHandler != nil {
+		proc.SetExitHandler(exitHandler)
 	}
 
 	if err := proc.Start(); err != nil {
@@ -145,7 +149,19 @@ func (m *Manager) CreateContext(config process.ProcessConfig) (*Context, error) 
 		return nil, ErrMaxContextsReached
 	}
 
-	ctx, err := NewContext(config)
+	// Define exit handler for the new context
+	exitHandler := func(cfg *process.ProcessConfig) {
+		// Create the callback context asynchronously to avoid holding locks or blocking
+		go func() {
+			if _, err := m.CreateContext(*cfg); err != nil {
+				// Log error? Accessing logger here is hard as Manager doesn't have it.
+				// Maybe we should inject logger into Manager?
+				fmt.Printf("Failed to create on_exit context: %v\n", err)
+			}
+		}()
+	}
+
+	ctx, err := NewContext(config, exitHandler)
 	if err != nil {
 		return nil, err
 	}

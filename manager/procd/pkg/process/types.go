@@ -57,6 +57,7 @@ type ProcessConfig struct {
 	AutoRestart bool              `json:"auto_restart"`
 	PTYSize     *PTYSize          `json:"pty_size"`
 	Term        string            `json:"term"`
+	OnExit      *ProcessConfig    `json:"on_exit,omitempty"`
 }
 
 // ProcessOutput represents output from a process.
@@ -105,6 +106,9 @@ type ResourceUsage struct {
 	MemoryBytes int64 `json:"memory_bytes"`
 }
 
+// ExitHandler is a function that handles process exit events.
+type ExitHandler func(*ProcessConfig)
+
 // Process interface defines the contract for all process types.
 type Process interface {
 	// Identity
@@ -118,6 +122,7 @@ type Process interface {
 	Restart() error
 	IsRunning() bool
 	State() ProcessState
+	SetExitHandler(ExitHandler)
 
 	// Pause/Resume - sends SIGSTOP/SIGCONT to process group
 	Pause() error
@@ -272,6 +277,8 @@ type BaseProcess struct {
 	// cpuTracker tracks CPU time between samples for percentage calculation
 	cpuTracker *cpuTracker
 
+	exitHandler ExitHandler
+
 	mu sync.RWMutex
 }
 
@@ -284,6 +291,25 @@ func NewBaseProcess(id string, processType ProcessType, config ProcessConfig) *B
 		state:           ProcessStateCreated,
 		outputMultiplex: NewMultiplexedChannel[ProcessOutput](64),
 		cpuTracker:      newCPUTracker(),
+	}
+}
+
+// SetExitHandler sets the exit handler.
+func (bp *BaseProcess) SetExitHandler(handler ExitHandler) {
+	bp.mu.Lock()
+	defer bp.mu.Unlock()
+	bp.exitHandler = handler
+}
+
+// TriggerExitHandler calls the exit handler if one is set and the config has OnExit.
+func (bp *BaseProcess) TriggerExitHandler() {
+	bp.mu.RLock()
+	handler := bp.exitHandler
+	config := bp.config
+	bp.mu.RUnlock()
+
+	if handler != nil && config.OnExit != nil {
+		handler(config.OnExit)
 	}
 }
 

@@ -214,4 +214,5 @@ func (b *BashREPL) monitorProcess() {
 	}
 
 	b.CloseOutput()
+	b.TriggerExitHandler()
 }
