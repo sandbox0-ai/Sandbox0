@@ -97,7 +97,7 @@ func main() {
 	}
 
 	// Create volume manager
-	volMgr := volume.NewManager(logrusLogger, cfg, repo)
+	volMgr := volume.NewManager(logrusLogger, cfg)
 
 	// Create Kubernetes client for pod watching
 	k8sClient, err := k8s.NewClient(cfg.KubeconfigPath)

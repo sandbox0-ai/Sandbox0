@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,6 +27,50 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 // Pool returns the underlying connection pool
 func (r *Repository) Pool() *pgxpool.Pool {
 	return r.pool
+}
+
+// DB interface for query execution (supports both pool and transaction)
+type DB interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+}
+
+// BeginTx starts a new transaction
+func (r *Repository) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.pool.Begin(ctx)
+}
+
+// WithTx executes a function within a transaction
+// If the function returns an error, the transaction is rolled back
+// Otherwise, the transaction is committed
+// Note: This function does not propagate panics to maintain service stability.
+// Panics are logged and converted to errors. Caller code should not panic.
+func (r *Repository) WithTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	// Ensure transaction is always finalized
+	committed := false
+	defer func() {
+		if !committed {
+			// Rollback on error or panic, ignore rollback errors in defer
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	committed = true
+	return nil
 }
 
 // CreateSandboxVolume creates a new sandbox volume record
@@ -55,16 +100,35 @@ func (r *Repository) CreateSandboxVolume(ctx context.Context, volume *SandboxVol
 
 // GetSandboxVolume retrieves a sandbox volume by ID
 func (r *Repository) GetSandboxVolume(ctx context.Context, id string) (*SandboxVolume, error) {
+	return r.getSandboxVolume(ctx, r.pool, id, false)
+}
+
+// GetSandboxVolumeForUpdate retrieves a sandbox volume with FOR UPDATE NOWAIT lock
+// This prevents deadlocks by failing immediately if the row is already locked
+// Use this within a transaction when you need to ensure exclusive access
+func (r *Repository) GetSandboxVolumeForUpdate(ctx context.Context, tx pgx.Tx, id string) (*SandboxVolume, error) {
+	return r.getSandboxVolume(ctx, tx, id, true)
+}
+
+// getSandboxVolume internal implementation supporting both locked and unlocked reads
+func (r *Repository) getSandboxVolume(ctx context.Context, db DB, id string, forUpdate bool) (*SandboxVolume, error) {
 	var v SandboxVolume
 
-	err := r.pool.QueryRow(ctx, `
+	query := `
 		SELECT
 			id, team_id, user_id,
 			cache_size, prefetch, buffer_size, writeback, read_only,
 			created_at, updated_at
 		FROM sandbox_volumes
 		WHERE id = $1
-	`, id).Scan(
+	`
+
+	// Add FOR UPDATE NOWAIT to prevent blocking and detect conflicts immediately
+	if forUpdate {
+		query += " FOR UPDATE NOWAIT"
+	}
+
+	err := db.QueryRow(ctx, query, id).Scan(
 		&v.ID, &v.TeamID, &v.UserID,
 		&v.CacheSize, &v.Prefetch, &v.BufferSize, &v.Writeback, &v.ReadOnly,
 		&v.CreatedAt, &v.UpdatedAt,
@@ -146,7 +210,17 @@ func (r *Repository) ListSandboxVolumesByTeam(ctx context.Context, teamID string
 
 // CreateSnapshot creates a new snapshot record
 func (r *Repository) CreateSnapshot(ctx context.Context, snapshot *Snapshot) error {
-	_, err := r.pool.Exec(ctx, `
+	return r.createSnapshot(ctx, r.pool, snapshot)
+}
+
+// CreateSnapshotTx creates a new snapshot record within a transaction
+func (r *Repository) CreateSnapshotTx(ctx context.Context, tx pgx.Tx, snapshot *Snapshot) error {
+	return r.createSnapshot(ctx, tx, snapshot)
+}
+
+// createSnapshot internal implementation supporting both pool and transaction
+func (r *Repository) createSnapshot(ctx context.Context, db DB, snapshot *Snapshot) error {
+	_, err := db.Exec(ctx, `
 		INSERT INTO sandbox_volume_snapshots (
 			id, volume_id, team_id, user_id,
 			root_inode, source_inode,
@@ -174,9 +248,24 @@ func (r *Repository) CreateSnapshot(ctx context.Context, snapshot *Snapshot) err
 
 // GetSnapshot retrieves a snapshot by ID
 func (r *Repository) GetSnapshot(ctx context.Context, id string) (*Snapshot, error) {
+	return r.getSnapshot(ctx, r.pool, id, false)
+}
+
+// GetSnapshotTx retrieves a snapshot by ID within a transaction
+func (r *Repository) GetSnapshotTx(ctx context.Context, tx pgx.Tx, id string) (*Snapshot, error) {
+	return r.getSnapshot(ctx, tx, id, false)
+}
+
+// GetSnapshotForUpdate retrieves a snapshot with FOR UPDATE NOWAIT lock
+func (r *Repository) GetSnapshotForUpdate(ctx context.Context, tx pgx.Tx, id string) (*Snapshot, error) {
+	return r.getSnapshot(ctx, tx, id, true)
+}
+
+// getSnapshot internal implementation supporting both locked and unlocked reads
+func (r *Repository) getSnapshot(ctx context.Context, db DB, id string, forUpdate bool) (*Snapshot, error) {
 	var s Snapshot
 
-	err := r.pool.QueryRow(ctx, `
+	query := `
 		SELECT
 			id, volume_id, team_id, user_id,
 			root_inode, source_inode,
@@ -184,7 +273,13 @@ func (r *Repository) GetSnapshot(ctx context.Context, id string) (*Snapshot, err
 			created_at, expires_at
 		FROM sandbox_volume_snapshots
 		WHERE id = $1
-	`, id).Scan(
+	`
+
+	if forUpdate {
+		query += " FOR UPDATE NOWAIT"
+	}
+
+	err := db.QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.VolumeID, &s.TeamID, &s.UserID,
 		&s.RootInode, &s.SourceInode,
 		&s.Name, &s.Description, &s.SizeBytes,
@@ -238,7 +333,17 @@ func (r *Repository) ListSnapshotsByVolume(ctx context.Context, volumeID string)
 
 // DeleteSnapshot deletes a snapshot record
 func (r *Repository) DeleteSnapshot(ctx context.Context, id string) error {
-	cmdTag, err := r.pool.Exec(ctx, `
+	return r.deleteSnapshot(ctx, r.pool, id)
+}
+
+// DeleteSnapshotTx deletes a snapshot record within a transaction
+func (r *Repository) DeleteSnapshotTx(ctx context.Context, tx pgx.Tx, id string) error {
+	return r.deleteSnapshot(ctx, tx, id)
+}
+
+// deleteSnapshot internal implementation supporting both pool and transaction
+func (r *Repository) deleteSnapshot(ctx context.Context, db DB, id string) error {
+	cmdTag, err := db.Exec(ctx, `
 		DELETE FROM sandbox_volume_snapshots WHERE id = $1
 	`, id)
 

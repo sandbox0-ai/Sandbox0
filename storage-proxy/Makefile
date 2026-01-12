@@ -19,7 +19,13 @@ docker:
 
 # Run tests
 test:
-	go test -v ./...
+	@echo "Running tests..."
+	@GOTOOLCHAIN=go1.25.0+auto go test -v -coverprofile=coverage.out ./...
+	@if [ -f coverage.out ]; then \
+		echo "\nTest Coverage Summary:"; \
+		go tool cover -func=coverage.out; \
+		rm coverage.out; \
+	fi
 
 # Clean build artifacts
 clean:

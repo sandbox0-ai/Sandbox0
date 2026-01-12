@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/juicedata/juicefs/pkg/meta"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/config"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
@@ -86,6 +87,28 @@ func (r *fakeRepo) DeleteSnapshot(ctx context.Context, id string) error {
 	delete(r.snapshots, id)
 	r.deleted = append(r.deleted, id)
 	return nil
+}
+
+// Transaction support methods for fakeRepo
+func (r *fakeRepo) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	// For testing, we just execute the function without a real transaction
+	return fn(nil)
+}
+
+func (r *fakeRepo) GetSandboxVolumeForUpdate(ctx context.Context, tx pgx.Tx, id string) (*db.SandboxVolume, error) {
+	return r.GetSandboxVolume(ctx, id)
+}
+
+func (r *fakeRepo) CreateSnapshotTx(ctx context.Context, tx pgx.Tx, snapshot *db.Snapshot) error {
+	return r.CreateSnapshot(ctx, snapshot)
+}
+
+func (r *fakeRepo) GetSnapshotForUpdate(ctx context.Context, tx pgx.Tx, id string) (*db.Snapshot, error) {
+	return r.GetSnapshot(ctx, id)
+}
+
+func (r *fakeRepo) DeleteSnapshotTx(ctx context.Context, tx pgx.Tx, id string) error {
+	return r.DeleteSnapshot(ctx, id)
 }
 
 type fakeVolumeProvider struct {

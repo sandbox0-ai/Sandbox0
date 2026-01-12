@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/juicedata/juicefs/pkg/meta"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/config"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
@@ -29,6 +31,13 @@ type repository interface {
 	GetSnapshot(context.Context, string) (*db.Snapshot, error)
 	CreateSnapshot(context.Context, *db.Snapshot) error
 	DeleteSnapshot(context.Context, string) error
+
+	// Transaction support
+	WithTx(context.Context, func(tx pgx.Tx) error) error
+	GetSandboxVolumeForUpdate(context.Context, pgx.Tx, string) (*db.SandboxVolume, error)
+	CreateSnapshotTx(context.Context, pgx.Tx, *db.Snapshot) error
+	GetSnapshotForUpdate(context.Context, pgx.Tx, string) (*db.Snapshot, error)
+	DeleteSnapshotTx(context.Context, pgx.Tx, string) error
 }
 
 // Errors
@@ -39,6 +48,7 @@ var (
 	ErrVolumeLocked              = errors.New("volume is locked for restore")
 	ErrFlushFailed               = errors.New("flush failed on one or more nodes")
 	ErrCloneFailed               = errors.New("clone operation failed")
+	ErrVolumeBusy                = errors.New("volume is busy, try again later")
 )
 
 // Manager handles snapshot operations for SandboxVolumes
@@ -81,101 +91,122 @@ type CreateSnapshotRequest struct {
 }
 
 // CreateSnapshot creates a new snapshot of a volume using JuiceFS COW clone
+// Uses a transaction to ensure data consistency and row-level locking to avoid deadlocks
 func (m *Manager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest) (*db.Snapshot, error) {
 	m.logger.WithFields(logrus.Fields{
 		"volume_id": req.VolumeID,
 		"name":      req.Name,
 	}).Info("Creating snapshot")
 
-	// 1. Get volume and verify ownership
-	vol, err := m.repo.GetSandboxVolume(ctx, req.VolumeID)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return nil, ErrVolumeNotFound
+	var snapshot *db.Snapshot
+	var snapshotPath string
+
+	// Execute within a transaction to ensure atomicity
+	err := m.repo.WithTx(ctx, func(tx pgx.Tx) error {
+		// 1. Get volume with FOR UPDATE NOWAIT lock to prevent concurrent modifications
+		// This ensures exclusive access and fails immediately if locked (avoiding deadlock)
+		vol, err := m.repo.GetSandboxVolumeForUpdate(ctx, tx, req.VolumeID)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return ErrVolumeNotFound
+			}
+			// Check for lock timeout (55P03 is PostgreSQL lock_not_available)
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+				return ErrVolumeBusy
+			}
+			return fmt.Errorf("get volume: %w", err)
 		}
-		return nil, fmt.Errorf("get volume: %w", err)
-	}
 
-	// Verify team ownership
-	if vol.TeamID != req.TeamID {
-		return nil, ErrVolumeNotFound // Don't reveal existence
-	}
+		// Verify team ownership
+		if vol.TeamID != req.TeamID {
+			return ErrVolumeNotFound // Don't reveal existence
+		}
 
-	// 2. Get volume context from volume manager
-	volCtx, err := m.volMgr.GetVolume(req.VolumeID)
+		// 2. Get volume context from volume manager
+		volCtx, err := m.volMgr.GetVolume(req.VolumeID)
+		if err != nil {
+			return fmt.Errorf("get volume context: %w", err)
+		}
+
+		// 3. Flush all cached data to ensure consistency
+		if err := volCtx.VFS.FlushAll(""); err != nil {
+			m.logger.WithError(err).Warn("Failed to flush VFS data before snapshot")
+			// Continue anyway - data should still be consistent
+		}
+
+		// 4. Look up the volume root directory
+		volumePath := fmt.Sprintf("/volumes/%s", req.VolumeID)
+		parentIno, rootIno, err := m.lookupPath(volCtx.Meta, volumePath)
+		if err != nil {
+			return fmt.Errorf("lookup volume path: %w", err)
+		}
+
+		// 5. Ensure snapshot parent directory exists
+		snapshotID := uuid.New().String()
+		snapshotParentPath := fmt.Sprintf("/snapshots/%s", req.VolumeID)
+
+		snapshotParentIno, err := m.ensurePathExists(ctx, volCtx.Meta, snapshotParentPath)
+		if err != nil {
+			return fmt.Errorf("ensure snapshot parent path: %w", err)
+		}
+
+		// 6. Clone volume root to snapshot location using JuiceFS COW
+		var cloneCount, cloneTotal uint64
+		jfsCtx := meta.Background()
+
+		errno := volCtx.Meta.Clone(jfsCtx, parentIno, rootIno, snapshotParentIno, snapshotID, 0, 0, &cloneCount, &cloneTotal)
+		if errno != 0 {
+			return fmt.Errorf("%w: %s", ErrCloneFailed, errno.Error())
+		}
+
+		m.logger.WithFields(logrus.Fields{
+			"volume_id":   req.VolumeID,
+			"snapshot_id": snapshotID,
+			"clone_count": cloneCount,
+			"clone_total": cloneTotal,
+		}).Info("JuiceFS clone completed")
+
+		// 7. Look up the new snapshot inode
+		snapshotPath = fmt.Sprintf("/snapshots/%s/%s", req.VolumeID, snapshotID)
+		_, snapshotIno, err := m.lookupPath(volCtx.Meta, snapshotPath)
+		if err != nil {
+			// Cleanup on error
+			m.deleteSnapshotDir(ctx, volCtx.Meta, snapshotPath)
+			return fmt.Errorf("lookup snapshot path: %w", err)
+		}
+
+		// 8. Save snapshot metadata to database within the transaction
+		snapshot = &db.Snapshot{
+			ID:          snapshotID,
+			VolumeID:    req.VolumeID,
+			TeamID:      req.TeamID,
+			UserID:      req.UserID,
+			RootInode:   int64(snapshotIno),
+			SourceInode: int64(rootIno),
+			Name:        req.Name,
+			Description: req.Description,
+			SizeBytes:   0, // Logical size, can be computed later
+			CreatedAt:   time.Now(),
+		}
+
+		if err := m.repo.CreateSnapshotTx(ctx, tx, snapshot); err != nil {
+			// Cleanup: delete the cloned snapshot directory
+			m.logger.WithError(err).Error("Failed to save snapshot metadata, cleaning up")
+			m.deleteSnapshotDir(ctx, volCtx.Meta, snapshotPath)
+			return fmt.Errorf("save snapshot: %w", err)
+		}
+
+		return nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("get volume context: %w", err)
-	}
-
-	// 3. Flush all cached data to ensure consistency
-	if err := volCtx.VFS.FlushAll(""); err != nil {
-		m.logger.WithError(err).Warn("Failed to flush VFS data before snapshot")
-		// Continue anyway - data should still be consistent
-	}
-
-	// 4. Look up the volume root directory
-	volumePath := fmt.Sprintf("/volumes/%s", req.VolumeID)
-	parentIno, rootIno, err := m.lookupPath(volCtx.Meta, volumePath)
-	if err != nil {
-		return nil, fmt.Errorf("lookup volume path: %w", err)
-	}
-
-	// 5. Ensure snapshot parent directory exists
-	snapshotID := uuid.New().String()
-	snapshotParentPath := fmt.Sprintf("/snapshots/%s", req.VolumeID)
-
-	snapshotParentIno, err := m.ensurePathExists(ctx, volCtx.Meta, snapshotParentPath)
-	if err != nil {
-		return nil, fmt.Errorf("ensure snapshot parent path: %w", err)
-	}
-
-	// 6. Clone volume root to snapshot location using JuiceFS COW
-	var cloneCount, cloneTotal uint64
-	jfsCtx := meta.Background()
-
-	errno := volCtx.Meta.Clone(jfsCtx, parentIno, rootIno, snapshotParentIno, snapshotID, 0, 0, &cloneCount, &cloneTotal)
-	if errno != 0 {
-		return nil, fmt.Errorf("%w: %s", ErrCloneFailed, errno.Error())
+		return nil, err
 	}
 
 	m.logger.WithFields(logrus.Fields{
 		"volume_id":   req.VolumeID,
-		"snapshot_id": snapshotID,
-		"clone_count": cloneCount,
-		"clone_total": cloneTotal,
-	}).Info("JuiceFS clone completed")
-
-	// 7. Look up the new snapshot inode
-	snapshotPath := fmt.Sprintf("/snapshots/%s/%s", req.VolumeID, snapshotID)
-	_, snapshotIno, err := m.lookupPath(volCtx.Meta, snapshotPath)
-	if err != nil {
-		return nil, fmt.Errorf("lookup snapshot path: %w", err)
-	}
-
-	// 8. Save snapshot metadata to database
-	snapshot := &db.Snapshot{
-		ID:          snapshotID,
-		VolumeID:    req.VolumeID,
-		TeamID:      req.TeamID,
-		UserID:      req.UserID,
-		RootInode:   int64(snapshotIno),
-		SourceInode: int64(rootIno),
-		Name:        req.Name,
-		Description: req.Description,
-		SizeBytes:   0, // Logical size, can be computed later
-		CreatedAt:   time.Now(),
-	}
-
-	if err := m.repo.CreateSnapshot(ctx, snapshot); err != nil {
-		// Cleanup: delete the cloned snapshot directory
-		m.logger.WithError(err).Error("Failed to save snapshot metadata, cleaning up")
-		m.deleteSnapshotDir(ctx, volCtx.Meta, snapshotPath)
-		return nil, fmt.Errorf("save snapshot: %w", err)
-	}
-
-	m.logger.WithFields(logrus.Fields{
-		"volume_id":   req.VolumeID,
-		"snapshot_id": snapshotID,
+		"snapshot_id": snapshot.ID,
 		"name":        req.Name,
 	}).Info("Snapshot created successfully")
 
@@ -327,39 +358,57 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 }
 
 // DeleteSnapshot removes a snapshot
+// Uses a transaction to ensure data consistency and avoid race conditions
 func (m *Manager) DeleteSnapshot(ctx context.Context, volumeID, snapshotID, teamID string) error {
 	m.logger.WithFields(logrus.Fields{
 		"volume_id":   volumeID,
 		"snapshot_id": snapshotID,
 	}).Info("Deleting snapshot")
 
-	// 1. Get snapshot and verify ownership
-	snapshot, err := m.repo.GetSnapshot(ctx, snapshotID)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return ErrSnapshotNotFound
+	// Execute within a transaction to ensure atomicity
+	err := m.repo.WithTx(ctx, func(tx pgx.Tx) error {
+		// 1. Get snapshot with FOR UPDATE NOWAIT lock to ensure exclusive access
+		// This prevents concurrent delete/restore operations on the same snapshot
+		snapshot, err := m.repo.GetSnapshotForUpdate(ctx, tx, snapshotID)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return ErrSnapshotNotFound
+			}
+			// Check for lock timeout
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+				return ErrVolumeBusy
+			}
+			return fmt.Errorf("get snapshot: %w", err)
 		}
-		return fmt.Errorf("get snapshot: %w", err)
+
+		// Verify ownership
+		if snapshot.VolumeID != volumeID || snapshot.TeamID != teamID {
+			return ErrSnapshotNotBelongToVolume
+		}
+
+		// 2. Delete database record first within the transaction
+		// This ensures that even if JuiceFS cleanup fails, the snapshot is marked as deleted
+		if err := m.repo.DeleteSnapshotTx(ctx, tx, snapshotID); err != nil {
+			return fmt.Errorf("delete snapshot record: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
-	if snapshot.VolumeID != volumeID || snapshot.TeamID != teamID {
-		return ErrSnapshotNotBelongToVolume
-	}
-
-	// 2. Get volume context
+	// 3. Clean up JuiceFS directory outside the transaction
+	// This is done after the DB transaction to avoid long-running transactions
+	// If this fails, it's not critical as the snapshot metadata is already deleted
 	volCtx, err := m.volMgr.GetVolume(volumeID)
 	if err != nil {
-		// Volume might not be mounted, but we can still delete the DB record
-		m.logger.WithError(err).Warn("Volume not mounted, deleting DB record only")
+		m.logger.WithError(err).Warn("Volume not mounted, skipping JuiceFS cleanup")
 	} else {
-		// 3. Delete snapshot directory from JuiceFS
 		snapshotPath := fmt.Sprintf("/snapshots/%s/%s", volumeID, snapshotID)
 		m.deleteSnapshotDir(ctx, volCtx.Meta, snapshotPath)
-	}
-
-	// 4. Delete database record
-	if err := m.repo.DeleteSnapshot(ctx, snapshotID); err != nil {
-		return fmt.Errorf("delete snapshot record: %w", err)
 	}
 
 	m.logger.WithFields(logrus.Fields{
