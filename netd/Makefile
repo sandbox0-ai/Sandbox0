@@ -27,8 +27,7 @@ docker-push: docker-build
 
 # Run tests
 test:
-	@echo "Running tests..."
-	go test -v ./...
+	@GOTOOLCHAIN=go1.25.0+auto go test -v -race -cover ./...
 
 # Run linter
 lint:

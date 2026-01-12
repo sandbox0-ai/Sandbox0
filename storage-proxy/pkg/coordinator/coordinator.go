@@ -236,6 +236,13 @@ func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string) error 
 		return nil
 	}
 
+	// Register in memory first to ensure local tracking even if DB fails
+	// This is critical for multi-replica coordination - the volume is mounted
+	// locally regardless of DB state, and we need to track it for heartbeats
+	// and flush coordination.
+	c.mountedVolumes[volumeID] = struct{}{}
+	metrics.CoordinatorMountsActive.Inc()
+
 	mount := &db.VolumeMount{
 		ID:            uuid.New().String(),
 		VolumeID:      volumeID,
@@ -247,11 +254,16 @@ func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string) error 
 
 	if err := c.repo.CreateMount(ctx, mount); err != nil {
 		metrics.CoordinatorMountRegistrations.WithLabelValues("failure").Inc()
+		// Note: We still track locally even if DB registration fails
+		// This ensures heartbeat updates and flush coordination work
+		c.logger.WithFields(logrus.Fields{
+			"volume_id":  volumeID,
+			"cluster_id": c.clusterID,
+			"pod_id":     c.podID,
+		}).WithError(err).Warn("Failed to register mount in DB, but tracking locally")
 		return fmt.Errorf("create mount: %w", err)
 	}
 
-	c.mountedVolumes[volumeID] = struct{}{}
-	metrics.CoordinatorMountsActive.Inc()
 	metrics.CoordinatorMountRegistrations.WithLabelValues("success").Inc()
 
 	c.logger.WithFields(logrus.Fields{

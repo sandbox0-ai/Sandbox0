@@ -317,13 +317,14 @@ func TestDeleteSnapshot_VolumeNotMounted(t *testing.T) {
 func TestDeleteSnapshotDir_RemovesDir(t *testing.T) {
 	repo := newFakeRepo()
 	mgr := newTestManager(repo, nil)
-	metaClient := newFakeMeta()
+	// Use the mgr's metaClient (which is created in newTestManager)
+	metaClient := mgr.metaClient.(*fakeMeta)
 	p, err := naming.JuiceFSSnapshotPath("vol1", "snap1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	metaClient.ensurePath(p)
-	mgr.deleteSnapshotDir(context.Background(), metaClient, p)
+	mgr.deleteSnapshotDir(context.Background(), p)
 	if len(metaClient.removedPaths) != 1 || metaClient.removedPaths[0] != p {
 		t.Fatalf("snapshot dir not removed: %v", metaClient.removedPaths)
 	}
@@ -332,15 +333,14 @@ func TestDeleteSnapshotDir_RemovesDir(t *testing.T) {
 func TestEnsurePathExists_CreatesDirectories(t *testing.T) {
 	repo := newFakeRepo()
 	mgr := newTestManager(repo, nil)
-	metaClient := newFakeMeta()
 	parent, err := naming.JuiceFSSnapshotParentPath("vol1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := mgr.ensurePathExists(context.Background(), metaClient, parent); err != nil {
+	if _, err := mgr.ensurePathExists(context.Background(), parent); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, _, err := mgr.lookupPath(metaClient, parent); err != nil {
+	if _, _, err := mgr.lookupPath(parent); err != nil {
 		t.Fatalf("lookup failed: %v", err)
 	}
 }
