@@ -5,6 +5,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sandbox0-ai/infra/pkg/internalauth"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/naming"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
 	"github.com/sirupsen/logrus"
@@ -31,19 +33,15 @@ func NewFileSystemServer(volMgr *volume.Manager, logger *logrus.Logger) *FileSys
 	}
 }
 
-// // getAuditInfo extracts audit information from context claims
-// // In internalauth, UserID represents the sandbox ID making the request
-// func getAuditInfo(ctx context.Context) (sandboxID, teamID string) {
-// 	claims := internalauth.ClaimsFromContext(ctx)
-// 	if claims == nil {
-// 		return "", ""
-// 	}
-// 	// In storage-proxy context, UserID represents the SandboxID
-// 	return claims.UserID, claims.TeamID
-// }
-
 // MountVolume mounts a volume
 func (s *FileSystemServer) MountVolume(ctx context.Context, req *pb.MountVolumeRequest) (*pb.MountVolumeResponse, error) {
+	// Extract team ID from context for multi-tenant isolation
+	claims := internalauth.ClaimsFromContext(ctx)
+	if claims == nil || claims.TeamID == "" {
+		s.logger.WithField("volume_id", req.VolumeId).Error("TeamID not found in context")
+		return nil, status.Error(codes.Unauthenticated, "team id not found in context")
+	}
+
 	config := &volume.VolumeConfig{
 		CacheSize:  req.Config.CacheSize,
 		Prefetch:   int(req.Config.Prefetch),
@@ -52,13 +50,23 @@ func (s *FileSystemServer) MountVolume(ctx context.Context, req *pb.MountVolumeR
 		ReadOnly:   req.Config.ReadOnly,
 	}
 
-	// TODO build s3 prefix based on team/user
-	prefix := ""
-	err := s.volMgr.MountVolume(ctx, prefix, req.VolumeId, config)
+	// Build S3 prefix with team ID for multi-tenant isolation (object-store namespace).
+	prefix, err := naming.S3VolumePrefix(claims.TeamID, req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	err = s.volMgr.MountVolume(ctx, prefix, req.VolumeId, config)
 	if err != nil {
 		s.logger.WithError(err).WithField("volume_id", req.VolumeId).Error("Failed to mount volume")
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+
+	s.logger.WithFields(logrus.Fields{
+		"volume_id": req.VolumeId,
+		"team_id":   claims.TeamID,
+		"prefix":    prefix,
+	}).Info("Volume mounted with team prefix")
 
 	return &pb.MountVolumeResponse{
 		VolumeId:  req.VolumeId,

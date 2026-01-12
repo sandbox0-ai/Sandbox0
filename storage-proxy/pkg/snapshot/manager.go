@@ -17,6 +17,7 @@ import (
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/config"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/metrics"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/naming"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sirupsen/logrus"
 )
@@ -173,7 +174,10 @@ func (m *Manager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest
 		}
 
 		// 4. Look up the volume root directory
-		volumePath := fmt.Sprintf("/volumes/%s", req.VolumeID)
+		volumePath, err := naming.JuiceFSVolumePath(req.VolumeID)
+		if err != nil {
+			return err
+		}
 		parentIno, rootIno, err := m.lookupPath(volCtx.Meta, volumePath)
 		if err != nil {
 			return fmt.Errorf("lookup volume path: %w", err)
@@ -181,7 +185,10 @@ func (m *Manager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest
 
 		// 5. Ensure snapshot parent directory exists
 		snapshotID := uuid.New().String()
-		snapshotParentPath := fmt.Sprintf("/snapshots/%s", req.VolumeID)
+		snapshotParentPath, err := naming.JuiceFSSnapshotParentPath(req.VolumeID)
+		if err != nil {
+			return err
+		}
 
 		snapshotParentIno, err := m.ensurePathExists(ctx, volCtx.Meta, snapshotParentPath)
 		if err != nil {
@@ -205,7 +212,10 @@ func (m *Manager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest
 		}).Info("JuiceFS clone completed")
 
 		// 7. Look up the new snapshot inode
-		snapshotPath = fmt.Sprintf("/snapshots/%s/%s", req.VolumeID, snapshotID)
+		snapshotPath, err = naming.JuiceFSSnapshotPath(req.VolumeID, snapshotID)
+		if err != nil {
+			return err
+		}
 		_, snapshotIno, err := m.lookupPath(volCtx.Meta, snapshotPath)
 		if err != nil {
 			// Cleanup on error
@@ -361,7 +371,10 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 	}
 
 	// 5. Look up paths
-	volumePath := fmt.Sprintf("/volumes/%s", req.VolumeID)
+	volumePath, err := naming.JuiceFSVolumePath(req.VolumeID)
+	if err != nil {
+		return err
+	}
 	parentIno, rootIno, err := m.lookupPath(volCtx.Meta, volumePath)
 	if err != nil {
 		return fmt.Errorf("lookup volume path: %w", err)
@@ -383,7 +396,13 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 
 	// 7. Clone snapshot to volume location
 	var cloneCount, cloneTotal uint64
-	snapshotParentIno, snapshotIno, err := m.lookupPath(volCtx.Meta, fmt.Sprintf("/snapshots/%s/%s", req.VolumeID, req.SnapshotID))
+	snapshotPath, err := naming.JuiceFSSnapshotPath(req.VolumeID, req.SnapshotID)
+	if err != nil {
+		// Rollback: restore the backup
+		volCtx.Meta.Rename(jfsCtx, parentIno, tempName, parentIno, volumeName, 0, &renamedIno, &renamedAttr)
+		return err
+	}
+	snapshotParentIno, snapshotIno, err := m.lookupPath(volCtx.Meta, snapshotPath)
 	if err != nil {
 		// Rollback: restore the backup
 		m.logger.WithError(err).Error("Failed to lookup snapshot path, rolling back")
@@ -401,7 +420,8 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 
 	// 8. Delete the backup
 	var removeCount uint64
-	tempIno, _, _ := m.lookupPath(volCtx.Meta, fmt.Sprintf("/volumes/%s", tempName))
+	tempPath, _ := naming.JuiceFSVolumePath(tempName)
+	tempIno, _, _ := m.lookupPath(volCtx.Meta, tempPath)
 	if tempIno > 0 {
 		errno = volCtx.Meta.Remove(jfsCtx, parentIno, tempName, true, 4, &removeCount)
 		if errno != 0 {
@@ -483,8 +503,12 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, volumeID, snapshotID, team
 	if err != nil {
 		m.logger.WithError(err).Warn("Volume not mounted, skipping JuiceFS cleanup")
 	} else {
-		snapshotPath := fmt.Sprintf("/snapshots/%s/%s", volumeID, snapshotID)
-		m.deleteSnapshotDir(ctx, volCtx.Meta, snapshotPath)
+		snapshotPath, err := naming.JuiceFSSnapshotPath(volumeID, snapshotID)
+		if err != nil {
+			m.logger.WithError(err).Warn("Invalid snapshot path, skipping JuiceFS cleanup")
+		} else {
+			m.deleteSnapshotDir(ctx, volCtx.Meta, snapshotPath)
+		}
 	}
 
 	// Record success metrics

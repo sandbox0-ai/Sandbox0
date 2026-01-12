@@ -14,6 +14,7 @@ import (
 	"github.com/juicedata/juicefs/pkg/meta"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/config"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/naming"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sirupsen/logrus"
 )
@@ -315,9 +316,13 @@ func TestDeleteSnapshotDir_RemovesDir(t *testing.T) {
 	repo := newFakeRepo()
 	mgr := newTestManager(repo, nil)
 	metaClient := newFakeMeta()
-	metaClient.ensurePath("/snapshots/vol1/snap1")
-	mgr.deleteSnapshotDir(context.Background(), metaClient, "/snapshots/vol1/snap1")
-	if len(metaClient.removedPaths) != 1 || metaClient.removedPaths[0] != "/snapshots/vol1/snap1" {
+	p, err := naming.JuiceFSSnapshotPath("vol1", "snap1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	metaClient.ensurePath(p)
+	mgr.deleteSnapshotDir(context.Background(), metaClient, p)
+	if len(metaClient.removedPaths) != 1 || metaClient.removedPaths[0] != p {
 		t.Fatalf("snapshot dir not removed: %v", metaClient.removedPaths)
 	}
 }
@@ -326,10 +331,14 @@ func TestEnsurePathExists_CreatesDirectories(t *testing.T) {
 	repo := newFakeRepo()
 	mgr := newTestManager(repo, nil)
 	metaClient := newFakeMeta()
-	if _, err := mgr.ensurePathExists(context.Background(), metaClient, "/snapshots/vol1"); err != nil {
+	parent, err := naming.JuiceFSSnapshotParentPath("vol1")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, _, err := mgr.lookupPath(metaClient, "/snapshots/vol1"); err != nil {
+	if _, err := mgr.ensurePathExists(context.Background(), metaClient, parent); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, _, err := mgr.lookupPath(metaClient, parent); err != nil {
 		t.Fatalf("lookup failed: %v", err)
 	}
 }
