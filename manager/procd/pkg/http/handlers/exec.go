@@ -42,15 +42,17 @@ type ExecRequest struct {
 	Timeout  int               `json:"timeout"` // Timeout in seconds, 0 means no timeout
 	PTYSize  *process.PTYSize  `json:"pty_size"`
 	OnExit   *ExecRequest      `json:"on_exit"` // Callback to execute after completion
+	Wait     bool              `json:"wait"`    // If true, wait for on_exit to complete (sync mode)
 }
 
 // ExecResponse is the response for synchronous execution.
 type ExecResponse struct {
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	ExitCode   int    `json:"exit_code"`
-	DurationMs int64  `json:"duration_ms"`
-	Error      string `json:"error,omitempty"`
+	Stdout       string        `json:"stdout"`
+	Stderr       string        `json:"stderr"`
+	ExitCode     int           `json:"exit_code"`
+	DurationMs   int64         `json:"duration_ms"`
+	Error        string        `json:"error,omitempty"`
+	OnExitResult *ExecResponse `json:"on_exit_result,omitempty"` // Result of on_exit if wait=true
 }
 
 // StreamEvent represents a Server-Sent Event.
@@ -98,9 +100,16 @@ func (h *ExecHandler) Exec(w http.ResponseWriter, r *http.Request) {
 
 	result.DurationMs = time.Since(startTime).Milliseconds()
 
-	// Handle on_exit callback (asynchronously)
+	// Handle on_exit callback
 	if req.OnExit != nil && result.Error == "" {
-		go h.executeOnExit(req.OnExit)
+		if req.OnExit.Wait {
+			// Synchronous: wait for on_exit to complete and include result
+			onExitResult := h.executeOnExitSync(req.OnExit)
+			result.OnExitResult = &onExitResult
+		} else {
+			// Asynchronous: fire and forget
+			go h.executeOnExitAsync(req.OnExit)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -166,9 +175,21 @@ func (h *ExecHandler) ExecStream(w http.ResponseWriter, r *http.Request) {
 	// Just add duration info
 	_ = durationMs
 
-	// Handle on_exit callback (asynchronously)
+	// Handle on_exit callback
 	if req.OnExit != nil {
-		go h.executeOnExit(req.OnExit)
+		if req.OnExit.Wait {
+			// Synchronous: execute on_exit and stream its output too
+			sendEvent("on_exit_start", map[string]bool{"wait": true})
+			if req.OnExit.Type == "repl" || req.OnExit.Type == "" {
+				h.execREPLStream(ctx, req.OnExit, sendEvent)
+			} else {
+				h.execCMDStream(ctx, req.OnExit, sendEvent)
+			}
+			sendEvent("on_exit_end", map[string]bool{"completed": true})
+		} else {
+			// Asynchronous: fire and forget
+			go h.executeOnExitAsync(req.OnExit)
+		}
 	}
 }
 
@@ -635,14 +656,65 @@ func (h *ExecHandler) getInterpreter(language string) (string, []string) {
 	}
 }
 
-// executeOnExit executes the on_exit callback asynchronously.
-func (h *ExecHandler) executeOnExit(req *ExecRequest) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+// executeOnExitSync executes the on_exit callback synchronously and returns the result.
+func (h *ExecHandler) executeOnExitSync(req *ExecRequest) ExecResponse {
+	startTime := time.Now()
+
+	// Use the timeout from the on_exit request, or default to 5 minutes
+	timeout := time.Duration(req.Timeout) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	var result ExecResponse
 	if req.Type == "repl" || req.Type == "" {
-		h.execREPL(ctx, req)
+		result = h.execREPL(ctx, req)
 	} else {
-		h.execCMD(ctx, req)
+		result = h.execCMD(ctx, req)
+	}
+
+	result.DurationMs = time.Since(startTime).Milliseconds()
+
+	// Handle nested on_exit (recursive)
+	if req.OnExit != nil && result.Error == "" {
+		if req.OnExit.Wait {
+			onExitResult := h.executeOnExitSync(req.OnExit)
+			result.OnExitResult = &onExitResult
+		} else {
+			go h.executeOnExitAsync(req.OnExit)
+		}
+	}
+
+	return result
+}
+
+// executeOnExitAsync executes the on_exit callback asynchronously (fire and forget).
+func (h *ExecHandler) executeOnExitAsync(req *ExecRequest) {
+	// Use the timeout from the on_exit request, or default to 5 minutes
+	timeout := time.Duration(req.Timeout) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	var result ExecResponse
+	if req.Type == "repl" || req.Type == "" {
+		result = h.execREPL(ctx, req)
+	} else {
+		result = h.execCMD(ctx, req)
+	}
+
+	// Handle nested on_exit (recursive)
+	if req.OnExit != nil && result.Error == "" {
+		if req.OnExit.Wait {
+			h.executeOnExitSync(req.OnExit)
+		} else {
+			go h.executeOnExitAsync(req.OnExit)
+		}
 	}
 }
