@@ -134,28 +134,34 @@ func (s *Server) setupRoutes() {
 			sandboxes.POST("/:id/resume", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.resumeSandbox)
 			sandboxes.POST("/:id/refresh", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.refreshSandbox)
 
-			// === Network Policy (→ Manager) ===
+			// === Network/Bandwidth Policy (→ Manager) ===
 			sandboxes.GET("/:id/network", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.getNetworkPolicy)
 			sandboxes.PATCH("/:id/network", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.updateNetworkPolicy)
-
-			// === Bandwidth Policy (→ Manager) ===
 			sandboxes.GET("/:id/bandwidth", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.getBandwidthPolicy)
 			sandboxes.PATCH("/:id/bandwidth", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.updateBandwidthPolicy)
 
 			// === Process Execution (→ Procd) ===
-			sandboxes.POST("/:id/exec", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.exec)
+			sandboxes.POST("/:id/exec", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.exec) // sync mode
 			sandboxes.POST("/:id/exec/stream", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.execStream)
 
 			// === Process/Context Management (→ Procd) ===
 			contexts := sandboxes.Group("/:id/contexts")
 			{
-				contexts.POST("", s.createContext)
+				contexts.POST("", s.createContext) // async mode
 				contexts.GET("", s.listContexts)
 				contexts.GET("/:ctx_id", s.getContext)
 				contexts.DELETE("/:ctx_id", s.deleteContext)
 				contexts.POST("/:ctx_id/restart", s.restartContext)
 				contexts.POST("/:ctx_id/execute", s.executeInContext)
 				contexts.GET("/:ctx_id/ws", s.contextWebSocket)
+			}
+
+			// === SandboxVolume Management (→ Procd) ===
+			sandboxvolumes := sandboxes.Group("/:id/sandboxvolumes")
+			{
+				sandboxvolumes.POST("/mount", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.mountSandboxVolume)
+				sandboxvolumes.POST("/unmount", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.unmountSandboxVolume)
+				sandboxvolumes.GET("", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.getSandboxVolumeStatus)
 			}
 
 			// === File System (→ Procd) ===

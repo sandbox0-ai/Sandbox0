@@ -127,3 +127,56 @@ func (s *Server) refreshSandbox(c *gin.Context) {
 
 	s.proxyToManager(c)
 }
+
+// === Sandbox Volume Mount Handlers (→ Procd) ===
+
+// mountSandboxVolume mounts a volume in the sandbox
+func (s *Server) mountSandboxVolume(c *gin.Context) {
+	sandboxID := c.Param("id")
+	if sandboxID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		return
+	}
+
+	procdURL, err := s.getProcdURL(c, sandboxID)
+	if err != nil {
+		return
+	}
+
+	c.Request.URL.Path = "/api/v1/sandboxvolumes/mount"
+	s.proxyToProcd(c, procdURL)
+}
+
+// unmountSandboxVolume unmounts a volume from the sandbox
+func (s *Server) unmountSandboxVolume(c *gin.Context) {
+	sandboxID := c.Param("id")
+	if sandboxID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		return
+	}
+
+	procdURL, err := s.getProcdURL(c, sandboxID)
+	if err != nil {
+		return
+	}
+
+	c.Request.URL.Path = "/api/v1/sandboxvolumes/unmount"
+	s.proxyToProcd(c, procdURL)
+}
+
+// getSandboxVolumeStatus gets the status of mounted volumes
+func (s *Server) getSandboxVolumeStatus(c *gin.Context) {
+	sandboxID := c.Param("id")
+	if sandboxID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		return
+	}
+
+	procdURL, err := s.getProcdURL(c, sandboxID)
+	if err != nil {
+		return
+	}
+
+	c.Request.URL.Path = "/api/v1/sandboxvolumes/status"
+	s.proxyToProcd(c, procdURL)
+}
