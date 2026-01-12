@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestSanitizePath tests path resolution.
@@ -438,5 +439,576 @@ func TestGetRootPath(t *testing.T) {
 
 	if m.GetRootPath() != tempDir {
 		t.Errorf("GetRootPath() = %s, want %s", m.GetRootPath(), tempDir)
+	}
+}
+
+// TestMoveFile tests file and directory move operations.
+func TestMoveFile(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	tests := []struct {
+		name    string
+		src     string
+		dst     string
+		setup   func() error
+		verify  func() error
+		wantErr bool
+	}{
+		{
+			name: "move file to new name",
+			src:  "file1.txt",
+			dst:  "file2.txt",
+			setup: func() error {
+				return m.WriteFile("file1.txt", []byte("content"), 0644)
+			},
+			verify: func() error {
+				data, err := m.ReadFile("file2.txt")
+				if err != nil {
+					return err
+				}
+				if string(data) != "content" {
+					t.Errorf("content = %s, want content", string(data))
+				}
+				// Source should be gone
+				_, err = m.ReadFile("file1.txt")
+				if err == nil {
+					t.Error("source file still exists")
+				}
+				return nil
+			},
+			wantErr: false,
+		},
+		{
+			name: "move file to subdirectory",
+			src:  "file.txt",
+			dst:  "subdir/file.txt",
+			setup: func() error {
+				return m.WriteFile("file.txt", []byte("content"), 0644)
+			},
+			verify: func() error {
+				data, err := m.ReadFile("subdir/file.txt")
+				if err != nil {
+					return err
+				}
+				if string(data) != "content" {
+					t.Errorf("content = %s, want content", string(data))
+				}
+				return nil
+			},
+			wantErr: false,
+		},
+		{
+			name:    "move non-existent file",
+			src:     "nonexistent.txt",
+			dst:     "dst.txt",
+			setup:   func() error { return nil },
+			verify:  func() error { return nil },
+			wantErr: true,
+		},
+		{
+			name: "move directory",
+			src:  "dir1",
+			dst:  "dir2",
+			setup: func() error {
+				return m.MakeDir("dir1", 0755, true)
+			},
+			verify: func() error {
+				info, err := m.Stat("dir2")
+				if err != nil {
+					return err
+				}
+				if info.Type != FileTypeDir {
+					t.Errorf("Type = %s, want dir", info.Type)
+				}
+				return nil
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clean up from previous test
+			os.RemoveAll(tempDir)
+			os.MkdirAll(tempDir, 0755)
+
+			if err := tt.setup(); err != nil {
+				t.Fatalf("setup() failed = %v", err)
+			}
+
+			err := m.Move(tt.src, tt.dst)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Move() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if err == nil && tt.verify != nil {
+				if err := tt.verify(); err != nil {
+					t.Errorf("verify() failed = %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestRemove tests file and directory removal.
+func TestRemove(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	tests := []struct {
+		name    string
+		path    string
+		setup   func() error
+		wantErr bool
+	}{
+		{
+			name: "remove file",
+			path: "file.txt",
+			setup: func() error {
+				return m.WriteFile("file.txt", []byte("content"), 0644)
+			},
+			wantErr: false,
+		},
+		{
+			name: "remove directory",
+			path: "dir",
+			setup: func() error {
+				m.WriteFile("dir/file1.txt", []byte("content1"), 0644)
+				m.WriteFile("dir/file2.txt", []byte("content2"), 0644)
+				return nil
+			},
+			wantErr: false,
+		},
+		{
+			name: "remove nested directory",
+			path: "parent/child",
+			setup: func() error {
+				return m.MakeDir("parent/child", 0755, true)
+			},
+			wantErr: false,
+		},
+		{
+			name:    "remove non-existent path",
+			path:    "nonexistent",
+			setup:   func() error { return nil },
+			wantErr: false, // RemoveAll doesn't error on non-existent
+		},
+		{
+			name: "remove directory with special characters",
+			path: "dir with spaces",
+			setup: func() error {
+				return m.WriteFile("dir with spaces/file.txt", []byte("content"), 0644)
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clean up from previous test
+			os.RemoveAll(tempDir)
+			os.MkdirAll(tempDir, 0755)
+
+			if err := tt.setup(); err != nil {
+				t.Fatalf("setup() failed = %v", err)
+			}
+
+			err := m.Remove(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Remove() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			// Verify the path is gone
+			_, err = m.Stat(tt.path)
+			if err == nil {
+				t.Error("Remove() path still exists")
+			}
+		})
+	}
+}
+
+// TestReadFileNotFound tests reading a non-existent file.
+func TestReadFileNotFound(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	_, err = m.ReadFile("nonexistent.txt")
+	if err != ErrFileNotFound {
+		t.Errorf("ReadFile() error = %v, want %v", err, ErrFileNotFound)
+	}
+}
+
+// TestStatNotFound tests stating a non-existent file.
+func TestStatNotFound(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	_, err = m.Stat("nonexistent.txt")
+	if err != ErrFileNotFound {
+		t.Errorf("Stat() error = %v, want %v", err, ErrFileNotFound)
+	}
+}
+
+// TestListDirNotFound tests listing a non-existent directory.
+func TestListDirNotFound(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	_, err = m.ListDir("nonexistent")
+	if err != ErrDirNotFound {
+		t.Errorf("ListDir() error = %v, want %v", err, ErrDirNotFound)
+	}
+}
+
+// TestConcurrentFileOperations tests concurrent file operations.
+func TestConcurrentFileOperations(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	const numGoroutines = 50
+	const numOps = 20
+
+	done := make(chan struct{})
+
+	// Concurrent writes
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			for j := 0; j < numOps; j++ {
+				select {
+				case <-done:
+					return
+				default:
+					filename := string(rune('a'+idx%26)) + ".txt"
+					m.WriteFile(filename, []byte("data"), 0644)
+				}
+			}
+		}(i)
+	}
+
+	// Concurrent reads
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			for j := 0; j < numOps; j++ {
+				select {
+				case <-done:
+					return
+				default:
+					filename := string(rune('a'+idx%26)) + ".txt"
+					m.ReadFile(filename)
+					m.Stat(filename)
+				}
+			}
+		}(i)
+	}
+
+	// Concurrent listings
+	for i := 0; i < numGoroutines/2; i++ {
+		go func() {
+			for j := 0; j < numOps; j++ {
+				select {
+				case <-done:
+					return
+				default:
+					m.ListDir(".")
+				}
+			}
+		}()
+	}
+
+	// Let it run
+	time.Sleep(100 * time.Millisecond)
+	close(done)
+
+	// Verify manager is still functional
+	files, err := m.ListDir(".")
+	if err != nil {
+		t.Errorf("ListDir() after concurrent ops failed = %v", err)
+	}
+	_ = files // Just verify it doesn't panic
+}
+
+// TestWriteFileInSubdirectory tests writing to a nested path.
+func TestWriteFileInSubdirectory(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	// Write to nested path - should create parent directories
+	err = m.WriteFile("parent/child/grandchild/file.txt", []byte("nested content"), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile() failed = %v", err)
+	}
+
+	// Verify file exists
+	data, err := m.ReadFile("parent/child/grandchild/file.txt")
+	if err != nil {
+		t.Fatalf("ReadFile() failed = %v", err)
+	}
+	if string(data) != "nested content" {
+		t.Errorf("content = %s, want nested content", string(data))
+	}
+
+	// Verify intermediate directories exist
+	for _, path := range []string{"parent", "parent/child", "parent/child/grandchild"} {
+		info, err := m.Stat(path)
+		if err != nil {
+			t.Errorf("Stat(%s) failed = %v", path, err)
+		}
+		if info.Type != FileTypeDir {
+			t.Errorf("Stat(%s) Type = %s, want dir", path, info.Type)
+		}
+	}
+}
+
+// TestStatFileModes tests that file modes are correctly reported.
+func TestStatFileModes(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	tests := []struct {
+		name    string
+		perm    os.FileMode
+		wantMode string
+	}{
+		{
+			name:     "0644 file",
+			perm:     0644,
+			wantMode: "0644",
+		},
+		{
+			name:     "0755 file",
+			perm:     0755,
+			wantMode: "0755",
+		},
+		{
+			name:     "0600 file",
+			perm:     0600,
+			wantMode: "0600",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filename := "test.txt"
+			err := m.WriteFile(filename, []byte("content"), tt.perm)
+			if err != nil {
+				t.Fatalf("WriteFile() failed = %v", err)
+			}
+
+			info, err := m.Stat(filename)
+			if err != nil {
+				t.Fatalf("Stat() failed = %v", err)
+			}
+
+			if info.Mode != tt.wantMode {
+				t.Errorf("Stat() Mode = %s, want %s", info.Mode, tt.wantMode)
+			}
+		})
+	}
+}
+
+// TestFileInfoFields tests FileInfo field values.
+func TestFileInfoFields(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "test-file-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	m, err := NewManager(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	// Test file
+	err = m.WriteFile("test.txt", []byte("hello"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := m.Stat("test.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.Name != "test.txt" {
+		t.Errorf("Name = %s, want test.txt", info.Name)
+	}
+
+	if info.Path != "test.txt" {
+		t.Errorf("Path = %s, want test.txt", info.Path)
+	}
+
+	if info.Type != FileTypeFile {
+		t.Errorf("Type = %s, want %s", info.Type, FileTypeFile)
+	}
+
+	if info.Size != 5 {
+		t.Errorf("Size = %d, want 5", info.Size)
+	}
+
+	if info.ModTime.IsZero() {
+		t.Error("ModTime is zero")
+	}
+
+	if info.IsLink {
+		t.Error("IsLink = true, want false")
+	}
+
+	// Test directory
+	err = m.MakeDir("testdir", 0755, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dirInfo, err := m.Stat("testdir")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if dirInfo.Type != FileTypeDir {
+		t.Errorf("Type = %s, want %s", dirInfo.Type, FileTypeDir)
+	}
+}
+
+// TestErrorDefinitions tests that error variables are properly defined.
+func TestErrorDefinitions(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		want  string
+	}{
+		{
+			name: "ErrFileNotFound",
+			err:  ErrFileNotFound,
+			want: "file not found",
+		},
+		{
+			name: "ErrDirNotFound",
+			err:  ErrDirNotFound,
+			want: "directory not found",
+		},
+		{
+			name: "ErrFileTooLarge",
+			err:  ErrFileTooLarge,
+			want: "file too large",
+		},
+		{
+			name: "ErrPermissionDenied",
+			err:  ErrPermissionDenied,
+			want: "permission denied",
+		},
+		{
+			name: "ErrWatcherNotFound",
+			err:  ErrWatcherNotFound,
+			want: "watcher not found",
+		},
+		{
+			name: "ErrWatcherClosed",
+			err:  ErrWatcherClosed,
+			want: "watcher manager closed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.err == nil {
+				t.Fatal("Error variable is nil")
+			}
+			if tt.err.Error() != tt.want {
+				t.Errorf("Error() = %s, want %s", tt.err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+// TestFileTypeValues tests FileType constant values.
+func TestFileTypeValues(t *testing.T) {
+	tests := []struct {
+		value    FileType
+		expected string
+	}{
+		{FileTypeFile, "file"},
+		{FileTypeDir, "dir"},
+		{FileTypeSymlink, "symlink"},
+	}
+
+	for _, tt := range tests {
+		if string(tt.value) != tt.expected {
+			t.Errorf("FileType = %s, want %s", tt.value, tt.expected)
+		}
 	}
 }

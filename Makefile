@@ -40,6 +40,27 @@ build:
 		exit 1; \
 	fi
 
+test:
+	@service="$(filter-out build build-all obuild obuild-all test lint tidy vendor clean,$(MAKECMDGOALS))"; \
+	if [ -z "$$service" ]; then \
+		echo "Available services: $(SERVICES)"; \
+		echo "Usage: make test <service>"; \
+		exit 1; \
+	elif echo "$(SERVICES)" | grep -qw "$$service"; then \
+		echo "Testing $$service..."; \
+		if [ -f "$$service/Makefile" ]; then \
+			$(MAKE) -C $$service test; \
+		elif [ -d "$$service/cmd" ]; then \
+			@GOTOOLCHAIN=go1.25.0+auto go test -v -race -cover ./$$service/cmd/...; \
+		elif [ -f "$$service/main.go" ]; then \
+			@GOTOOLCHAIN=go1.25.0+auto go test -v -race -cover ./$$service/; \
+		fi; \
+	else \
+		echo "Error: Unknown service '$$service'"; \
+		echo "Available services: $(SERVICES)"; \
+		exit 1; \
+	fi
+
 # Direct go build specific service: make obuild <service> (no Makefile delegation)
 obuild:
 	@service="$(filter-out build build-all obuild test lint tidy vendor clean,$(MAKECMDGOALS))"; \
@@ -68,9 +89,6 @@ obuild:
 # Prevent make from treating service names as targets
 internal-gateway manager storage-proxy k8s-plugin:
 	@:
-
-test:
-	go test -v ./...
 
 lint:
 	golangci-lint run ./...

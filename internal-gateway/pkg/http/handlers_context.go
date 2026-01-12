@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 
@@ -190,7 +191,10 @@ func (s *Server) getProcdURL(c *gin.Context, sandboxID string) (*url.URL, error)
 		return nil, err
 	}
 
-	// Team ownership is already verified by manager
+	if sandbox.TeamID != authCtx.TeamID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "sandbox belongs to a different team"})
+		return nil, errors.New("sandbox belongs to a different team")
+	}
 
 	// Parse procd address
 	procdURL, err := url.Parse(sandbox.ProcdAddress)
