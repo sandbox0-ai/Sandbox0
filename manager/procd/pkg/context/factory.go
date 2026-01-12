@@ -9,7 +9,7 @@ import (
 )
 
 // createREPLProcess creates a REPL process based on language.
-// Now supports Python, Node.js, Bash, and Zsh.
+// Now supports Python, Node.js, Bash, Zsh, Ruby, Lua, PHP, R, and Perl.
 func createREPLProcess(ctxID string, config process.ProcessConfig) (process.Process, error) {
 	procID := ctxID + "-proc"
 	lang := config.Language
@@ -26,6 +26,16 @@ func createREPLProcess(ctxID string, config process.ProcessConfig) (process.Proc
 		return repl.NewBashREPL(procID, config)
 	case "zsh":
 		return repl.NewZshREPL(procID, config)
+	case "ruby", "rb":
+		return repl.NewRubyREPL(procID, config)
+	case "lua":
+		return repl.NewLuaREPL(procID, config)
+	case "php":
+		return repl.NewPHPREPL(procID, config)
+	case "r", "R":
+		return repl.NewRREPL(procID, config)
+	case "perl", "pl":
+		return repl.NewPerlREPL(procID, config)
 	default:
 		return nil, fmt.Errorf("%w: %s", process.ErrUnsupportedLanguage, lang)
 	}

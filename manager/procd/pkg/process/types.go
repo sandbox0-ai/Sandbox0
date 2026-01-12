@@ -13,7 +13,7 @@ import (
 type ProcessType string
 
 const (
-	// ProcessTypeREPL represents a REPL process (Python, Node, Bash, Zsh, etc.)
+	// ProcessTypeREPL represents a REPL process (Python, Node, Bash, Zsh, Ruby, Lua, PHP, R, Perl, etc.)
 	ProcessTypeREPL ProcessType = "repl"
 	// ProcessTypeCMD represents a one-time command execution (e.g., /bin/ls, /bin/cat)
 	ProcessTypeCMD ProcessType = "cmd"
@@ -50,7 +50,7 @@ type PTYSize struct {
 // ProcessConfig holds configuration for creating a process.
 type ProcessConfig struct {
 	Type        ProcessType       `json:"type"`
-	Language    string            `json:"language"` // For REPL: python, node, bash, zsh, etc.
+	Language    string            `json:"language"` // For REPL: python, node, bash, zsh, ruby, lua, php, r, perl, etc.
 	Command     []string          `json:"command"`  // For CMD: command path and arguments, e.g., ["/bin/ls", "-la"]
 	CWD         string            `json:"cwd"`
 	EnvVars     map[string]string `json:"env_vars"`

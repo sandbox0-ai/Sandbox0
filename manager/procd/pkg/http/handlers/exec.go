@@ -34,7 +34,7 @@ func NewExecHandler(logger *zap.Logger) *ExecHandler {
 // ExecRequest is the request body for executing a command.
 type ExecRequest struct {
 	Type     string            `json:"type"`     // "repl" or "cmd"
-	Language string            `json:"language"` // For REPL: python, node, bash, zsh
+	Language string            `json:"language"` // For REPL: python, node, bash, zsh, ruby, lua, php, r, perl
 	Command  []string          `json:"command"`  // For CMD: command and args
 	Code     string            `json:"code"`     // For REPL: code to execute
 	CWD      string            `json:"cwd"`
@@ -651,6 +651,37 @@ func (h *ExecHandler) getInterpreter(language string) (string, []string) {
 		return "/bin/zsh", []string{}
 	case "sh":
 		return "/bin/sh", []string{}
+	case "ruby", "rb":
+		if path, err := exec.LookPath("ruby"); err == nil {
+			return path, []string{}
+		}
+		return "", nil
+	case "lua":
+		// Try lua variants
+		for _, variant := range []string{"lua", "lua5.4", "lua5.3", "lua5.2", "lua5.1", "luajit"} {
+			if path, err := exec.LookPath(variant); err == nil {
+				return path, []string{}
+			}
+		}
+		return "", nil
+	case "php":
+		if path, err := exec.LookPath("php"); err == nil {
+			return path, []string{}
+		}
+		return "", nil
+	case "r", "R":
+		if path, err := exec.LookPath("Rscript"); err == nil {
+			return path, []string{"--vanilla"}
+		}
+		if path, err := exec.LookPath("R"); err == nil {
+			return path, []string{"--quiet", "--no-save"}
+		}
+		return "", nil
+	case "perl", "pl":
+		if path, err := exec.LookPath("perl"); err == nil {
+			return path, []string{}
+		}
+		return "", nil
 	default:
 		return "", nil
 	}
