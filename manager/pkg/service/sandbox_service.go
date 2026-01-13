@@ -54,8 +54,23 @@ type SandboxService struct {
 	procdClient                 *ProcdClient
 	internalTokenGenerator      TokenGenerator
 	procdTokenGenerator         TokenGenerator
+	clock                       TimeProvider
 	logger                      *zap.Logger
 }
+
+// TimeProvider provides time functions, allowing for synchronized time across clusters
+type TimeProvider interface {
+	Now() time.Time
+	Since(t time.Time) time.Duration
+	Until(t time.Time) time.Duration
+}
+
+// systemTime is the default implementation using system time
+type systemTime struct{}
+
+func (systemTime) Now() time.Time                  { return time.Now() }
+func (systemTime) Since(t time.Time) time.Duration { return time.Since(t) }
+func (systemTime) Until(t time.Time) time.Duration { return time.Until(t) }
 
 // TokenGenerator generates internal tokens for procd authentication.
 type TokenGenerator interface {
@@ -70,8 +85,14 @@ func NewSandboxService(
 	SandboxNetworkPolicyService *SandboxNetworkPolicyService,
 	internalTokenGenerator TokenGenerator,
 	procdTokenGenerator TokenGenerator,
+	clock TimeProvider,
 	logger *zap.Logger,
 ) *SandboxService {
+	// Use system time as fallback if clock is nil
+	if clock == nil {
+		clock = systemTime{}
+	}
+
 	return &SandboxService{
 		k8sClient:                   k8sClient,
 		podLister:                   podLister,
@@ -80,6 +101,7 @@ func NewSandboxService(
 		procdClient:                 NewProcdClient(),
 		internalTokenGenerator:      internalTokenGenerator,
 		procdTokenGenerator:         procdTokenGenerator,
+		clock:                       clock,
 		logger:                      logger,
 	}
 }
@@ -272,7 +294,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	}
 	pod.Annotations[controller.AnnotationTeamID] = req.TeamID
 	pod.Annotations[controller.AnnotationUserID] = req.UserID
-	pod.Annotations[controller.AnnotationClaimedAt] = time.Now().Format(time.RFC3339)
+	pod.Annotations[controller.AnnotationClaimedAt] = s.clock.Now().Format(time.RFC3339)
 	pod.Annotations[controller.AnnotationClaimType] = "hot"
 
 	// Set expiration time
@@ -280,7 +302,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	if req.Config != nil && req.Config.TTL > 0 {
 		ttl = req.Config.TTL
 	}
-	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
+	expiresAt := s.clock.Now().Add(time.Duration(ttl) * time.Second)
 	pod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
 
 	// Serialize config
@@ -326,7 +348,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 			Annotations: map[string]string{
 				controller.AnnotationTeamID:    req.TeamID,
 				controller.AnnotationUserID:    req.UserID,
-				controller.AnnotationClaimedAt: time.Now().Format(time.RFC3339),
+				controller.AnnotationClaimedAt: s.clock.Now().Format(time.RFC3339),
 				controller.AnnotationClaimType: "cold",
 			},
 		},
@@ -338,7 +360,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 	if req.Config != nil && req.Config.TTL > 0 {
 		ttl = req.Config.TTL
 	}
-	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
+	expiresAt := s.clock.Now().Add(time.Duration(ttl) * time.Second)
 	pod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
 
 	// Serialize config
@@ -653,7 +675,7 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 		podCopy.Annotations = make(map[string]string)
 	}
 	podCopy.Annotations[controller.AnnotationPaused] = "true"
-	podCopy.Annotations[controller.AnnotationPausedAt] = time.Now().Format(time.RFC3339)
+	podCopy.Annotations[controller.AnnotationPausedAt] = s.clock.Now().Format(time.RFC3339)
 	podCopy.Annotations[controller.AnnotationPausedState] = string(pausedStateJSON)
 	// Remove expires-at annotation to stop TTL countdown during pause
 	delete(podCopy.Annotations, controller.AnnotationExpiresAt)
@@ -759,7 +781,7 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 
 			// Restore TTL by setting new expires-at based on remaining TTL
 			if pausedState.RemainingTTL > 0 {
-				newExpiresAt := time.Now().Add(time.Duration(pausedState.RemainingTTL))
+				newExpiresAt := s.clock.Now().Add(time.Duration(pausedState.RemainingTTL))
 				podCopy.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
 			}
 
@@ -892,7 +914,7 @@ func (s *SandboxService) RefreshSandbox(ctx context.Context, sandboxID string, r
 	}
 
 	// Calculate new expiration time
-	newExpiresAt := time.Now().Add(ttlDuration)
+	newExpiresAt := s.clock.Now().Add(ttlDuration)
 
 	// Update pod annotation
 	podCopy := pod.DeepCopy()

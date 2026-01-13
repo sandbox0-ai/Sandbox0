@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"github.com/sandbox0-ai/infra/manager/pkg/config"
@@ -17,6 +18,7 @@ import (
 	httpserver "github.com/sandbox0-ai/infra/manager/pkg/http"
 	"github.com/sandbox0-ai/infra/manager/pkg/service"
 	"github.com/sandbox0-ai/infra/manager/pkg/webhook"
+	"github.com/sandbox0-ai/infra/pkg/clock"
 	"github.com/sandbox0-ai/infra/pkg/env"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
@@ -73,6 +75,33 @@ func main() {
 	crdClient, err := clientset.NewForConfig(k8sConfig)
 	if err != nil {
 		logger.Fatal("Failed to create CRD clientset", zap.Error(err))
+	}
+
+	// Initialize database and clock if DATABASE_URL is provided
+	var clk *clock.Clock
+	if cfg.DatabaseURL != "" {
+		pool, err := initDatabase(ctx, cfg.DatabaseURL, logger)
+		if err != nil {
+			logger.Fatal("Failed to connect to database", zap.Error(err))
+		}
+		defer pool.Close()
+
+		// Initialize clock for cross-cluster time synchronization
+		clk, err = clock.New(ctx, &pgxPoolAdapter{pool: pool},
+			clock.WithSyncInterval(30*time.Second),
+			clock.WithLogger(&zapClockLogger{logger: logger}),
+		)
+		if err != nil {
+			logger.Fatal("Failed to initialize clock", zap.Error(err))
+		}
+		defer clk.Close()
+
+		logger.Info("Clock initialized for cross-cluster time synchronization",
+			zap.Int64("offset_ms", clk.Offset().Milliseconds()),
+			zap.Int64("rtt_ms", clk.LastRTT().Milliseconds()),
+		)
+	} else {
+		logger.Warn("DATABASE_URL not set, using local time (may cause cross-cluster inconsistencies)")
 	}
 
 	// Create informers
@@ -145,6 +174,7 @@ func main() {
 		networkPolicyService,
 		internalTokenGenerator,
 		procdTokenGenerator,
+		clk,
 		logger,
 	)
 
@@ -160,6 +190,7 @@ func main() {
 		podLister,
 		operator.GetTemplateLister(),
 		recorder,
+		clk,
 		logger,
 		cfg.CleanupInterval,
 	)
@@ -306,4 +337,87 @@ func startMetricsServer(port int, logger *zap.Logger) {
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		logger.Error("Metrics server failed", zap.Error(err))
 	}
+}
+
+// initDatabase initializes the database connection pool
+func initDatabase(ctx context.Context, databaseURL string, logger *zap.Logger) (*pgxpool.Pool, error) {
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database URL: %w", err)
+	}
+
+	// Configure pool
+	poolConfig.MaxConns = 10
+	poolConfig.MinConns = 2
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create connection pool: %w", err)
+	}
+
+	// Test connection
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+
+	logger.Info("Database connection established",
+		zap.Int32("max_conns", poolConfig.MaxConns),
+		zap.Int32("min_conns", poolConfig.MinConns),
+	)
+
+	return pool, nil
+}
+
+// pgxPoolAdapter adapts pgxpool.Pool to clock.DB interface
+type pgxPoolAdapter struct {
+	pool *pgxpool.Pool
+}
+
+type pgxRowAdapter struct {
+	row interface {
+		Scan(dest ...any) error
+	}
+}
+
+func (r *pgxRowAdapter) Scan(dest ...any) error {
+	return r.row.Scan(dest...)
+}
+
+func (a *pgxPoolAdapter) QueryRow(ctx context.Context, sql string, args ...any) clock.Row {
+	return &pgxRowAdapter{row: a.pool.QueryRow(ctx, sql, args...)}
+}
+
+// zapClockLogger adapts zap.Logger to clock.Logger interface
+type zapClockLogger struct {
+	logger *zap.Logger
+}
+
+func (z *zapClockLogger) Info(msg string, keysAndValues ...any) {
+	z.logger.Info(msg, toZapFields(keysAndValues)...)
+}
+
+func (z *zapClockLogger) Warn(msg string, keysAndValues ...any) {
+	z.logger.Warn(msg, toZapFields(keysAndValues)...)
+}
+
+func (z *zapClockLogger) Error(msg string, keysAndValues ...any) {
+	z.logger.Error(msg, toZapFields(keysAndValues)...)
+}
+
+// toZapFields converts key-value pairs to zap fields
+func toZapFields(keysAndValues []any) []zap.Field {
+	if len(keysAndValues)%2 != 0 {
+		return []zap.Field{zap.Any("args", keysAndValues)}
+	}
+
+	fields := make([]zap.Field, 0, len(keysAndValues)/2)
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key, ok := keysAndValues[i].(string)
+		if !ok {
+			continue
+		}
+		fields = append(fields, zap.Any(key, keysAndValues[i+1]))
+	}
+	return fields
 }

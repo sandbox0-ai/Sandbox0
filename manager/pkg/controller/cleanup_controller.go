@@ -20,9 +20,24 @@ type CleanupController struct {
 	podLister      corelisters.PodLister
 	templateLister TemplateLister
 	recorder       record.EventRecorder
+	clock          TimeProvider
 	logger         *zap.Logger
 	interval       time.Duration
 }
+
+// TimeProvider provides time functions, allowing for synchronized time across clusters
+type TimeProvider interface {
+	Now() time.Time
+	Since(t time.Time) time.Duration
+	Until(t time.Time) time.Duration
+}
+
+// systemTime is the default implementation using system time
+type systemTime struct{}
+
+func (systemTime) Now() time.Time                  { return time.Now() }
+func (systemTime) Since(t time.Time) time.Duration { return time.Since(t) }
+func (systemTime) Until(t time.Time) time.Duration { return time.Until(t) }
 
 // TemplateLister interface for listing templates
 type TemplateLister interface {
@@ -36,14 +51,21 @@ func NewCleanupController(
 	podLister corelisters.PodLister,
 	templateLister TemplateLister,
 	recorder record.EventRecorder,
+	clock TimeProvider,
 	logger *zap.Logger,
 	interval time.Duration,
 ) *CleanupController {
+	// Use system time as fallback if clock is nil
+	if clock == nil {
+		clock = systemTime{}
+	}
+
 	return &CleanupController{
 		k8sClient:      k8sClient,
 		podLister:      podLister,
 		templateLister: templateLister,
 		recorder:       recorder,
+		clock:          clock,
 		logger:         logger,
 		interval:       interval,
 	}
@@ -101,7 +123,7 @@ func (cc *CleanupController) cleanupExpired(ctx context.Context, template *v1alp
 		return err
 	}
 
-	now := time.Now()
+	now := cc.clock.Now()
 	expiredCount := 0
 
 	for _, pod := range pods {
