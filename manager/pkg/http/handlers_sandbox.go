@@ -307,6 +307,61 @@ func (s *Server) resumeSandbox(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// refreshSandbox refreshes sandbox TTL
+func (s *Server) refreshSandbox(c *gin.Context) {
+	sandboxID := c.Param("id")
+	if sandboxID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "sandbox_id is required",
+		})
+		return
+	}
+
+	// Get team ID from claims for ownership verification
+	claims := internalauth.ClaimsFromContext(c.Request.Context())
+	if claims == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "missing authentication",
+		})
+		return
+	}
+
+	// Verify ownership
+	sandbox, err := s.sandboxService.GetSandbox(c.Request.Context(), sandboxID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": fmt.Sprintf("sandbox not found: %v", err),
+		})
+		return
+	}
+
+	if sandbox.TeamID != claims.TeamID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "sandbox belongs to a different team",
+		})
+		return
+	}
+
+	// Parse optional request body
+	var req service.RefreshRequest
+	// Ignore error - body is optional
+	_ = c.ShouldBindJSON(&req)
+
+	resp, err := s.sandboxService.RefreshSandbox(c.Request.Context(), sandboxID, &req)
+	if err != nil {
+		s.logger.Error("Failed to refresh sandbox",
+			zap.String("sandboxID", sandboxID),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("failed to refresh sandbox: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // getSandboxStats gets a sandbox stats
 func (s *Server) getSandboxStats(c *gin.Context) {
 	sandboxID := c.Param("id")

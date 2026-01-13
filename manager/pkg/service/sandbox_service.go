@@ -864,6 +864,78 @@ func (s *SandboxService) GetSandboxResourceUsage(ctx context.Context, sandboxID 
 	return &statsResp.SandboxResourceUsage, nil
 }
 
+// RefreshRequest represents a sandbox refresh request
+type RefreshRequest struct {
+	Duration int32 `json:"duration,omitempty"` // Duration to extend in seconds (optional, defaults to original TTL)
+}
+
+// RefreshResponse represents a sandbox refresh response
+type RefreshResponse struct {
+	SandboxID string    `json:"sandbox_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// RefreshSandbox refreshes the TTL of a sandbox
+func (s *SandboxService) RefreshSandbox(ctx context.Context, sandboxID string, req *RefreshRequest) (*RefreshResponse, error) {
+	s.logger.Info("Refreshing sandbox TTL", zap.String("sandboxID", sandboxID))
+
+	// Find the pod by sandbox ID
+	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
+		controller.LabelSandboxID: sandboxID,
+	}))
+	if err != nil {
+		return nil, fmt.Errorf("list pods: %w", err)
+	}
+
+	if len(pods) == 0 {
+		return nil, fmt.Errorf("sandbox not found: %s", sandboxID)
+	}
+
+	pod := pods[0]
+
+	// Determine the TTL duration
+	var ttlDuration time.Duration
+	if req != nil && req.Duration > 0 {
+		ttlDuration = time.Duration(req.Duration) * time.Second
+	} else {
+		// Try to get original TTL from config annotation
+		ttlDuration = 5 * time.Minute // Default 5 minutes
+		if configJSON := pod.Annotations[controller.AnnotationConfig]; configJSON != "" {
+			var config SandboxConfig
+			if err := json.Unmarshal([]byte(configJSON), &config); err == nil && config.TTL > 0 {
+				ttlDuration = time.Duration(config.TTL) * time.Second
+			}
+		}
+	}
+
+	// Calculate new expiration time
+	newExpiresAt := time.Now().Add(ttlDuration)
+
+	// Update pod annotation
+	podCopy := pod.DeepCopy()
+	if podCopy.Annotations == nil {
+		podCopy.Annotations = make(map[string]string)
+	}
+	podCopy.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
+
+	// Apply the update
+	_, err = s.k8sClient.CoreV1().Pods(pod.Namespace).Update(ctx, podCopy, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("update pod: %w", err)
+	}
+
+	s.logger.Info("Sandbox TTL refreshed successfully",
+		zap.String("sandboxID", sandboxID),
+		zap.Time("newExpiresAt", newExpiresAt),
+		zap.Duration("ttlDuration", ttlDuration),
+	)
+
+	return &RefreshResponse{
+		SandboxID: sandboxID,
+		ExpiresAt: newExpiresAt,
+	}, nil
+}
+
 // extractOriginalResources extracts current resources from pod containers.
 func (s *SandboxService) extractOriginalResources(pod *corev1.Pod) OriginalResources {
 	original := OriginalResources{

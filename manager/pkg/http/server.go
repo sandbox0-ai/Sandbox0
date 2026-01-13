@@ -71,6 +71,7 @@ func (s *Server) setupRoutes() {
 			sandboxes.GET("/:id/stats", s.getSandboxStats)
 			sandboxes.POST("/:id/pause", s.pauseSandbox)
 			sandboxes.POST("/:id/resume", s.resumeSandbox)
+			sandboxes.POST("/:id/refresh", s.refreshSandbox)
 			sandboxes.DELETE("/:id", s.terminateSandbox)
 		}
 

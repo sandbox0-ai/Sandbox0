@@ -53,7 +53,7 @@ func (p *PythonREPL) Start() error {
 		name string
 		args []string
 	}{
-		{"ipython", []string{"--simple-prompt", "-i", "--no-banner", "--colors=NoColor"}},
+		{"ipython3", []string{"--simple-prompt", "-i", "--no-banner", "--colors=NoColor"}},
 		{"python3", []string{"-i", "-u"}},
 		{"python", []string{"-i", "-u"}},
 		{"python2", []string{"-i", "-u"}},
@@ -68,7 +68,7 @@ func (p *PythonREPL) Start() error {
 
 	if cmd == nil {
 		p.SetState(process.ProcessStateCrashed)
-		return fmt.Errorf("%w: no Python interpreter found (tried: ipython, python3, python, python2)", process.ErrProcessStartFailed)
+		return fmt.Errorf("%w: no Python interpreter found (tried: ipython3, python3, python, python2)", process.ErrProcessStartFailed)
 	}
 
 	// Set working directory
