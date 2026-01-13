@@ -370,18 +370,10 @@ func (s *SandboxService) TerminateSandbox(ctx context.Context, sandboxID string)
 	s.logger.Info("Terminating sandbox", zap.String("sandboxID", sandboxID))
 
 	// Find the pod by sandbox ID
-	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
-		controller.LabelSandboxID: sandboxID,
-	}))
+	pod, err := s.getSandboxPod(ctx, sandboxID)
 	if err != nil {
-		return fmt.Errorf("list pods: %w", err)
+		return fmt.Errorf("get pod: %w", err)
 	}
-
-	if len(pods) == 0 {
-		return fmt.Errorf("sandbox not found: %s", sandboxID)
-	}
-
-	pod := pods[0]
 
 	// Delete network and bandwidth policies
 	if s.SandboxNetworkPolicyService != nil {
@@ -414,19 +406,16 @@ func (s *SandboxService) TerminateSandbox(ctx context.Context, sandboxID string)
 // GetSandbox gets a sandbox by ID
 func (s *SandboxService) GetSandbox(ctx context.Context, sandboxID string) (*Sandbox, error) {
 	// Find the pod by sandbox ID
-	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
-		controller.LabelSandboxID: sandboxID,
-	}))
+	pod, err := s.getSandboxPod(ctx, sandboxID)
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, fmt.Errorf("get pod: %w", err)
 	}
 
-	if len(pods) == 0 {
-		return nil, fmt.Errorf("sandbox not found: %s", sandboxID)
-	}
-
-	pod := pods[0]
 	return s.podToSandbox(pod, sandboxID), nil
+}
+
+func (s *SandboxService) getSandboxPod(ctx context.Context, sandboxID string) (*corev1.Pod, error) {
+	return s.podLister.Pods("").Get(sandboxID)
 }
 
 // ListSandboxes lists all sandboxes for a team
@@ -565,18 +554,10 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 	s.logger.Info("Pausing sandbox", zap.String("sandboxID", sandboxID))
 
 	// Find the pod by sandbox ID
-	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
-		controller.LabelSandboxID: sandboxID,
-	}))
+	pod, err := s.getSandboxPod(ctx, sandboxID)
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, fmt.Errorf("get pod: %w", err)
 	}
-
-	if len(pods) == 0 {
-		return nil, fmt.Errorf("sandbox not found: %s", sandboxID)
-	}
-
-	pod := pods[0]
 
 	// Check if already paused
 	if pod.Annotations[controller.AnnotationPaused] == "true" {
@@ -746,18 +727,10 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 	s.logger.Info("Resuming sandbox", zap.String("sandboxID", sandboxID))
 
 	// Find the pod by sandbox ID
-	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
-		controller.LabelSandboxID: sandboxID,
-	}))
+	pod, err := s.getSandboxPod(ctx, sandboxID)
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, fmt.Errorf("get pods: %w", err)
 	}
-
-	if len(pods) == 0 {
-		return nil, fmt.Errorf("sandbox not found: %s", sandboxID)
-	}
-
-	pod := pods[0]
 
 	// Check if paused
 	if pod.Annotations[controller.AnnotationPaused] != "true" {
@@ -850,18 +823,10 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 // GetSandboxResourceUsage gets the resource usage of a sandbox.
 func (s *SandboxService) GetSandboxResourceUsage(ctx context.Context, sandboxID string) (*SandboxResourceUsage, error) {
 	// Find the pod by sandbox ID
-	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
-		controller.LabelSandboxID: sandboxID,
-	}))
+	pod, err := s.getSandboxPod(ctx, sandboxID)
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, fmt.Errorf("get pod: %w", err)
 	}
-
-	if len(pods) == 0 {
-		return nil, fmt.Errorf("sandbox not found: %s", sandboxID)
-	}
-
-	pod := pods[0]
 
 	// Generate internal token for procd authentication
 	if s.internalTokenGenerator == nil || s.procdTokenGenerator == nil {
@@ -906,18 +871,10 @@ func (s *SandboxService) RefreshSandbox(ctx context.Context, sandboxID string, r
 	s.logger.Info("Refreshing sandbox TTL", zap.String("sandboxID", sandboxID))
 
 	// Find the pod by sandbox ID
-	pods, err := s.podLister.Pods("").List(labels.SelectorFromSet(map[string]string{
-		controller.LabelSandboxID: sandboxID,
-	}))
+	pod, err := s.getSandboxPod(ctx, sandboxID)
 	if err != nil {
 		return nil, fmt.Errorf("list pods: %w", err)
 	}
-
-	if len(pods) == 0 {
-		return nil, fmt.Errorf("sandbox not found: %s", sandboxID)
-	}
-
-	pod := pods[0]
 
 	// Determine the TTL duration
 	var ttlDuration time.Duration
