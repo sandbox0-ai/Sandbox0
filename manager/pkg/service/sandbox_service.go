@@ -544,9 +544,13 @@ type ResumeSandboxResponse struct {
 	RestoredMemory string `json:"restored_memory,omitempty"`
 }
 
-// OriginalResources stores original pod resources before pause.
-type OriginalResources struct {
-	Containers map[string]ContainerResources `json:"containers"`
+// PausedState stores the sandbox state before pause for restoration on resume.
+type PausedState struct {
+	// Resources stores original pod resources before pause.
+	Resources map[string]ContainerResources `json:"resources"`
+	// RemainingTTL stores the remaining TTL duration (in nanoseconds) at pause time.
+	// This allows TTL countdown to be paused and resumed correctly.
+	RemainingTTL int64 `json:"remaining_ttl,omitempty"`
 }
 
 // ContainerResources stores resource requests/limits for a container.
@@ -607,11 +611,24 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 		return nil, fmt.Errorf("procd pause failed: %s", pauseResp.Error)
 	}
 
-	// Save original resources before updating
-	originalResources := s.extractOriginalResources(pod)
-	originalResourcesJSON, err := json.Marshal(originalResources)
+	// Build paused state to save resources and TTL
+	pausedState := PausedState{
+		Resources: s.extractOriginalResources(pod),
+	}
+
+	// Calculate remaining TTL if expires-at annotation exists
+	if expiresAtStr, ok := pod.Annotations[controller.AnnotationExpiresAt]; ok {
+		if expiresAt, err := time.Parse(time.RFC3339, expiresAtStr); err == nil {
+			remainingTTL := time.Until(expiresAt)
+			if remainingTTL > 0 {
+				pausedState.RemainingTTL = int64(remainingTTL)
+			}
+		}
+	}
+
+	pausedStateJSON, err := json.Marshal(pausedState)
 	if err != nil {
-		return nil, fmt.Errorf("marshal original resources: %w", err)
+		return nil, fmt.Errorf("marshal paused state: %w", err)
 	}
 
 	// Calculate new memory request and limit
@@ -656,7 +673,9 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 	}
 	podCopy.Annotations[controller.AnnotationPaused] = "true"
 	podCopy.Annotations[controller.AnnotationPausedAt] = time.Now().Format(time.RFC3339)
-	podCopy.Annotations[controller.AnnotationOriginalResources] = string(originalResourcesJSON)
+	podCopy.Annotations[controller.AnnotationPausedState] = string(pausedStateJSON)
+	// Remove expires-at annotation to stop TTL countdown during pause
+	delete(podCopy.Annotations, controller.AnnotationExpiresAt)
 
 	// Update container resources
 	// We update if we have new memory values OR we want to reduce CPU
@@ -745,17 +764,18 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 		return nil, fmt.Errorf("sandbox is not paused")
 	}
 
-	// Restore original resources first (before resuming processes)
+	// Restore original resources and TTL first (before resuming processes)
 	var restoredMemory string
-	originalResourcesJSON := pod.Annotations[controller.AnnotationOriginalResources]
-	if originalResourcesJSON != "" {
-		var originalResources OriginalResources
-		if err := json.Unmarshal([]byte(originalResourcesJSON), &originalResources); err == nil {
+	pausedStateJSON := pod.Annotations[controller.AnnotationPausedState]
+	if pausedStateJSON != "" {
+		var pausedState PausedState
+		if err := json.Unmarshal([]byte(pausedStateJSON), &pausedState); err == nil {
 			podCopy := pod.DeepCopy()
 
+			// Restore container resources
 			for i := range podCopy.Spec.Containers {
 				container := &podCopy.Spec.Containers[i]
-				if orig, ok := originalResources.Containers[container.Name]; ok {
+				if orig, ok := pausedState.Resources[container.Name]; ok {
 					container.Resources.Requests = orig.Requests
 					container.Resources.Limits = orig.Limits
 					if memReq, ok := orig.Requests[corev1.ResourceMemory]; ok {
@@ -764,15 +784,21 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 				}
 			}
 
+			// Restore TTL by setting new expires-at based on remaining TTL
+			if pausedState.RemainingTTL > 0 {
+				newExpiresAt := time.Now().Add(time.Duration(pausedState.RemainingTTL))
+				podCopy.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
+			}
+
 			// Remove pause annotations
 			delete(podCopy.Annotations, controller.AnnotationPaused)
 			delete(podCopy.Annotations, controller.AnnotationPausedAt)
-			delete(podCopy.Annotations, controller.AnnotationOriginalResources)
+			delete(podCopy.Annotations, controller.AnnotationPausedState)
 
 			// Apply the update
 			_, err = s.k8sClient.CoreV1().Pods(pod.Namespace).Update(ctx, podCopy, metav1.UpdateOptions{})
 			if err != nil {
-				s.logger.Error("Failed to restore pod resources before resume",
+				s.logger.Error("Failed to restore pod state before resume",
 					zap.String("sandboxID", sandboxID),
 					zap.Error(err),
 				)
@@ -937,17 +963,15 @@ func (s *SandboxService) RefreshSandbox(ctx context.Context, sandboxID string, r
 }
 
 // extractOriginalResources extracts current resources from pod containers.
-func (s *SandboxService) extractOriginalResources(pod *corev1.Pod) OriginalResources {
-	original := OriginalResources{
-		Containers: make(map[string]ContainerResources),
-	}
+func (s *SandboxService) extractOriginalResources(pod *corev1.Pod) map[string]ContainerResources {
+	resources := make(map[string]ContainerResources)
 
 	for _, container := range pod.Spec.Containers {
-		original.Containers[container.Name] = ContainerResources{
+		resources[container.Name] = ContainerResources{
 			Requests: container.Resources.Requests.DeepCopy(),
 			Limits:   container.Resources.Limits.DeepCopy(),
 		}
 	}
 
-	return original
+	return resources
 }

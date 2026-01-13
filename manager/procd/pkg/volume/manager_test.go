@@ -259,11 +259,11 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 // TestManager_getStorageProxyAddress tests address generation with node affinity.
 func TestManager_getStorageProxyAddress(t *testing.T) {
 	tests := []struct {
-		name          string
-		nodeName      string
-		replicas      int
-		baseURL       string
-		wantContains  string
+		name         string
+		nodeName     string
+		replicas     int
+		baseURL      string
+		wantContains string
 	}{
 		{
 			name:         "single replica",
@@ -384,9 +384,9 @@ func TestVolumeConfig(t *testing.T) {
 // TestErrorDefinitions tests that error variables are properly defined.
 func TestErrorDefinitions(t *testing.T) {
 	tests := []struct {
-		name  string
-		err   error
-		want  string
+		name string
+		err  error
+		want string
 	}{
 		{
 			name: "ErrVolumeAlreadyMounted",

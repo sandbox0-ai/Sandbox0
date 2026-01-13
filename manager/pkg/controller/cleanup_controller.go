@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
@@ -80,84 +79,12 @@ func (cc *CleanupController) runCleanup(ctx context.Context) error {
 	}
 
 	for _, template := range templates {
-		if err := cc.cleanupTemplate(ctx, template); err != nil {
-			cc.logger.Error("Failed to cleanup template",
+		if err := cc.cleanupExpired(ctx, template); err != nil {
+			cc.logger.Error("Failed to cleanup expired sandbox",
 				zap.String("template", template.ObjectMeta.Name),
 				zap.Error(err),
 			)
 		}
-	}
-
-	return nil
-}
-
-// cleanupTemplate cleans up pods for a specific template
-func (cc *CleanupController) cleanupTemplate(ctx context.Context, template *v1alpha1.SandboxTemplate) error {
-	// 1. Enforce maxIdle limit
-	if err := cc.enforceMaxIdle(ctx, template); err != nil {
-		return err
-	}
-
-	// 2. Clean up expired active pods
-	if err := cc.cleanupExpired(ctx, template); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// enforceMaxIdle enforces the maxIdle limit by deleting excess idle pods
-func (cc *CleanupController) enforceMaxIdle(ctx context.Context, template *v1alpha1.SandboxTemplate) error {
-	maxIdle := template.Spec.Pool.MaxIdle
-
-	// Get all idle pods for this template from informer cache
-	pods, err := cc.podLister.Pods(template.ObjectMeta.Namespace).List(labels.SelectorFromSet(map[string]string{
-		LabelTemplateID: template.ObjectMeta.Name,
-		LabelPoolType:   PoolTypeIdle,
-	}))
-	if err != nil {
-		return err
-	}
-
-	idleCount := int32(len(pods))
-	if idleCount <= maxIdle {
-		return nil
-	}
-
-	// Delete excess idle pods (keep the newest ones)
-	excess := int(idleCount - maxIdle)
-
-	// Sort pods by creation time (newest first)
-	sort.Slice(pods, func(i, j int) bool {
-		return pods[i].CreationTimestamp.After(pods[j].CreationTimestamp.Time)
-	})
-
-	cc.logger.Info("Enforcing maxIdle",
-		zap.String("template", template.ObjectMeta.Name),
-		zap.Int32("idle", idleCount),
-		zap.Int32("maxIdle", maxIdle),
-		zap.Int("toDelete", excess),
-	)
-
-	// Delete the oldest pods
-	for i := len(pods) - excess; i < len(pods); i++ {
-		pod := pods[i]
-		cc.logger.Debug("Deleting excess idle pod",
-			zap.String("pod", pod.Name),
-			zap.Time("created", pod.CreationTimestamp.Time),
-		)
-
-		err := cc.k8sClient.CoreV1().Pods(template.ObjectMeta.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
-		if err != nil {
-			cc.logger.Error("Failed to delete pod",
-				zap.String("pod", pod.Name),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		cc.recorder.Eventf(template, corev1.EventTypeNormal, "ExcessPodDeleted",
-			"Deleted excess idle pod %s", pod.Name)
 	}
 
 	return nil
@@ -178,6 +105,11 @@ func (cc *CleanupController) cleanupExpired(ctx context.Context, template *v1alp
 	expiredCount := 0
 
 	for _, pod := range pods {
+		// Skip paused pods
+		if pod.Annotations[AnnotationPaused] == "true" {
+			continue
+		}
+
 		// Check if pod has expiration annotation
 		expiresAtStr, ok := pod.Annotations[AnnotationExpiresAt]
 		if !ok {

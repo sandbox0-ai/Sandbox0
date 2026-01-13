@@ -12,11 +12,11 @@ import (
 // TestNewCMD tests CMD creation.
 func TestNewCMD(t *testing.T) {
 	tests := []struct {
-		name      string
-		id        string
-		config    process.ProcessConfig
-		command   []string
-		wantErr   error
+		name    string
+		id      string
+		config  process.ProcessConfig
+		command []string
+		wantErr error
 	}{
 		{
 			name: "valid command",

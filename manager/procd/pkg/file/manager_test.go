@@ -838,8 +838,8 @@ func TestStatFileModes(t *testing.T) {
 	defer m.Close()
 
 	tests := []struct {
-		name    string
-		perm    os.FileMode
+		name     string
+		perm     os.FileMode
 		wantMode string
 	}{
 		{
@@ -947,9 +947,9 @@ func TestFileInfoFields(t *testing.T) {
 // TestErrorDefinitions tests that error variables are properly defined.
 func TestErrorDefinitions(t *testing.T) {
 	tests := []struct {
-		name  string
-		err   error
-		want  string
+		name string
+		err  error
+		want string
 	}{
 		{
 			name: "ErrFileNotFound",

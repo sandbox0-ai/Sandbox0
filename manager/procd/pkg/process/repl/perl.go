@@ -43,7 +43,7 @@ func (p *PerlREPL) Start() error {
 		name string
 		args []string
 	}{
-		{"re.pl", []string{}}, // Perl REPL if installed via cpanm Devel::REPL
+		{"re.pl", []string{}},          // Perl REPL if installed via cpanm Devel::REPL
 		{"perl", []string{"-de", "0"}}, // Perl debugger as REPL
 	}
 

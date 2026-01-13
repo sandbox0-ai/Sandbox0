@@ -15,11 +15,11 @@ import (
 // TestGrpcErrToFuseStatus tests gRPC to FUSE error code conversion.
 func TestGrpcErrToFuseStatus(t *testing.T) {
 	tests := []struct {
-		name         string
-		grpcCode     codes.Code
-		grpcMsg      string
-		wantStatus   fuse.Status
-		wantInRange  bool // helper for checking if status is in valid range
+		name        string
+		grpcCode    codes.Code
+		grpcMsg     string
+		wantStatus  fuse.Status
+		wantInRange bool // helper for checking if status is in valid range
 	}{
 		{
 			name:        "nil error returns OK",
@@ -355,20 +355,20 @@ func TestConcurrentHandleOperations(t *testing.T) {
 func TestErrorCodeMapping(t *testing.T) {
 	// List of all gRPC codes that should be handled
 	codesHandled := map[codes.Code]bool{
-		codes.OK:               true,
-		codes.NotFound:         true,
-		codes.PermissionDenied:  true,
-		codes.AlreadyExists:     true,
-		codes.InvalidArgument:   true,
-		codes.ResourceExhausted: true,
+		codes.OK:                 true,
+		codes.NotFound:           true,
+		codes.PermissionDenied:   true,
+		codes.AlreadyExists:      true,
+		codes.InvalidArgument:    true,
+		codes.ResourceExhausted:  true,
 		codes.FailedPrecondition: true,
-		codes.Aborted:           true,
-		codes.OutOfRange:        true,
+		codes.Aborted:            true,
+		codes.OutOfRange:         true,
 		codes.Unimplemented:      true,
-		codes.Unavailable:       true,
-		codes.Unknown:           true, // Falls back to EIO
-		codes.Internal:          true, // Falls back to EIO
-		codes.DeadlineExceeded:  true, // Falls back to EIO
+		codes.Unavailable:        true,
+		codes.Unknown:            true, // Falls back to EIO
+		codes.Internal:           true, // Falls back to EIO
+		codes.DeadlineExceeded:   true, // Falls back to EIO
 	}
 
 	for code := range codesHandled {

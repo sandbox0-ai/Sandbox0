@@ -127,25 +127,25 @@
 //
 // # Security Considerations
 //
-//   1. Key Management:
-//      - Private key must be stored securely (environment variables, K8s secrets, Vault)
-//      - Private key should only be on trusted services (internal-gateway)
-//      - Public key can be embedded in untrusted service images or mounted as config
-//      - Rotate keys regularly (recommend 90 days)
-//      - Never commit keys to code or expose them in logs
+//  1. Key Management:
+//     - Private key must be stored securely (environment variables, K8s secrets, Vault)
+//     - Private key should only be on trusted services (internal-gateway)
+//     - Public key can be embedded in untrusted service images or mounted as config
+//     - Rotate keys regularly (recommend 90 days)
+//     - Never commit keys to code or expose them in logs
 //
-//   2. Token Lifetime: Short TTL (30s default) means:
-//      - Tokens expire quickly if leaked
-//      - No need for token revocation
-//      - Clock synchronization is important
+//  2. Token Lifetime: Short TTL (30s default) means:
+//     - Tokens expire quickly if leaked
+//     - No need for token revocation
+//     - Clock synchronization is important
 //
-//   3. Network Security: While tokens are signed, use:
-//      - HTTPS/mTLS in production
-//      - Network policies to restrict who can connect
-//      - Service mesh for additional security
+//  3. Network Security: While tokens are signed, use:
+//     - HTTPS/mTLS in production
+//     - Network policies to restrict who can connect
+//     - Service mesh for additional security
 //
-//   4. Replay Attack Detection: Enable ReplayDetectionEnabled in ValidatorConfig
-//      to prevent token reuse. This adds memory overhead for tracking used JTIs.
+//  4. Replay Attack Detection: Enable ReplayDetectionEnabled in ValidatorConfig
+//     to prevent token reuse. This adds memory overhead for tracking used JTIs.
 //
 // # Key Generation
 //
@@ -162,9 +162,9 @@
 //
 // Common service names for use as Caller/Target:
 //
-//	- "internal-gateway"  - API gateway and router
-//	- "manager"           - Template and sandbox management
-//	- "procd"             - Sandbox process manager (untrusted, uses public key only)
-//	- "storage-proxy"     - Storage and volume management
-//	- "e2b-gateway"       - E2B compatibility layer
+//   - "internal-gateway"  - API gateway and router
+//   - "manager"           - Template and sandbox management
+//   - "procd"             - Sandbox process manager (untrusted, uses public key only)
+//   - "storage-proxy"     - Storage and volume management
+//   - "e2b-gateway"       - E2B compatibility layer
 package internalauth
