@@ -7,12 +7,16 @@ import (
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 )
+
+// SandboxPauser defines the interface for pausing sandboxes
+type SandboxPauser interface {
+	PauseSandboxByID(ctx context.Context, sandboxID string) error
+}
 
 // CleanupController handles cleanup of excess idle pods and expired active pods
 type CleanupController struct {
@@ -21,6 +25,7 @@ type CleanupController struct {
 	templateLister TemplateLister
 	recorder       record.EventRecorder
 	clock          TimeProvider
+	sandboxPauser  SandboxPauser
 	logger         *zap.Logger
 	interval       time.Duration
 }
@@ -52,6 +57,7 @@ func NewCleanupController(
 	templateLister TemplateLister,
 	recorder record.EventRecorder,
 	clock TimeProvider,
+	sandboxPauser SandboxPauser,
 	logger *zap.Logger,
 	interval time.Duration,
 ) *CleanupController {
@@ -66,6 +72,7 @@ func NewCleanupController(
 		templateLister: templateLister,
 		recorder:       recorder,
 		clock:          clock,
+		sandboxPauser:  sandboxPauser,
 		logger:         logger,
 		interval:       interval,
 	}
@@ -149,23 +156,30 @@ func (cc *CleanupController) cleanupExpired(ctx context.Context, template *v1alp
 
 		// Check if pod is expired
 		if now.After(expiresAt) {
-			cc.logger.Info("Deleting expired pod",
+			cc.logger.Info("Pausing expired pod",
 				zap.String("pod", pod.Name),
 				zap.Time("expiresAt", expiresAt),
 			)
 
-			err := cc.k8sClient.CoreV1().Pods(template.ObjectMeta.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{})
-			if err != nil {
-				cc.logger.Error("Failed to delete expired pod",
-					zap.String("pod", pod.Name),
-					zap.Error(err),
-				)
-				continue
-			}
+			// Pause the sandbox instead of deleting it
+			if cc.sandboxPauser != nil {
+				err := cc.sandboxPauser.PauseSandboxByID(ctx, pod.Name)
+				if err != nil {
+					cc.logger.Error("Failed to pause expired pod",
+						zap.String("pod", pod.Name),
+						zap.Error(err),
+					)
+					continue
+				}
 
-			cc.recorder.Eventf(template, corev1.EventTypeNormal, "ExpiredPodDeleted",
-				"Deleted expired pod %s", pod.Name)
-			expiredCount++
+				cc.recorder.Eventf(template, corev1.EventTypeNormal, "ExpiredPodPaused",
+					"Paused expired pod %s", pod.Name)
+				expiredCount++
+			} else {
+				cc.logger.Warn("SandboxPauser not configured, skipping pause of expired pod",
+					zap.String("pod", pod.Name),
+				)
+			}
 		}
 	}
 

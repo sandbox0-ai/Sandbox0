@@ -55,6 +55,7 @@ type SandboxService struct {
 	internalTokenGenerator      TokenGenerator
 	procdTokenGenerator         TokenGenerator
 	clock                       TimeProvider
+	defaultTTL                  time.Duration
 	logger                      *zap.Logger
 }
 
@@ -86,6 +87,7 @@ func NewSandboxService(
 	internalTokenGenerator TokenGenerator,
 	procdTokenGenerator TokenGenerator,
 	clock TimeProvider,
+	defaultTTL time.Duration,
 	logger *zap.Logger,
 ) *SandboxService {
 	// Use system time as fallback if clock is nil
@@ -102,6 +104,7 @@ func NewSandboxService(
 		internalTokenGenerator:      internalTokenGenerator,
 		procdTokenGenerator:         procdTokenGenerator,
 		clock:                       clock,
+		defaultTTL:                  defaultTTL,
 		logger:                      logger,
 	}
 }
@@ -298,7 +301,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	pod.Annotations[controller.AnnotationClaimType] = "hot"
 
 	// Set expiration time
-	ttl := int32(300) // Default 5 minutes
+	ttl := int32(s.defaultTTL.Seconds())
 	if req.Config != nil && req.Config.TTL > 0 {
 		ttl = req.Config.TTL
 	}
@@ -356,7 +359,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 	}
 
 	// Set expiration time
-	ttl := int32(300) // Default 5 minutes
+	ttl := int32(s.defaultTTL.Seconds())
 	if req.Config != nil && req.Config.TTL > 0 {
 		ttl = req.Config.TTL
 	}
@@ -559,9 +562,9 @@ type ResumeSandboxResponse struct {
 type PausedState struct {
 	// Resources stores original pod resources before pause.
 	Resources map[string]ContainerResources `json:"resources"`
-	// RemainingTTL stores the remaining TTL duration (in nanoseconds) at pause time.
-	// This allows TTL countdown to be paused and resumed correctly.
-	RemainingTTL int64 `json:"remaining_ttl,omitempty"`
+	// OriginalTTL stores the original TTL (in seconds) set by user or default.
+	// On resume, this TTL is reused to reset the countdown.
+	OriginalTTL int32 `json:"original_ttl,omitempty"`
 }
 
 // ContainerResources stores resource requests/limits for a container.
@@ -614,18 +617,16 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 		return nil, fmt.Errorf("procd pause failed: %s", pauseResp.Error)
 	}
 
-	// Build paused state to save resources and TTL
+	// Build paused state to save resources and original TTL
 	pausedState := PausedState{
 		Resources: s.extractOriginalResources(pod),
 	}
 
-	// Calculate remaining TTL if expires-at annotation exists
-	if expiresAtStr, ok := pod.Annotations[controller.AnnotationExpiresAt]; ok {
-		if expiresAt, err := time.Parse(time.RFC3339, expiresAtStr); err == nil {
-			remainingTTL := time.Until(expiresAt)
-			if remainingTTL > 0 {
-				pausedState.RemainingTTL = int64(remainingTTL)
-			}
+	// Extract original TTL from config annotation
+	if configJSON := pod.Annotations[controller.AnnotationConfig]; configJSON != "" {
+		var config SandboxConfig
+		if err := json.Unmarshal([]byte(configJSON), &config); err == nil && config.TTL > 0 {
+			pausedState.OriginalTTL = config.TTL
 		}
 	}
 
@@ -779,9 +780,14 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 				}
 			}
 
-			// Restore TTL by setting new expires-at based on remaining TTL
-			if pausedState.RemainingTTL > 0 {
-				newExpiresAt := s.clock.Now().Add(time.Duration(pausedState.RemainingTTL))
+			// Reset TTL using original TTL (not remaining time)
+			if pausedState.OriginalTTL > 0 {
+				// Use the original TTL to reset countdown
+				newExpiresAt := s.clock.Now().Add(time.Duration(pausedState.OriginalTTL) * time.Second)
+				podCopy.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
+			} else {
+				// Fallback to default TTL if no original TTL was saved
+				newExpiresAt := s.clock.Now().Add(s.defaultTTL)
 				podCopy.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
 			}
 
@@ -840,6 +846,13 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 		Resumed:        true,
 		RestoredMemory: restoredMemory,
 	}, nil
+}
+
+// PauseSandboxByID implements the SandboxPauser interface from controller package.
+// It wraps PauseSandbox and returns only the error.
+func (s *SandboxService) PauseSandboxByID(ctx context.Context, sandboxID string) error {
+	_, err := s.PauseSandbox(ctx, sandboxID)
+	return err
 }
 
 // GetSandboxResourceUsage gets the resource usage of a sandbox.
@@ -904,7 +917,7 @@ func (s *SandboxService) RefreshSandbox(ctx context.Context, sandboxID string, r
 		ttlDuration = time.Duration(req.Duration) * time.Second
 	} else {
 		// Try to get original TTL from config annotation
-		ttlDuration = 5 * time.Minute // Default 5 minutes
+		ttlDuration = s.defaultTTL
 		if configJSON := pod.Annotations[controller.AnnotationConfig]; configJSON != "" {
 			var config SandboxConfig
 			if err := json.Unmarshal([]byte(configJSON), &config); err == nil && config.TTL > 0 {

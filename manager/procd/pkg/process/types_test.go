@@ -25,9 +25,8 @@ func TestMultiplexedChannel_BasicFork(t *testing.T) {
 
 	// Publish an event
 	event := ProcessOutput{
-		Timestamp: time.Now(),
-		Source:    OutputSourceStdout,
-		Data:      []byte("test data"),
+		Source: OutputSourceStdout,
+		Data:   []byte("test data"),
 	}
 	mc.Publish(event)
 
@@ -104,9 +103,8 @@ func TestMultiplexedChannel_MultipleSubscribers(t *testing.T) {
 	const numEvents = 10
 	for i := 0; i < numEvents; i++ {
 		mc.Publish(ProcessOutput{
-			Timestamp: time.Now(),
-			Source:    OutputSourceStdout,
-			Data:      []byte("test"),
+			Source: OutputSourceStdout,
+			Data:   []byte("test"),
 		})
 	}
 
@@ -176,7 +174,7 @@ func TestMultiplexedChannel_BufferFull(t *testing.T) {
 
 	// Fill the channel buffer
 	for i := 0; i < 2; i++ {
-		mc.Publish(ProcessOutput{Timestamp: time.Now(), Source: OutputSourceStdout})
+		mc.Publish(ProcessOutput{Source: OutputSourceStdout})
 	}
 
 	// Publish more events - should be dropped, not block
@@ -184,7 +182,7 @@ func TestMultiplexedChannel_BufferFull(t *testing.T) {
 	done := make(chan bool)
 	go func() {
 		for i := 0; i < 10; i++ {
-			mc.Publish(ProcessOutput{Timestamp: time.Now(), Source: OutputSourceStdout})
+			mc.Publish(ProcessOutput{Source: OutputSourceStdout})
 		}
 		close(done)
 	}()
@@ -233,7 +231,7 @@ func TestMultiplexedChannel_CloseAllSubscribers(t *testing.T) {
 	}
 
 	// Publish an event before closing
-	mc.Publish(ProcessOutput{Timestamp: time.Now(), Source: OutputSourceStdout})
+	mc.Publish(ProcessOutput{Source: OutputSourceStdout})
 
 	// Close the source
 	mc.Close()
@@ -474,9 +472,8 @@ func TestBaseProcess_PublishAndReadOutput(t *testing.T) {
 	bp := NewBaseProcess("test-id", ProcessTypeREPL, config)
 
 	output := ProcessOutput{
-		Timestamp: time.Now(),
-		Source:    OutputSourceStdout,
-		Data:      []byte("test output"),
+		Source: OutputSourceStdout,
+		Data:   []byte("test output"),
 	}
 
 	// Fork before publishing
@@ -678,9 +675,8 @@ func BenchmarkMultiplexedChannel_Publish(b *testing.B) {
 	}
 
 	event := ProcessOutput{
-		Timestamp: time.Now(),
-		Source:    OutputSourceStdout,
-		Data:      make([]byte, 100),
+		Source: OutputSourceStdout,
+		Data:   make([]byte, 100),
 	}
 
 	b.ResetTimer()

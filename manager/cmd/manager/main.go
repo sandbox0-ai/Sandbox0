@@ -176,6 +176,7 @@ func main() {
 		internalTokenGenerator,
 		procdTokenGenerator,
 		clk,
+		cfg.DefaultSandboxTTL,
 		logger,
 	)
 
@@ -192,6 +193,7 @@ func main() {
 		operator.GetTemplateLister(),
 		recorder,
 		clk,
+		sandboxService,
 		logger,
 		cfg.CleanupInterval,
 	)

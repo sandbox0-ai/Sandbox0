@@ -42,6 +42,9 @@ type Config struct {
 	// Internal Auth
 	InternalAuthPublicKeyPath  string
 	InternalAuthPrivateKeyPath string
+
+	// Sandbox
+	DefaultSandboxTTL time.Duration
 }
 
 // LoadConfig loads configuration from environment variables
@@ -64,5 +67,6 @@ func LoadConfig() *Config {
 		WebhookKeyPath:             env.GetEnv("WEBHOOK_KEY_PATH", "/tmp/k8s-webhook-server/serving-certs/tls.key"),
 		InternalAuthPublicKeyPath:  env.GetEnv("INTERNAL_AUTH_PUBLIC_KEY_PATH", "/config/internal_jwt_public.key"),
 		InternalAuthPrivateKeyPath: env.GetEnv("INTERNAL_AUTH_PRIVATE_KEY_PATH", "/secrets/internal_jwt_private.key"),
+		DefaultSandboxTTL:          env.GetEnvDuration("DEFAULT_SANDBOX_TTL", 5*time.Minute),
 	}
 }
