@@ -219,5 +219,4 @@ func (r *RubyREPL) monitorProcess() {
 	}
 
 	r.CloseOutput()
-	r.TriggerExitHandler()
 }

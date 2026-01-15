@@ -207,5 +207,4 @@ func (p *PHPREPL) monitorProcess() {
 	}
 
 	p.CloseOutput()
-	p.TriggerExitHandler()
 }

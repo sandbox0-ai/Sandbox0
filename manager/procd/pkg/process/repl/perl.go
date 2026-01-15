@@ -219,5 +219,4 @@ func (p *PerlREPL) monitorProcess() {
 	}
 
 	p.CloseOutput()
-	p.TriggerExitHandler()
 }

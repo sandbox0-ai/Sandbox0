@@ -241,5 +241,4 @@ func (c *CMD) monitorProcess() {
 	}
 
 	c.CloseOutput()
-	c.TriggerExitHandler()
 }

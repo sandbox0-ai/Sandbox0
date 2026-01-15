@@ -56,7 +56,6 @@ type ProcessConfig struct {
 	AutoRestart bool              `json:"auto_restart"`
 	PTYSize     *PTYSize          `json:"pty_size"`
 	Term        string            `json:"term"`
-	OnExit      *ProcessConfig    `json:"on_exit,omitempty"`
 }
 
 // ProcessOutput represents output from a process.
@@ -297,18 +296,6 @@ func (bp *BaseProcess) SetExitHandler(handler ExitHandler) {
 	bp.mu.Lock()
 	defer bp.mu.Unlock()
 	bp.exitHandler = handler
-}
-
-// TriggerExitHandler calls the exit handler if one is set and the config has OnExit.
-func (bp *BaseProcess) TriggerExitHandler() {
-	bp.mu.RLock()
-	handler := bp.exitHandler
-	config := bp.config
-	bp.mu.RUnlock()
-
-	if handler != nil && config.OnExit != nil {
-		handler(config.OnExit)
-	}
 }
 
 // ID returns the process ID.

@@ -213,5 +213,4 @@ func (l *LuaREPL) monitorProcess() {
 	}
 
 	l.CloseOutput()
-	l.TriggerExitHandler()
 }

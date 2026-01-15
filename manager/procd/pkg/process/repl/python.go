@@ -260,7 +260,6 @@ func (p *PythonREPL) monitorProcess() {
 	}
 
 	p.CloseOutput()
-	p.TriggerExitHandler()
 }
 
 // detectPrompt checks if the output contains a Python prompt.

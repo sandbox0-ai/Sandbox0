@@ -142,9 +142,6 @@ All other configuration (database URLs, S3 credentials, etc.) is stored in Confi
 
 ```bash
 # Update chart dependencies
-cd infra
-make helm-update
-cd helm
 helm dependency update
 
 # Upgrade the release

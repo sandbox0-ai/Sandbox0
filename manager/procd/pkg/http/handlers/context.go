@@ -36,13 +36,12 @@ func NewContextHandler(manager *ctxpkg.Manager, logger *zap.Logger) *ContextHand
 
 // CreateContextRequest is the request body for creating a context.
 type CreateContextRequest struct {
-	Type     string                `json:"type"`     // "repl" or "cmd"
-	Language string                `json:"language"` // For REPL: python, node, bash, zsh, etc.
-	Command  []string              `json:"command"`  // For CMD: command path and args, e.g., ["/bin/ls", "-la"]
-	CWD      string                `json:"cwd"`
-	EnvVars  map[string]string     `json:"env_vars"`
-	PTYSize  *process.PTYSize      `json:"pty_size"`
-	OnExit   *CreateContextRequest `json:"on_exit"`
+	Type     string            `json:"type"`     // "repl" or "cmd"
+	Language string            `json:"language"` // For REPL: python, node, bash, zsh, etc.
+	Command  []string          `json:"command"`  // For CMD: command path and args, e.g., ["/bin/ls", "-la"]
+	CWD      string            `json:"cwd"`
+	EnvVars  map[string]string `json:"env_vars"`
+	PTYSize  *process.PTYSize  `json:"pty_size"`
 }
 
 // ContextResponse is the response body for a context.
@@ -111,21 +110,6 @@ func (h *ContextHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CWD:      req.CWD,
 		EnvVars:  req.EnvVars,
 		PTYSize:  req.PTYSize,
-	}
-
-	if req.OnExit != nil {
-		onExitType := process.ProcessTypeREPL
-		if req.OnExit.Type == "cmd" {
-			onExitType = process.ProcessTypeCMD
-		}
-		config.OnExit = &process.ProcessConfig{
-			Type:     onExitType,
-			Language: req.OnExit.Language,
-			Command:  req.OnExit.Command,
-			CWD:      req.OnExit.CWD,
-			EnvVars:  req.OnExit.EnvVars,
-			PTYSize:  req.OnExit.PTYSize,
-		}
 	}
 
 	ctx, err := h.manager.CreateContext(config)
@@ -297,9 +281,9 @@ func (h *ContextHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for output := range outputCh {
 			msg := map[string]any{
-				"type":      "output",
-				"source":    string(output.Source),
-				"data":      string(output.Data),
+				"type":   "output",
+				"source": string(output.Source),
+				"data":   string(output.Data),
 			}
 
 			if err := conn.WriteJSON(msg); err != nil {

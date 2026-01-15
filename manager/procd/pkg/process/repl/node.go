@@ -200,5 +200,4 @@ func (n *NodeREPL) monitorProcess() {
 	}
 
 	n.CloseOutput()
-	n.TriggerExitHandler()
 }

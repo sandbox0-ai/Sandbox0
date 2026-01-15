@@ -219,5 +219,4 @@ func (r *RREPL) monitorProcess() {
 	}
 
 	r.CloseOutput()
-	r.TriggerExitHandler()
 }
