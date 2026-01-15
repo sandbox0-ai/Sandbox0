@@ -1,70 +1,125 @@
-replicaCount: 1
+# Default values for manager
+
+replicaCount: 2
 
 image:
   repository: sandbox0/manager
-  pullPolicy: Always
-  tag: "latest"
+  pullPolicy: IfNotPresent
+  tag: ""
 
+imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
 serviceAccount:
   create: true
+  automount: true
   annotations: {}
-  name: "manager"
+  name: ""
 
 podAnnotations: {}
+podLabels: {}
+
 podSecurityContext: {}
 
-securityContext: {}
+securityContext:
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
 
 service:
   type: ClusterIP
   port: 8080
-  metricsPort: 9090
-  webhookPort: 443
+
+metricsService:
+  type: ClusterIP
+  port: 9090
+
+webhookService:
+  type: ClusterIP
+  port: 9443
 
 resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
   limits:
     cpu: 500m
     memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
 
 nodeSelector: {}
-
 tolerations: []
-
 affinity: {}
 
+# Secrets - only for file-based secrets (keys, certs)
+secrets:
+  internalJwtSecretName: "sandbox0-internal-jwt"
+  internalJwtPrivateKeyKey: "private.key"
+  internalJwtPublicKeyKey: "public.key"
+
+# Webhook TLS
+webhook:
+  enabled: true
+  certManager:
+    enabled: false
+  tls:
+    certSecretName: ""
+
+# CRD installation
+crds:
+  install: true
+
+# RBAC
+rbac:
+  create: true
+
+# Application config - directly maps to config.yaml (snake_case)
 config:
   http_port: 8080
-  metrics_port: 9090
   log_level: "info"
-  cleanup_interval: "60s"
-  resync_period: "30s"
-  leader_election: true
+
+  # Template defaults
   default_template: "default"
   default_template_namespace: "sb0"
   default_cluster_id: "default"
-  default_sandbox_ttl: "5m"
-  database_url: "${DATABASE_URL}"
+
+  # Kubernetes
+  kube_config: ""
+  namespace: "default"
+  leader_election: true
+  resync_period: "30s"
+
+  # Database - configure directly (no env var needed)
+  database_url: "postgres://user:pass@postgres:5432/sandbox0"
+
+  # Cleanup
+  cleanup_interval: "60s"
+
+  # Metrics
+  metrics_port: 9090
+
+  # Webhook
   webhook_port: 9443
   webhook_cert_path: "/tmp/k8s-webhook-server/serving-certs/tls.crt"
   webhook_key_path: "/tmp/k8s-webhook-server/serving-certs/tls.key"
-  internal_auth_public_key_path: "/secrets/internal-auth/public.key"
-  internal_auth_private_key_path: "/secrets/internal-auth/private.key"
 
-env:
-  - name: DATABASE_URL
-    valueFrom:
-      secretKeyRef:
-        name: sandbox0-secrets
-        key: database-url
-        optional: true
-  # Example for setting other env vars if needed
+  # Internal Auth
+  internal_auth_public_key_path: "/config/internal_jwt_public.key"
+  internal_auth_private_key_path: "/secrets/internal_jwt_private.key"
 
-webhook:
-  enabled: true
-  secretName: webhook-server-cert
+  # Sandbox
+  default_sandbox_ttl: "5m"

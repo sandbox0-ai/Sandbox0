@@ -1,11 +1,4 @@
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {{ include "netd.serviceAccountName" . }}
-  labels:
-    {{- include "netd.labels" . | nindent 4 }}
-
----
+{{- if .Values.rbac.create -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -13,37 +6,27 @@ metadata:
   labels:
     {{- include "netd.labels" . | nindent 4 }}
 rules:
-  # Watch pods on this node
+  # Watch sandbox CRDs for network policies
+  - apiGroups: ["sandbox0.ai"]
+    resources:
+      - sandboxnetworkpolicies
+      - sandboxbandwidthpolicies
+    verbs: ["get", "list", "watch"]
+  # Watch pods to apply network policies
   - apiGroups: [""]
-    resources: ["pods"]
+    resources:
+      - pods
     verbs: ["get", "list", "watch"]
-  # Watch nodes for node info
+  # Watch nodes for node-specific configuration
   - apiGroups: [""]
-    resources: ["nodes"]
+    resources:
+      - nodes
     verbs: ["get", "list", "watch"]
-  # Watch and update SandboxNetworkPolicy CRD
-  - apiGroups: ["sandbox0.ai"]
-    resources: ["sandboxnetworkpolicies"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["sandbox0.ai"]
-    resources: ["sandboxnetworkpolicies/status"]
-    verbs: ["update", "patch"]
-  # Watch and update SandboxBandwidthPolicy CRD
-  - apiGroups: ["sandbox0.ai"]
-    resources: ["sandboxbandwidthpolicies"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["sandbox0.ai"]
-    resources: ["sandboxbandwidthpolicies/status"]
-    verbs: ["update", "patch"]
-  # Watch SandboxTemplate for reference
-  - apiGroups: ["sandbox0.ai"]
-    resources: ["sandboxtemplates"]
-    verbs: ["get", "list", "watch"]
-  # Events for diagnostics
+  # Create events for policy enforcement logging
   - apiGroups: [""]
-    resources: ["events"]
+    resources:
+      - events
     verbs: ["create", "patch"]
-
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -59,3 +42,4 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "netd.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- end }}

@@ -1,21 +1,24 @@
+# Default values for netd
+
 image:
   repository: sandbox0/netd
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: ""
 
+imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
 serviceAccount:
   create: true
+  automount: true
   annotations: {}
-  name: "netd"
+  name: ""
 
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "9090"
-  prometheus.io/path: "/metrics"
+podAnnotations: {}
+podLabels: {}
 
+# netd requires privileged access for eBPF and network control
 podSecurityContext: {}
 
 securityContext:
@@ -23,81 +26,89 @@ securityContext:
   capabilities:
     add:
       - NET_ADMIN
-      - NET_RAW
       - SYS_ADMIN
+      - BPF
+
+metricsService:
+  type: ClusterIP
+  port: 9090
+
+healthService:
+  type: ClusterIP
+  port: 8080
 
 resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: health
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: health
+  initialDelaySeconds: 5
+  periodSeconds: 5
 
 nodeSelector: {}
 
 tolerations:
+  # Run on all nodes including masters
   - operator: Exists
-    effect: NoSchedule
-  - operator: Exists
-    effect: NoExecute
 
 affinity: {}
 
+# Update strategy for DaemonSet
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# RBAC
+rbac:
+  create: true
+
+# Application config - directly maps to config.yaml (snake_case)
 config:
   log_level: "info"
   metrics_port: 9090
   health_port: 8080
+
+  # Node name - use env var placeholder (injected from downward API)
   node_name: "${NODE_NAME}"
-  namespace: "${NAMESPACE}"
+
+  # Kubernetes
+  namespace: ""  # Empty means all namespaces
   kube_config: ""
   resync_period: "30s"
+
+  # L7 Proxy
   proxy_listen_addr: "0.0.0.0"
   proxy_http_port: 18080
   proxy_https_port: 18443
   dns_resolvers:
     - "8.8.8.8:53"
+
+  # Metrics
   metrics_report_interval: "10s"
+
+  # Network policy
   fail_closed: true
-  storage_proxy_cidr: "10.43.0.0/16"
-  cluster_dns_cidr: "10.96.0.10/32"
-  internal_gateway_cidr: "10.42.0.0/16"
+  storage_proxy_cidr: ""
+  cluster_dns_cidr: ""
+  internal_gateway_cidr: ""
   procd_port: 49983
+
+  # eBPF
   use_ebpf: true
   bpf_fs_path: "/sys/fs/bpf"
   use_edt: true
-
-env:
-  - name: NODE_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: spec.nodeName
-  - name: NAMESPACE
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.namespace
-
-volumes:
-  - name: xtables-lock
-    hostPath:
-      path: /run/xtables.lock
-      type: FileOrCreate
-  - name: lib-modules
-    hostPath:
-      path: /lib/modules
-      type: Directory
-  - name: bpf-fs
-    hostPath:
-      path: /sys/fs/bpf
-      type: Directory
-
-volumeMounts:
-  - name: xtables-lock
-    mountPath: /run/xtables.lock
-    readOnly: false
-  - name: lib-modules
-    mountPath: /lib/modules
-    readOnly: true
-  - name: bpf-fs
-    mountPath: /sys/fs/bpf
-    mountPropagation: Bidirectional

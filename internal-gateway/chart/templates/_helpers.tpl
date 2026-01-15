@@ -38,6 +38,7 @@ helm.sh/chart: {{ include "internal-gateway.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: sandbox0
 {{- end }}
 
 {{/*
@@ -46,7 +47,7 @@ Selector labels
 {{- define "internal-gateway.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "internal-gateway.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
-app: {{ include "internal-gateway.name" . }}
+app.kubernetes.io/component: internal-gateway
 {{- end }}
 
 {{/*

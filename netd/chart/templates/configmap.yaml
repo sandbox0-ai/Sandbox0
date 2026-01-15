@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "netd.fullname" . }}-config
+  name: {{ include "netd.fullname" . }}
   labels:
     {{- include "netd.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- toYaml .Values.config | nindent 4 }}
+    {{- .Values.config | toYaml | nindent 4 }}

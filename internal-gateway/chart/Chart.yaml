@@ -1,6 +1,13 @@
 apiVersion: v2
 name: internal-gateway
-description: A Helm chart for sandbox0 internal-gateway
+description: Internal Gateway - Routes requests between sandbox0 internal services
 type: application
 version: 0.1.0
-appVersion: "1.0.0"
+appVersion: "0.1.0"
+keywords:
+  - sandbox0
+  - gateway
+  - internal
+  - routing
+maintainers:
+  - name: sandbox0

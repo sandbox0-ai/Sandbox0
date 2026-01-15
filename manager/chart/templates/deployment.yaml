@@ -4,7 +4,6 @@ metadata:
   name: {{ include "manager.fullname" . }}
   labels:
     {{- include "manager.labels" . | nindent 4 }}
-    component: control-plane
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -12,63 +11,101 @@ spec:
       {{- include "manager.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      labels:
-        {{- include "manager.selectorLabels" . | nindent 8 }}
-        component: control-plane
       annotations:
-        checksum/config: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "manager.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       serviceAccountName: {{ include "manager.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ .Values.config.http_port }}
               protocol: TCP
             - name: metrics
-              containerPort: {{ .Values.service.metricsPort }}
+              containerPort: {{ .Values.config.metrics_port }}
               protocol: TCP
+            {{- if .Values.webhook.enabled }}
             - name: webhook
-              containerPort: {{ .Values.service.webhookPort }}
+              containerPort: {{ .Values.config.webhook_port }}
               protocol: TCP
-          env:
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: CONFIG_PATH
-              value: /config/config.yaml
-            {{- with .Values.env }}
-            {{- toYaml . | nindent 12 }}
             {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 5
           volumeMounts:
             - name: config
               mountPath: /config
               readOnly: true
-            - name: cert
+            - name: internal-jwt-private-key
+              mountPath: /secrets
+              readOnly: true
+            - name: internal-jwt-public-key
+              mountPath: /config/internal_jwt_public.key
+              subPath: internal_jwt_public.key
+              readOnly: true
+            {{- if .Values.webhook.enabled }}
+            - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
-            name: {{ include "manager.fullname" . }}-config
-        - name: cert
+            name: {{ include "manager.fullname" . }}
+        - name: internal-jwt-private-key
           secret:
-            defaultMode: 420
-            secretName: {{ .Values.webhook.secretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName }}
+            items:
+              - key: {{ .Values.secrets.internalJwtPrivateKeyKey }}
+                path: internal_jwt_private.key
+        - name: internal-jwt-public-key
+          secret:
+            secretName: {{ .Values.secrets.internalJwtSecretName }}
+            items:
+              - key: {{ .Values.secrets.internalJwtPublicKeyKey }}
+                path: internal_jwt_public.key
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-certs
+          secret:
+            {{- if .Values.webhook.tls.certSecretName }}
+            secretName: {{ .Values.webhook.tls.certSecretName }}
+            {{- else }}
+            secretName: {{ include "manager.fullname" . }}-webhook-certs
+            {{- end }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

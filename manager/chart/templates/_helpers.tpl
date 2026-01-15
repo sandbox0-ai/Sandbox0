@@ -7,8 +7,6 @@ Expand the name of the chart.
 
 {{/*
 Create a default fully qualified app name.
-We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
-If release name contains chart name it will be used as a full name.
 */}}
 {{- define "manager.fullname" -}}
 {{- if .Values.fullnameOverride }}
@@ -40,6 +38,7 @@ helm.sh/chart: {{ include "manager.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: sandbox0
 {{- end }}
 
 {{/*
@@ -48,7 +47,7 @@ Selector labels
 {{- define "manager.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "manager.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
-app: {{ include "manager.name" . }}
+app.kubernetes.io/component: manager
 {{- end }}
 
 {{/*

@@ -38,6 +38,7 @@ helm.sh/chart: {{ include "storage-proxy.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: sandbox0
 {{- end }}
 
 {{/*
@@ -46,8 +47,7 @@ Selector labels
 {{- define "storage-proxy.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "storage-proxy.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
-app: {{ include "storage-proxy.name" . }}
-component: storage
+app.kubernetes.io/component: storage-proxy
 {{- end }}
 
 {{/*
