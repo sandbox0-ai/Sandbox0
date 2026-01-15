@@ -102,17 +102,20 @@ topologySpreadConstraints:
     matchLabels:
       app: internal-gateway
 
-env:
-  INTERNAL_GATEWAY_HTTP_PORT: "8443"
-  INTERNAL_GATEWAY_LOG_LEVEL: "info"
-  INTERNAL_JWT_PRIVATE_KEY_PATH: "/secrets/internal_jwt_private.key"
-  MANAGER_URL: "http://manager.sandbox0-system.svc.cluster.local:8080"
-  STORAGE_PROXY_URL: "http://storage-proxy.sandbox0-system.svc.cluster.local:8081"
+config:
+  http_port: 8443
+  log_level: "info"
+  manager_url: "http://manager.sandbox0-system.svc.cluster.local:8080"
+  storage_proxy_url: "http://storage-proxy.sandbox0-system.svc.cluster.local:8081"
+  internal_jwt_private_key_path: "/secrets/internal_jwt_private.key"
+  proxy_timeout: "30s"
+  shutdown_timeout: "30s"
+  health_check_period: "10s"
+
+env: []
 
 secrets:
   # In production, these should be managed externally
-  databaseUrl: "postgres://sandbox0:password@postgres.sandbox0-system.svc.cluster.local:5432/sandbox0?sslmode=require"
-  jwtSecret: "REPLACE_WITH_SECURE_SECRET_IN_PRODUCTION"
   internalJwtKeySecretName: "internal-jwt-key"
 
 volumeMounts:

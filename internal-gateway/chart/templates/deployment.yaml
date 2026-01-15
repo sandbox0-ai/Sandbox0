@@ -22,6 +22,7 @@ spec:
       labels:
         {{- include "internal-gateway.selectorLabels" . | nindent 8 }}
       annotations:
+        checksum/config: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
       serviceAccountName: {{ include "internal-gateway.serviceAccountName" . }}
@@ -36,11 +37,15 @@ spec:
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
-            {{- range $key, $value := .Values.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
             {{- toYaml .Values.volumeMounts | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -63,6 +68,9 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
       volumes:
+        - name: config
+          configMap:
+            name: {{ include "internal-gateway.fullname" . }}-config
         {{- toYaml .Values.volumes | nindent 8 }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}

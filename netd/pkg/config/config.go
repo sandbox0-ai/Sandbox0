@@ -133,6 +133,9 @@ func load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	// Expand environment variables
+	data = []byte(os.ExpandEnv(string(data)))
+
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}

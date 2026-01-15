@@ -15,6 +15,7 @@ spec:
       labels:
         {{- include "storage-proxy.selectorLabels" . | nindent 8 }}
       annotations:
+        checksum/config: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
       serviceAccountName: {{ include "storage-proxy.serviceAccountName" . }}
@@ -35,44 +36,17 @@ spec:
               name: metrics
               protocol: TCP
           env:
-            {{- range $key, $value := .Values.env }}
-            - name: {{ $key }}
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "storage-proxy.fullname" $ }}-config
-                  key: {{ $key }}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-            # Secrets
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storage-proxy.fullname" . }}-secrets
-                  key: jwt-secret
-            - name: DEFAULT_META_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storage-proxy.fullname" . }}-secrets
-                  key: postgres-url
-            - name: AWS_ACCESS_KEY_ID
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storage-proxy.fullname" . }}-secrets
-                  key: aws-access-key-id
-                  optional: true
-            - name: AWS_SECRET_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storage-proxy.fullname" . }}-secrets
-                  key: aws-secret-access-key
-                  optional: true
-            - name: AWS_REGION
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "storage-proxy.fullname" . }}-config
-                  key: DEFAULT_S3_REGION
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
             {{- toYaml .Values.volumeMounts | nindent 12 }}
           livenessProbe:
             httpGet:
@@ -99,6 +73,9 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 30
       volumes:
+        - name: config
+          configMap:
+            name: {{ include "storage-proxy.fullname" . }}-config
         {{- toYaml .Values.volumes | nindent 8 }}
   {{- if .Values.persistence.cache.enabled }}
   volumeClaimTemplates:

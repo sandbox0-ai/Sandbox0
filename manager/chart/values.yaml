@@ -38,12 +38,32 @@ tolerations: []
 
 affinity: {}
 
+config:
+  http_port: 8080
+  metrics_port: 9090
+  log_level: "info"
+  cleanup_interval: "60s"
+  resync_period: "30s"
+  leader_election: true
+  default_template: "default"
+  default_template_namespace: "sb0"
+  default_cluster_id: "default"
+  default_sandbox_ttl: "5m"
+  database_url: "${DATABASE_URL}"
+  webhook_port: 9443
+  webhook_cert_path: "/tmp/k8s-webhook-server/serving-certs/tls.crt"
+  webhook_key_path: "/tmp/k8s-webhook-server/serving-certs/tls.key"
+  internal_auth_public_key_path: "/secrets/internal-auth/public.key"
+  internal_auth_private_key_path: "/secrets/internal-auth/private.key"
+
 env:
-  HTTP_PORT: "8080"
-  METRICS_PORT: "9090"
-  LOG_LEVEL: "info"
-  CLEANUP_INTERVAL: "60s"
-  RESYNC_PERIOD: "30s"
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: sandbox0-secrets
+        key: database-url
+        optional: true
+  # Example for setting other env vars if needed
 
 webhook:
   enabled: true

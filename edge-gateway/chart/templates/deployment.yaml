@@ -22,6 +22,7 @@ spec:
       labels:
         {{- include "edge-gateway.selectorLabels" . | nindent 8 }}
       annotations:
+        checksum/config: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
       serviceAccountName: {{ include "edge-gateway.serviceAccountName" . }}
@@ -36,21 +37,15 @@ spec:
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
-            {{- range $key, $value := .Values.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "edge-gateway.fullname" . }}-secrets
-                  key: database-url
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "edge-gateway.fullname" . }}-secrets
-                  key: jwt-secret
           volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
             {{- toYaml .Values.volumeMounts | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -70,9 +65,10 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
       volumes:
+        - name: config
+          configMap:
+            name: {{ include "edge-gateway.fullname" . }}-config
         {{- toYaml .Values.volumes | nindent 8 }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}

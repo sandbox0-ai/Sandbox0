@@ -47,21 +47,69 @@ pdb:
   enabled: true
   minAvailable: 2
 
+config:
+  grpc_addr: "0.0.0.0"
+  grpc_port: 8080
+  http_addr: "0.0.0.0"
+  http_port: 8081
+  metrics_port: 9090
+  metrics_enabled: true
+  log_level: "info"
+  audit_log: true
+  audit_file: "/var/log/storage-proxy/audit.log"
+  # S3 / JuiceFS
+  meta_url: "${META_URL}"
+  s3_bucket: "${S3_BUCKET}"
+  s3_region: "${S3_REGION}"
+  s3_endpoint: "${S3_ENDPOINT}"
+  s3_access_key: "${S3_ACCESS_KEY}"
+  s3_secret_key: "${S3_SECRET_KEY}"
+  default_cache_size: "10G"
+  default_cache_dir: "/var/lib/storage-proxy/cache"
+  cache_root: "/var/lib/storage-proxy/cache"
+  # Limits
+  max_ops_per_second: 10000
+  max_bytes_per_second: 1073741824
+  # Auth
+  internal_auth_public_key: "${INTERNAL_AUTH_PUBLIC_KEY}"
+  database_url: "${DATABASE_URL}"
+
 env:
-  DEFAULT_S3_REGION: "us-east-1"
-  DEFAULT_S3_ENDPOINT: ""
-  DEFAULT_CACHE_SIZE: "10G"
-  DEFAULT_CACHE_DIR: "/var/lib/storage-proxy/cache"
-  GRPC_ADDR: "0.0.0.0"
-  GRPC_PORT: "8080"
-  HTTP_ADDR: "0.0.0.0"
-  HTTP_PORT: "8081"
-  METRICS_PORT: "9090"
-  LOG_LEVEL: "info"
-  AUDIT_LOG: "true"
-  AUDIT_FILE: "/var/log/storage-proxy/audit.log"
-  MAX_OPS_PER_SECOND: "10000"
-  MAX_BYTES_PER_SECOND: "1073741824"
+  - name: META_URL
+    valueFrom:
+      secretKeyRef:
+        name: storage-proxy-secrets
+        key: meta-url
+  - name: S3_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: storage-proxy-secrets
+        key: aws-access-key-id
+        optional: true
+  - name: S3_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: storage-proxy-secrets
+        key: aws-secret-access-key
+        optional: true
+  - name: S3_REGION
+    value: "us-east-1"
+  - name: S3_BUCKET
+    value: "sandbox0-bucket"
+  - name: S3_ENDPOINT
+    value: ""
+  - name: INTERNAL_AUTH_PUBLIC_KEY
+    valueFrom:
+      secretKeyRef:
+        name: storage-proxy-secrets
+        key: internal-auth-public-key
+        optional: true
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: storage-proxy-secrets
+        key: database-url
+        optional: true
 
 secrets:
   jwtSecret: "CHANGE_ME_IN_PRODUCTION_USE_LONG_RANDOM_STRING"

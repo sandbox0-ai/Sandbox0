@@ -45,18 +45,37 @@ tolerations:
 affinity: {}
 
 config:
-  storageProxyCidr: ""
-  clusterDnsCidr: "10.96.0.10/32"
-  internalGatewayCidr: ""
+  log_level: "info"
+  metrics_port: 9090
+  health_port: 8080
+  node_name: "${NODE_NAME}"
+  namespace: "${NAMESPACE}"
+  kube_config: ""
+  resync_period: "30s"
+  proxy_listen_addr: "0.0.0.0"
+  proxy_http_port: 18080
+  proxy_https_port: 18443
+  dns_resolvers:
+    - "8.8.8.8:53"
+  metrics_report_interval: "10s"
+  fail_closed: true
+  storage_proxy_cidr: "10.43.0.0/16"
+  cluster_dns_cidr: "10.96.0.10/32"
+  internal_gateway_cidr: "10.42.0.0/16"
+  procd_port: 49983
+  use_ebpf: true
+  bpf_fs_path: "/sys/fs/bpf"
+  use_edt: true
 
 env:
-  LOG_LEVEL: "info"
-  METRICS_PORT: "9090"
-  HEALTH_PORT: "8080"
-  PROXY_HTTP_PORT: "18080"
-  PROXY_HTTPS_PORT: "18443"
-  FAIL_CLOSED: "true"
-  METRICS_REPORT_INTERVAL: "10s"
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+  - name: NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
 
 volumes:
   - name: xtables-lock
@@ -67,6 +86,10 @@ volumes:
     hostPath:
       path: /lib/modules
       type: Directory
+  - name: bpf-fs
+    hostPath:
+      path: /sys/fs/bpf
+      type: Directory
 
 volumeMounts:
   - name: xtables-lock
@@ -75,3 +98,6 @@ volumeMounts:
   - name: lib-modules
     mountPath: /lib/modules
     readOnly: true
+  - name: bpf-fs
+    mountPath: /sys/fs/bpf
+    mountPropagation: Bidirectional
