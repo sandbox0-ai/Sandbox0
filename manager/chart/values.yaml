@@ -1,9 +1,9 @@
 # Default values for manager
 
-replicaCount: 2
+replicaCount: 1
 
 image:
-  repository: sandbox0/manager
+  repository: sandbox0ai/manager
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -66,10 +66,11 @@ tolerations: []
 affinity: {}
 
 # Secrets - only for file-based secrets (keys, certs)
+# Uses global.jwt.internalJwtSecretName by default
 secrets:
-  internalJwtSecretName: "sandbox0-internal-jwt"
-  internalJwtPrivateKeyKey: "private.key"
-  internalJwtPublicKeyKey: "public.key"
+  internalJwtSecretName: ""  # defaults to {{ .Values.global.jwt.internalJwtSecretName }}
+  internalJwtPrivateKeyKey: ""  # defaults to {{ .Values.global.jwt.privateKeyKey }}
+  internalJwtPublicKeyKey: ""  # defaults to {{ .Values.global.jwt.publicKeyKey }}
 
 # Webhook TLS
 webhook:

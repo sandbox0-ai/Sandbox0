@@ -78,15 +78,15 @@ spec:
             name: {{ include "manager.fullname" . }}
         - name: internal-jwt-private-key
           secret:
-            secretName: {{ .Values.secrets.internalJwtSecretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName | default .Values.global.jwt.internalJwtSecretName }}
             items:
-              - key: {{ .Values.secrets.internalJwtPrivateKeyKey }}
+              - key: {{ .Values.secrets.internalJwtPrivateKeyKey | default .Values.global.jwt.privateKeyKey }}
                 path: internal_jwt_private.key
         - name: internal-jwt-public-key
           secret:
-            secretName: {{ .Values.secrets.internalJwtSecretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName | default .Values.global.jwt.internalJwtSecretName }}
             items:
-              - key: {{ .Values.secrets.internalJwtPublicKeyKey }}
+              - key: {{ .Values.secrets.internalJwtPublicKeyKey | default .Values.global.jwt.publicKeyKey }}
                 path: internal_jwt_public.key
         {{- if .Values.webhook.enabled }}
         - name: webhook-certs

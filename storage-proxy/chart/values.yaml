@@ -1,9 +1,9 @@
 # Default values for storage-proxy
 
-replicaCount: 3
+replicaCount: 1
 
 image:
-  repository: sandbox0/storage-proxy
+  repository: sandbox0ai/storage-proxy
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -75,9 +75,10 @@ persistence:
   existingClaim: ""
 
 # Secrets - only for file-based secrets (keys, certs)
+# Uses global.jwt.internalJwtSecretName by default
 secrets:
-  internalJwtSecretName: "sandbox0-internal-jwt"
-  internalJwtPublicKeyKey: "public.key"
+  internalJwtSecretName: ""  # defaults to {{ .Values.global.jwt.internalJwtSecretName }}
+  internalJwtPublicKeyKey: ""  # defaults to {{ .Values.global.jwt.publicKeyKey }}
 
 # RBAC for watching pods
 rbac:
@@ -93,17 +94,19 @@ config:
   http_addr: "0.0.0.0"
   http_port: 8081
 
-  # Database - configure directly (no env var needed)
-  database_url: "postgres://user:pass@postgres:5432/sandbox0"
+  # Database - uses global value by default
+  # Override: set this to a specific value to override global.database.url
+  database_url: ""  # defaults to {{ .Values.global.database.url }}
 
-  # JuiceFS - configure directly (no env var needed)
-  meta_url: "postgres://user:pass@postgres:5432/juicefs"
-  s3_bucket: "sandbox0-data"
-  s3_region: "us-east-1"
-  s3_endpoint: "https://s3.amazonaws.com"
-  s3_access_key: "your-access-key"
-  s3_secret_key: "your-secret-key"
-  s3_session_token: ""
+  # JuiceFS - uses global values by default
+  # Override: set these to specific values to override global.juicefs.*
+  meta_url: ""  # defaults to {{ .Values.global.juicefs.meta_url }}
+  s3_bucket: ""  # defaults to {{ .Values.global.juicefs.s3_bucket }}
+  s3_region: ""  # defaults to {{ .Values.global.juicefs.s3_region }}
+  s3_endpoint: ""  # defaults to {{ .Values.global.juicefs.s3_endpoint }}
+  s3_access_key: ""  # defaults to {{ .Values.global.juicefs.s3_access_key }}
+  s3_secret_key: ""  # defaults to {{ .Values.global.juicefs.s3_secret_key }}
+  s3_session_token: ""  # defaults to {{ .Values.global.juicefs.s3_session_token }}
 
   # Cache defaults
   default_cache_size: "1G"

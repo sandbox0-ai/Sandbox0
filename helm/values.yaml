@@ -1,2 +1,177 @@
-# Global values
-global: {}
+# Global configuration shared across all services
+# Override these values in production!
+global:
+  tag: &globalTag "latest"
+  # Database configuration (shared by all services)
+  database:
+    url: "postgres://sandbox0:sandbox0@postgres:5432/sandbox0?sslmode=disable"
+  
+  # JuiceFS metadata database (for storage-proxy)
+  juicefs:
+    meta_url: "postgres://juicefs:juicefs@postgres:5432/juicefs?sslmode=disable"
+    s3_bucket: "sandbox0-data"
+    s3_region: "us-east-1"
+    s3_endpoint: "https://s3.amazonaws.com"
+    s3_access_key: "your-access-key-here"
+    s3_secret_key: "your-secret-key-here"
+    s3_session_token: ""
+  
+  # JWT configuration
+  jwt:
+    # For edge-gateway user authentication
+    secret: "change-me-in-production-use-strong-random-secret"
+    
+    # For internal service-to-service authentication
+    # These are references to k8s secrets (created separately)
+    internalJwtSecretName: "sandbox0-internal-jwt"
+    privateKeyKey: "private.key"
+    publicKeyKey: "public.key"
+  
+  # Optional: built-in auth initial user (edge-gateway)
+  initUser:
+    enabled: false
+    email: "admin@localhost"
+    password: "change-me-in-production"
+    name: "Admin"
+
+# Service-specific overrides (optional)
+# Each service can override global values if needed
+#
+manager:
+  replicaCount: 1
+  
+  image:
+    repository: sandbox0ai/manager
+    tag: *globalTag
+  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  
+  # Optional: override global database URL
+  # config:
+  #   database_url: "postgres://custom-url"
+
+# ------------------------------------------------------------------------------
+# Storage-proxy - JuiceFS storage proxy for persistent volumes
+# ------------------------------------------------------------------------------
+storage-proxy:
+  replicaCount: 1
+  
+  image:
+    repository: sandbox0ai/storage-proxy
+    tag: *globalTag
+  
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+  
+  # Cache configuration
+  config:
+    cache_root: "/var/cache/storage-proxy"
+    cache_size: "10737418240"  # 10GB
+  
+  persistence:
+    enabled: true
+    size: 40Gi
+    storageClass: "default"
+
+# ------------------------------------------------------------------------------
+# Internal-gateway - Internal service gateway
+# ------------------------------------------------------------------------------
+internal-gateway:
+  replicaCount: 1
+  
+  image:
+    repository: sandbox0ai/internal-gateway
+    tag: *globalTag
+  
+  resources:
+    #limits:
+    #  cpu: 500m
+    #  memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  config:
+    manager_url: "http://manager:8080"
+    storage_proxy_url: "http://storage-proxy:8081"
+
+# ------------------------------------------------------------------------------
+# Edge-gateway - Public API gateway
+# ------------------------------------------------------------------------------
+edge-gateway:
+  replicaCount: 1
+  
+  image:
+    repository: sandbox0ai/edge-gateway
+    tag: *globalTag
+  
+  resources:
+    #limits:
+    #  cpu: 500m
+    #  memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  
+  service:
+    type: LoadBalancer  # Change to ClusterIP if using Ingress
+    port: 80
+  
+  # Ingress configuration (optional)
+  ingress:
+    enabled: false
+    className: "nginx"
+    annotations: {}
+      # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: api.yourdomain.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+      # - secretName: edge-gateway-tls
+      #   hosts:
+      #     - api.yourdomain.com
+  
+  config:
+    internal_gateway_url: "http://internal-gateway:8443"
+    
+    # Authentication providers
+    built_in_auth:
+      enabled: true
+      allow_registration: false
+      email_verification_required: false
+      admin_only: false
+
+# ------------------------------------------------------------------------------
+# Netd - Network daemon for L7 proxy and eBPF policies
+# ------------------------------------------------------------------------------
+netd:
+  image:
+    repository: sandbox0ai/netd
+    tag: *globalTag
+  
+  resources:
+    #limits:
+    #  cpu: 200m
+    #  memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  
+  config:
+    # Network policy - if true, blocks sandbox all traffic when netd is not ready
+    fail_closed: true
+    # use_ebpf enables eBPF-based bandwidth control (more efficient than tc htb)
+    use_ebpf: true

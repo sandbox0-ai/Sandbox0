@@ -1,0 +1,32 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+IMPORTANT: Before deploying to production, make sure to:
+
+1. Create the internal JWT secret with private/public key pair:
+
+   kubectl -n sandbox0-system create secret generic {{ .Values.global.jwt.internalJwtSecretName }} \
+     --from-file={{ .Values.global.jwt.privateKeyKey }}=/path/to/private.key \
+     --from-file={{ .Values.global.jwt.publicKeyKey }}=/path/to/public.key
+
+2. Update the following values in your values.yaml or via --set:
+
+   - global.database.url
+   - global.juicefs.meta_url
+   - global.juicefs.s3_bucket
+   - global.juicefs.s3_access_key
+   - global.juicefs.s3_secret_key
+   - global.jwt.secret
+
+3. If using built-in authentication, configure:
+
+   - global.initUser.email
+   - global.initUser.password
+   - global.initUser.name
+

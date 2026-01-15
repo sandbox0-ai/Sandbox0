@@ -61,9 +61,9 @@ spec:
             name: {{ include "internal-gateway.fullname" . }}
         - name: internal-jwt-private-key
           secret:
-            secretName: {{ .Values.secrets.internalJwtSecretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName | default .Values.global.jwt.internalJwtSecretName }}
             items:
-              - key: {{ .Values.secrets.internalJwtPrivateKeyKey }}
+              - key: {{ .Values.secrets.internalJwtPrivateKeyKey | default .Values.global.jwt.privateKeyKey }}
                 path: internal_jwt_private.key
       {{- with .Values.nodeSelector }}
       nodeSelector:

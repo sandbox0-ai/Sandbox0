@@ -72,9 +72,9 @@ spec:
             name: {{ include "storage-proxy.fullname" . }}
         - name: internal-jwt-public-key
           secret:
-            secretName: {{ .Values.secrets.internalJwtSecretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName | default .Values.global.jwt.internalJwtSecretName }}
             items:
-              - key: {{ .Values.secrets.internalJwtPublicKeyKey }}
+              - key: {{ .Values.secrets.internalJwtPublicKeyKey | default .Values.global.jwt.publicKeyKey }}
                 path: internal_jwt_public.key
         - name: cache
           {{- if .Values.persistence.enabled }}

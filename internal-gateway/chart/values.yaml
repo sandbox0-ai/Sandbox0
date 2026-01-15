@@ -1,9 +1,9 @@
 # Default values for internal-gateway
 
-replicaCount: 2
+replicaCount: 1
 
 image:
-  repository: sandbox0/internal-gateway
+  repository: sandbox0ai/internal-gateway
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -58,9 +58,10 @@ tolerations: []
 affinity: {}
 
 # Secrets - only for file-based secrets (keys, certs)
+# Uses global.jwt.internalJwtSecretName by default
 secrets:
-  internalJwtSecretName: "sandbox0-internal-jwt"
-  internalJwtPrivateKeyKey: "private.key"
+  internalJwtSecretName: ""  # defaults to {{ .Values.global.jwt.internalJwtSecretName }}
+  internalJwtPrivateKeyKey: ""  # defaults to {{ .Values.global.jwt.privateKeyKey }}
 
 # Application config - directly maps to config.yaml (snake_case)
 config:

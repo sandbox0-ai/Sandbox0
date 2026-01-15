@@ -6,4 +6,10 @@ metadata:
     {{- include "manager.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- .Values.config | toYaml | nindent 4 }}
+    {{- $config := deepCopy .Values.config }}
+    {{- if and .Values.global .Values.global.database }}
+    {{- if not $config.database_url }}
+    {{- $_ := set $config "database_url" .Values.global.database.url }}
+    {{- end }}
+    {{- end }}
+    {{- $config | toYaml | nindent 4 }}

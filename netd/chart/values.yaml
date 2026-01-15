@@ -1,7 +1,7 @@
 # Default values for netd
 
 image:
-  repository: sandbox0/netd
+  repository: sandbox0ai/netd
   pullPolicy: IfNotPresent
   tag: ""
 

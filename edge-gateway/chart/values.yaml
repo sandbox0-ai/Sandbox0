@@ -1,9 +1,9 @@
 # Default values for edge-gateway
 
-replicaCount: 2
+replicaCount: 1
 
 image:
-  repository: sandbox0/edge-gateway
+  repository: sandbox0ai/edge-gateway
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -69,9 +69,10 @@ tolerations: []
 affinity: {}
 
 # Secrets - only for file-based secrets (keys, certs)
+# Uses global.jwt.internalJwtSecretName by default
 secrets:
-  internalJwtSecretName: "sandbox0-internal-jwt"
-  internalJwtPrivateKeyKey: "private.key"
+  internalJwtSecretName: ""  # defaults to {{ .Values.global.jwt.internalJwtSecretName }}
+  internalJwtPrivateKeyKey: ""  # defaults to {{ .Values.global.jwt.privateKeyKey }}
 
 # Application config - directly maps to config.yaml (snake_case)
 config:
@@ -80,9 +81,10 @@ config:
   log_level: "info"
   internal_gateway_url: "http://internal-gateway:8443"
 
-  # Database and JWT - configure directly (no env var needed)
-  database_url: "postgres://user:pass@postgres:5432/sandbox0"
-  jwt_secret: "change-me-in-production-use-strong-random-secret"
+  # Database and JWT - uses global values by default
+  # Override: set these to specific values to override global.*
+  database_url: ""  # defaults to {{ .Values.global.database.url }}
+  jwt_secret: ""  # defaults to {{ .Values.global.jwt.secret }}
 
   # JWT
   jwt_access_token_ttl: "15m"
@@ -106,11 +108,7 @@ config:
     allow_registration: false
     email_verification_required: false
     admin_only: false
-    # Uncomment to create initial admin user
-    # init_user:
-    #   email: "admin@localhost"
-    #   password: "change-me-in-production"
-    #   name: "Admin"
+    # init_user can be configured via global.initUser (if enabled)
 
   # OIDC providers (optional)
   # oidc_providers:
