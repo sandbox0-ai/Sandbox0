@@ -1,4 +1,4 @@
-.PHONY: all build build-all obuild obuild-all test lint tidy vendor clean helm-update
+.PHONY: all build build-all obuild obuild-all test lint tidy vendor clean helm-update release
 
 SERVICES := edge-gateway internal-gateway manager storage-proxy netd k8s-plugin
 
@@ -115,3 +115,12 @@ helm-update:
 			cp -r $$service/chart helm/charts/$$service; \
 		fi; \
 	done
+
+# Release helm chart and git tag in one shot:
+#   make release VERSION=v0.1.0
+release:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION is required. Usage: make release VERSION=v0.1.0"; \
+		exit 2; \
+	fi
+	@bash helm/release.sh "$(VERSION)"
