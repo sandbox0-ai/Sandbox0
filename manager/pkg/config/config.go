@@ -14,7 +14,7 @@ type Config struct {
 	HTTPPort int `yaml:"http_port"`
 
 	// template
-	DefaultTemplate          string `yaml:"default_template"`
+	DefaultTemplateName      string `yaml:"default_template_name"`
 	DefaultTemplateNamespace string `yaml:"default_template_namespace"`
 	DefaultTemplateImage     string `yaml:"default_template_image"`
 	DefaultClusterId         string `yaml:"default_cluster_id"`
@@ -50,7 +50,7 @@ type Config struct {
 func defaultConfig() *Config {
 	return &Config{
 		HTTPPort:                 8080,
-		DefaultTemplate:          "default",
+		DefaultTemplateName:      "default",
 		DefaultTemplateNamespace: "sandbox0",
 		DefaultTemplateImage:     "sandbox0ai/otemplates:default-v0.1.0",
 		DefaultClusterId:         "default",

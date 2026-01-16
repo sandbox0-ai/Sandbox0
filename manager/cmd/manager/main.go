@@ -23,8 +23,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -73,14 +71,6 @@ func main() {
 	crdClient, err := clientset.NewForConfig(k8sConfig)
 	if err != nil {
 		logger.Fatal("Failed to create CRD clientset", zap.Error(err))
-	}
-
-	// Ensure default template namespace exists
-	if err := ensureNamespace(ctx, k8sClient, cfg.DefaultTemplateNamespace, logger); err != nil {
-		logger.Fatal("Failed to ensure default template namespace",
-			zap.String("namespace", cfg.DefaultTemplateNamespace),
-			zap.Error(err),
-		)
 	}
 
 	// Initialize database and clock if DATABASE_URL is provided
@@ -427,42 +417,4 @@ func toZapFields(keysAndValues []any) []zap.Field {
 		fields = append(fields, zap.Any(key, keysAndValues[i+1]))
 	}
 	return fields
-}
-
-// ensureNamespace creates a namespace if it does not exist
-func ensureNamespace(ctx context.Context, client kubernetes.Interface, namespace string, logger *zap.Logger) error {
-	_, err := client.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-	if err == nil {
-		// Namespace already exists
-		logger.Info("Namespace already exists", zap.String("namespace", namespace))
-		return nil
-	}
-
-	if !apierrors.IsNotFound(err) {
-		// Unexpected error
-		return fmt.Errorf("failed to check namespace: %w", err)
-	}
-
-	// Namespace does not exist, create it
-	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "sandbox0-manager",
-			},
-		},
-	}
-
-	_, err = client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-	if err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			// Race condition: namespace was created by another process
-			logger.Info("Namespace was created by another process", zap.String("namespace", namespace))
-			return nil
-		}
-		return fmt.Errorf("failed to create namespace: %w", err)
-	}
-
-	logger.Info("Created namespace", zap.String("namespace", namespace))
-	return nil
 }

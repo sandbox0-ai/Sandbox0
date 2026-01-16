@@ -18,21 +18,21 @@ var (
 // Claims represents JWT claims
 type Claims struct {
 	jwt.RegisteredClaims
-	UserID   string   `json:"user_id"`
-	TeamID   string   `json:"team_id"`
-	Email    string   `json:"email"`
-	Name     string   `json:"name"`
-	Roles    []string `json:"roles"`
-	IsAdmin  bool     `json:"is_admin"`
-	TokenType string  `json:"token_type"` // "access" or "refresh"
+	UserID    string   `json:"user_id"`
+	TeamID    string   `json:"team_id"`
+	Email     string   `json:"email"`
+	Name      string   `json:"name"`
+	Roles     []string `json:"roles"`
+	IsAdmin   bool     `json:"is_admin"`
+	TokenType string   `json:"token_type"` // "access" or "refresh"
 }
 
 // Issuer handles JWT token creation and validation
 type Issuer struct {
-	secret           []byte
-	accessTokenTTL   time.Duration
-	refreshTokenTTL  time.Duration
-	issuer           string
+	secret          []byte
+	accessTokenTTL  time.Duration
+	refreshTokenTTL time.Duration
+	issuer          string
 }
 
 // NewIssuer creates a new JWT issuer
@@ -47,9 +47,9 @@ func NewIssuer(secret string, accessTTL, refreshTTL time.Duration) *Issuer {
 
 // TokenPair represents an access/refresh token pair
 type TokenPair struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	AccessToken      string    `json:"access_token"`
+	RefreshToken     string    `json:"refresh_token"`
+	ExpiresAt        time.Time `json:"expires_at"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 }
 

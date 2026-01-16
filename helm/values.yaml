@@ -128,8 +128,13 @@ manager:
       memory: 256Mi
   
   config:
-    default_template: "default"
+    default_template_name: "default"
     default_template_namespace: "sandbox0"
+    default_template_image: "sandbox0ai/otemplates:default-v0.1.0"
+  
+  # Namespace management
+  sandboxNamespace:
+    create: true  # Set to false if namespace is managed externally
 
 # ------------------------------------------------------------------------------
 # Storage-proxy - JuiceFS storage proxy for persistent volumes

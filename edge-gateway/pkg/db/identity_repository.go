@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	ErrIdentityNotFound     = errors.New("identity not found")
+	ErrIdentityNotFound      = errors.New("identity not found")
 	ErrIdentityAlreadyExists = errors.New("identity already exists")
 )
 

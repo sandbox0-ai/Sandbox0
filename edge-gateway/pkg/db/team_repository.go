@@ -5,28 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
 // TeamMemberWithUser is a result type that combines TeamMember with User details
 type TeamMemberWithUser struct {
-	ID       string    `json:"id"`
-	TeamID   string    `json:"team_id"`
-	UserID   string    `json:"user_id"`
-	Role     string    `json:"role"`
-	JoinedAt time.Time `json:"joined_at"`
-	UserID2   string    `json:"user_id2"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	AvatarURL string    `json:"avatar_url"`
-	Roles     []string  `json:"roles"`
-	EmailVerified bool   `json:"email_verified"`
-	IsAdmin   bool      `json:"is_admin"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	TeamID        string    `json:"team_id"`
+	UserID        string    `json:"user_id"`
+	Role          string    `json:"role"`
+	JoinedAt      time.Time `json:"joined_at"`
+	UserID2       string    `json:"user_id2"`
+	Email         string    `json:"email"`
+	Name          string    `json:"name"`
+	AvatarURL     string    `json:"avatar_url"`
+	Roles         []string  `json:"roles"`
+	EmailVerified bool      `json:"email_verified"`
+	IsAdmin       bool      `json:"is_admin"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 var (

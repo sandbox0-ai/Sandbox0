@@ -31,7 +31,7 @@ func (s *Server) claimSandbox(c *gin.Context) {
 	if req.Template == "" || req.Namespace == "" {
 		cfg := config.LoadConfig()
 		if req.Template == "" {
-			req.Template = cfg.DefaultTemplate
+			req.Template = cfg.DefaultTemplateName
 		}
 		if req.Namespace == "" {
 			req.Namespace = cfg.DefaultTemplateNamespace

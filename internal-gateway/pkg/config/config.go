@@ -30,13 +30,13 @@ type Config struct {
 // defaultConfig returns the default configuration
 func defaultConfig() *Config {
 	return &Config{
-		HTTPPort:                  8443,
-		LogLevel:                  "info",
-		ManagerURL:                "http://manager.sandbox0-system:8080",
-		StorageProxyURL:           "http://storage-proxy.sandbox0-system:8081",
-		ProxyTimeout:              30 * time.Second,
-		ShutdownTimeout:           30 * time.Second,
-		HealthCheckPeriod:         10 * time.Second,
+		HTTPPort:          8443,
+		LogLevel:          "info",
+		ManagerURL:        "http://manager.sandbox0-system:8080",
+		StorageProxyURL:   "http://storage-proxy.sandbox0-system:8081",
+		ProxyTimeout:      30 * time.Second,
+		ShutdownTimeout:   30 * time.Second,
+		HealthCheckPeriod: 10 * time.Second,
 	}
 }
 

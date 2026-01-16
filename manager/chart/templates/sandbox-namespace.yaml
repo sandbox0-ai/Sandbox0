@@ -1,0 +1,17 @@
+{{- if .Values.sandboxNamespace.create }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.config.default_template_namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: sandbox0
+    sandbox0.ai/namespace-type: "templates"
+  annotations:
+    # Create namespace before manager starts (using pre-install hook)
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+{{- end }}

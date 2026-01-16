@@ -7,6 +7,28 @@ To learn more about the release, try:
   $ helm status {{ .Release.Name }}
   $ helm get all {{ .Release.Name }}
 
+INSTALLATION SEQUENCE:
+  1. PostgreSQL and RustFS (infrastructure)
+  2. Manager chart installs:
+     - Namespace '{{ .Values.manager.config.default_template_namespace }}' (pre-install hook, weight -10)
+     - CRDs (sandboxtemplates, sandboxnetworkpolicies, sandboxbandwidthpolicies)
+     - Manager deployment
+  3. Default SandboxTemplate CR '{{ .Values.defaultTemplate.name }}' (post-install hook, weight 10)
+  4. Other services (storage-proxy, netd, internal-gateway, edge-gateway)
+
+VERIFY INSTALLATION:
+  # Check if namespace was created
+  $ kubectl get namespace {{ .Values.manager.config.default_template_namespace }}
+
+  # Check if CRDs are installed
+  $ kubectl get crd | grep sandbox0.ai
+
+  # Check if default template is created
+  $ kubectl get sandboxtemplate -n {{ .Values.manager.config.default_template_namespace }}
+
+  # Check all pods are running
+  $ kubectl get pods -n {{ .Release.Namespace }}
+
 IMPORTANT: Before deploying to production, make sure to:
 
 1. Create the internal JWT secret with private/public key pair:

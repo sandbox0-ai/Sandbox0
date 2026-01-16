@@ -5,22 +5,28 @@ type: application
 version: 0.1.0
 appVersion: "v0.1.0"
 dependencies:
-  - name: rustfs
-    version: 0.0.79
-    repository: https://charts.rustfs.com
-    condition: rustfs.enabled
+  # Phase 1: Infrastructure dependencies (databases, storage)
   - name: postgresql
     version: 18.2.0
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
-  - name: edge-gateway
-    version: 0.1.0
-  - name: internal-gateway
-    version: 0.1.0
+  - name: rustfs
+    version: 0.0.79
+    repository: https://charts.rustfs.com
+    condition: rustfs.enabled
+  
+  # Phase 2: Manager (installs CRDs and creates namespace)
   - name: manager
+    version: 0.1.0
+  
+  # Phase 3: Other services (after CRDs and namespace are ready)
+  # SandboxTemplate CR is created via templates/sandboxtemplate.yaml with post-install hook
+  - name: storage-proxy
     version: 0.1.0
   - name: netd
     version: 0.1.0
-  - name: storage-proxy
+  - name: internal-gateway
+    version: 0.1.0
+  - name: edge-gateway
     version: 0.1.0
 

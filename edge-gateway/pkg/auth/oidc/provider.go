@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	ErrProviderNotFound     = errors.New("OIDC provider not found")
-	ErrProviderDisabled     = errors.New("OIDC provider is disabled")
-	ErrInvalidState         = errors.New("invalid OAuth state")
-	ErrInvalidCode          = errors.New("invalid authorization code")
-	ErrMissingEmail         = errors.New("email not provided by IdP")
-	ErrEmailDomainMismatch  = errors.New("email domain not allowed")
+	ErrProviderNotFound    = errors.New("OIDC provider not found")
+	ErrProviderDisabled    = errors.New("OIDC provider is disabled")
+	ErrInvalidState        = errors.New("invalid OAuth state")
+	ErrInvalidCode         = errors.New("invalid authorization code")
+	ErrMissingEmail        = errors.New("email not provided by IdP")
+	ErrEmailDomainMismatch = errors.New("email domain not allowed")
 )
 
 // UserInfo contains user information from OIDC token
@@ -33,12 +33,12 @@ type UserInfo struct {
 
 // Provider represents a configured OIDC provider
 type Provider struct {
-	id            string
-	name          string
-	config        *config.OIDCProviderConfig
-	oidcProvider  *oidc.Provider
-	oauth2Config  *oauth2.Config
-	verifier      *oidc.IDTokenVerifier
+	id           string
+	name         string
+	config       *config.OIDCProviderConfig
+	oidcProvider *oidc.Provider
+	oauth2Config *oauth2.Config
+	verifier     *oidc.IDTokenVerifier
 }
 
 // NewProvider creates a new OIDC provider

@@ -88,13 +88,17 @@ crds:
 rbac:
   create: true
 
+# Sandbox Namespace (config.default_template_namespace) - Namespace for SandboxTemplates
+sandboxNamespace:
+  create: true  # Set to false if namespace is managed externally
+
 # Application config - directly maps to config.yaml (snake_case)
 config:
   http_port: 8080
   log_level: "info"
 
   # Template defaults
-  default_template: "default"
+  default_template_name: "default"
   default_template_namespace: "sandbox0"
   default_template_image: "sandbox0ai/otemplates:default-v0.1.0"
   default_cluster_id: "default"
