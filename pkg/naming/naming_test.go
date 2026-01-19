@@ -54,3 +54,29 @@ func TestSlugWithHashTruncates(t *testing.T) {
 		t.Fatalf("generated name invalid: %v", err)
 	}
 }
+
+func TestClusterIDFromName(t *testing.T) {
+	clusterID, err := ClusterIDFromName("My Cluster East 1")
+	if err != nil {
+		t.Fatalf("ClusterIDFromName: %v", err)
+	}
+	if len(clusterID) > clusterIDMaxLen {
+		t.Fatalf("cluster_id too long: %d", len(clusterID))
+	}
+	if err := validateDNSLabel(clusterID); err != nil {
+		t.Fatalf("cluster_id invalid: %v", err)
+	}
+}
+
+func TestTemplateIDFromName(t *testing.T) {
+	templateID, err := TemplateIDFromName("My Template Name")
+	if err != nil {
+		t.Fatalf("TemplateIDFromName: %v", err)
+	}
+	if len(templateID) > dnsLabelMaxLen {
+		t.Fatalf("template_id too long: %d", len(templateID))
+	}
+	if err := validateDNSLabel(templateID); err != nil {
+		t.Fatalf("template_id invalid: %v", err)
+	}
+}

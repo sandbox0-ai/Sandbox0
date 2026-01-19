@@ -7,6 +7,7 @@ SET search_path TO scheduler;
 -- Clusters table: stores registered data-plane clusters
 CREATE TABLE IF NOT EXISTS scheduler_clusters (
     cluster_id VARCHAR(255) PRIMARY KEY,
+    cluster_name VARCHAR(255) NOT NULL,
     internal_gateway_url VARCHAR(1024) NOT NULL,
     weight INTEGER NOT NULL DEFAULT 100,
     enabled BOOLEAN NOT NULL DEFAULT true,
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS scheduler_clusters (
 -- Templates table: stores SandboxTemplate definitions (source of truth)
 CREATE TABLE IF NOT EXISTS scheduler_templates (
     template_id VARCHAR(255) NOT NULL,
+    template_name VARCHAR(255) NOT NULL,
     scope VARCHAR(32) NOT NULL DEFAULT 'public', -- public, team
     team_id VARCHAR(255) NOT NULL DEFAULT '',    -- only for scope=team
     user_id VARCHAR(255) NOT NULL DEFAULT '',    -- creator/updater user id (best-effort)
@@ -48,7 +50,9 @@ CREATE TABLE IF NOT EXISTS scheduler_template_allocations (
 
 -- Index for efficient queries
 CREATE INDEX IF NOT EXISTS idx_scheduler_clusters_enabled ON scheduler_clusters(enabled);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_clusters_name ON scheduler_clusters(cluster_name);
 CREATE INDEX IF NOT EXISTS idx_scheduler_templates_template_id ON scheduler_templates(template_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_templates_name ON scheduler_templates(scope, team_id, template_name);
 CREATE INDEX IF NOT EXISTS idx_scheduler_templates_team_id ON scheduler_templates(team_id);
 CREATE INDEX IF NOT EXISTS idx_scheduler_allocations_cluster ON scheduler_template_allocations(cluster_id);
 CREATE INDEX IF NOT EXISTS idx_scheduler_allocations_sync_status ON scheduler_template_allocations(sync_status);

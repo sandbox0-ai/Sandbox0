@@ -4,13 +4,14 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/scheduler/pkg/db"
 	"go.uber.org/zap"
 )
 
 // ClusterRequest represents the request body for creating/updating a cluster
 type ClusterRequest struct {
-	ClusterID          string `json:"cluster_id"`
+	ClusterName        string `json:"cluster_name"`
 	InternalGatewayURL string `json:"internal_gateway_url"`
 	Weight             int    `json:"weight"`
 	Enabled            bool   `json:"enabled"`
@@ -76,8 +77,8 @@ func (s *Server) createCluster(c *gin.Context) {
 		return
 	}
 
-	if req.ClusterID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cluster_id is required"})
+	if err := naming.ValidateClusterName(req.ClusterName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -91,8 +92,14 @@ func (s *Server) createCluster(c *gin.Context) {
 		req.Weight = 100
 	}
 
+	clusterID, err := naming.ClusterIDFromName(req.ClusterName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Check if cluster already exists
-	existing, err := s.repo.GetCluster(c.Request.Context(), req.ClusterID)
+	existing, err := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if err != nil {
 		s.logger.Error("Failed to check existing cluster", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create cluster"})
@@ -104,7 +111,8 @@ func (s *Server) createCluster(c *gin.Context) {
 	}
 
 	cluster := &db.Cluster{
-		ClusterID:          req.ClusterID,
+		ClusterID:          clusterID,
+		ClusterName:        req.ClusterName,
 		InternalGatewayURL: req.InternalGatewayURL,
 		Weight:             req.Weight,
 		Enabled:            req.Enabled,
@@ -119,14 +127,15 @@ func (s *Server) createCluster(c *gin.Context) {
 	}
 
 	s.logger.Info("Cluster created",
-		zap.String("cluster_id", req.ClusterID),
+		zap.String("cluster_id", clusterID),
+		zap.String("cluster_name", req.ClusterName),
 		zap.String("internal_gateway_url", req.InternalGatewayURL),
 		zap.Int("weight", req.Weight),
 		zap.Bool("enabled", req.Enabled),
 	)
 
 	// Get the created cluster to return with timestamps
-	created, _ := s.repo.GetCluster(c.Request.Context(), req.ClusterID)
+	created, _ := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if created != nil {
 		c.JSON(http.StatusCreated, created)
 	} else {
@@ -169,9 +178,17 @@ func (s *Server) updateCluster(c *gin.Context) {
 	if req.Weight <= 0 {
 		req.Weight = existing.Weight
 	}
+	if req.ClusterName == "" {
+		req.ClusterName = existing.ClusterName
+	}
+	if err := naming.ValidateClusterName(req.ClusterName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	cluster := &db.Cluster{
 		ClusterID:          clusterID,
+		ClusterName:        req.ClusterName,
 		InternalGatewayURL: req.InternalGatewayURL,
 		Weight:             req.Weight,
 		Enabled:            req.Enabled,
@@ -187,6 +204,7 @@ func (s *Server) updateCluster(c *gin.Context) {
 
 	s.logger.Info("Cluster updated",
 		zap.String("cluster_id", clusterID),
+		zap.String("cluster_name", req.ClusterName),
 		zap.String("internal_gateway_url", req.InternalGatewayURL),
 		zap.Int("weight", req.Weight),
 		zap.Bool("enabled", req.Enabled),

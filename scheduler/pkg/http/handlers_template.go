@@ -8,14 +8,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
+	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/scheduler/pkg/db"
 	"go.uber.org/zap"
 )
 
 // TemplateRequest represents the request body for updating a template
 type TemplateRequest struct {
-	Public *bool                        `json:"public,omitempty"`
-	Spec   v1alpha1.SandboxTemplateSpec `json:"spec"`
+	TemplateName *string                      `json:"template_name,omitempty"`
+	Public       *bool                        `json:"public,omitempty"`
+	Spec         v1alpha1.SandboxTemplateSpec `json:"spec"`
 }
 
 // listTemplates lists all templates
@@ -102,9 +104,9 @@ func (s *Server) getTemplate(c *gin.Context) {
 // createTemplate creates a new template
 func (s *Server) createTemplate(c *gin.Context) {
 	var req struct {
-		Name   string                       `json:"name"`
-		Public bool                         `json:"public,omitempty"`
-		Spec   v1alpha1.SandboxTemplateSpec `json:"spec"`
+		TemplateName string                       `json:"template_name"`
+		Public       bool                         `json:"public,omitempty"`
+		Spec         v1alpha1.SandboxTemplateSpec `json:"spec"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -112,8 +114,8 @@ func (s *Server) createTemplate(c *gin.Context) {
 		return
 	}
 
-	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+	if err := naming.ValidateTemplateName(req.TemplateName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -137,8 +139,14 @@ func (s *Server) createTemplate(c *gin.Context) {
 		return
 	}
 
+	templateID, err := naming.TemplateIDFromName(req.TemplateName)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Check if template already exists
-	existing, err := s.repo.GetTemplate(c.Request.Context(), scope, teamID, req.Name)
+	existing, err := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to check existing template", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create template"})
@@ -150,11 +158,12 @@ func (s *Server) createTemplate(c *gin.Context) {
 	}
 
 	template := &db.Template{
-		TemplateID: req.Name,
-		Scope:      scope,
-		TeamID:     teamID,
-		UserID:     claims.UserID,
-		Spec:       req.Spec,
+		TemplateID:   templateID,
+		TemplateName: req.TemplateName,
+		Scope:        scope,
+		TeamID:       teamID,
+		UserID:       claims.UserID,
+		Spec:         req.Spec,
 	}
 
 	if err := s.repo.CreateTemplate(c.Request.Context(), template); err != nil {
@@ -166,7 +175,8 @@ func (s *Server) createTemplate(c *gin.Context) {
 	}
 
 	s.logger.Info("Template created",
-		zap.String("template_id", req.Name),
+		zap.String("template_id", templateID),
+		zap.String("template_name", req.TemplateName),
 		zap.String("scope", scope),
 		zap.String("team_id", teamID),
 	)
@@ -177,7 +187,7 @@ func (s *Server) createTemplate(c *gin.Context) {
 	}
 
 	// Get the created template to return with timestamps
-	created, _ := s.repo.GetTemplate(c.Request.Context(), scope, teamID, req.Name)
+	created, _ := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if created != nil {
 		c.JSON(http.StatusCreated, created)
 	} else {
@@ -231,12 +241,21 @@ func (s *Server) updateTemplate(c *gin.Context) {
 		return
 	}
 
+	if req.TemplateName == nil || *req.TemplateName == "" {
+		req.TemplateName = &existing.TemplateName
+	}
+	if err := naming.ValidateTemplateName(*req.TemplateName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	template := &db.Template{
-		TemplateID: templateID,
-		Scope:      scope,
-		TeamID:     teamID,
-		UserID:     claims.UserID,
-		Spec:       req.Spec,
+		TemplateID:   templateID,
+		TemplateName: *req.TemplateName,
+		Scope:        scope,
+		TeamID:       teamID,
+		UserID:       claims.UserID,
+		Spec:         req.Spec,
 	}
 
 	if err := s.repo.UpdateTemplate(c.Request.Context(), template); err != nil {
@@ -249,6 +268,7 @@ func (s *Server) updateTemplate(c *gin.Context) {
 
 	s.logger.Info("Template updated",
 		zap.String("template_id", templateID),
+		zap.String("template_name", *req.TemplateName),
 		zap.String("scope", scope),
 		zap.String("team_id", teamID),
 	)

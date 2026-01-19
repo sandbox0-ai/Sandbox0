@@ -17,6 +17,7 @@ const (
 	defaultClusterID  = "default"
 	nameHashLength    = 8
 	clusterKeyMaxLen  = 32
+	clusterIDMaxLen   = 20
 	sandboxNamePrefix = "rs"
 )
 

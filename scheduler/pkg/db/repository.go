@@ -14,6 +14,7 @@ import (
 // Cluster represents a registered data-plane cluster
 type Cluster struct {
 	ClusterID          string     `json:"cluster_id"`
+	ClusterName        string     `json:"cluster_name"`
 	InternalGatewayURL string     `json:"internal_gateway_url"`
 	Weight             int        `json:"weight"`
 	Enabled            bool       `json:"enabled"`
@@ -24,13 +25,14 @@ type Cluster struct {
 
 // Template represents a SandboxTemplate stored in the scheduler
 type Template struct {
-	TemplateID string                       `json:"template_id"`
-	Scope      string                       `json:"scope"`             // public, team
-	TeamID     string                       `json:"team_id,omitempty"` // only for scope=team
-	UserID     string                       `json:"user_id,omitempty"` // creator/updater user id (best-effort)
-	Spec       v1alpha1.SandboxTemplateSpec `json:"spec"`
-	CreatedAt  time.Time                    `json:"created_at"`
-	UpdatedAt  time.Time                    `json:"updated_at"`
+	TemplateID   string                       `json:"template_id"`
+	TemplateName string                       `json:"template_name"`
+	Scope        string                       `json:"scope"`             // public, team
+	TeamID       string                       `json:"team_id,omitempty"` // only for scope=team
+	UserID       string                       `json:"user_id,omitempty"` // creator/updater user id (best-effort)
+	Spec         v1alpha1.SandboxTemplateSpec `json:"spec"`
+	CreatedAt    time.Time                    `json:"created_at"`
+	UpdatedAt    time.Time                    `json:"updated_at"`
 }
 
 // TemplateAllocation represents how a template is allocated to a cluster
@@ -68,9 +70,9 @@ func (r *Repository) Ping(ctx context.Context) error {
 // CreateCluster creates a new cluster
 func (r *Repository) CreateCluster(ctx context.Context, cluster *Cluster) error {
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO scheduler_clusters (cluster_id, internal_gateway_url, weight, enabled)
-		VALUES ($1, $2, $3, $4)
-	`, cluster.ClusterID, cluster.InternalGatewayURL, cluster.Weight, cluster.Enabled)
+		INSERT INTO scheduler_clusters (cluster_id, cluster_name, internal_gateway_url, weight, enabled)
+		VALUES ($1, $2, $3, $4, $5)
+	`, cluster.ClusterID, cluster.ClusterName, cluster.InternalGatewayURL, cluster.Weight, cluster.Enabled)
 	if err != nil {
 		return fmt.Errorf("create cluster: %w", err)
 	}
@@ -81,11 +83,12 @@ func (r *Repository) CreateCluster(ctx context.Context, cluster *Cluster) error 
 func (r *Repository) GetCluster(ctx context.Context, clusterID string) (*Cluster, error) {
 	var cluster Cluster
 	err := r.pool.QueryRow(ctx, `
-		SELECT cluster_id, internal_gateway_url, weight, enabled, last_seen_at, created_at, updated_at
+		SELECT cluster_id, cluster_name, internal_gateway_url, weight, enabled, last_seen_at, created_at, updated_at
 		FROM scheduler_clusters
 		WHERE cluster_id = $1
 	`, clusterID).Scan(
 		&cluster.ClusterID,
+		&cluster.ClusterName,
 		&cluster.InternalGatewayURL,
 		&cluster.Weight,
 		&cluster.Enabled,
@@ -105,7 +108,7 @@ func (r *Repository) GetCluster(ctx context.Context, clusterID string) (*Cluster
 // ListClusters lists all clusters
 func (r *Repository) ListClusters(ctx context.Context) ([]*Cluster, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT cluster_id, internal_gateway_url, weight, enabled, last_seen_at, created_at, updated_at
+		SELECT cluster_id, cluster_name, internal_gateway_url, weight, enabled, last_seen_at, created_at, updated_at
 		FROM scheduler_clusters
 		ORDER BY cluster_id
 	`)
@@ -119,6 +122,7 @@ func (r *Repository) ListClusters(ctx context.Context) ([]*Cluster, error) {
 		var cluster Cluster
 		if err := rows.Scan(
 			&cluster.ClusterID,
+			&cluster.ClusterName,
 			&cluster.InternalGatewayURL,
 			&cluster.Weight,
 			&cluster.Enabled,
@@ -136,7 +140,7 @@ func (r *Repository) ListClusters(ctx context.Context) ([]*Cluster, error) {
 // ListEnabledClusters lists only enabled clusters
 func (r *Repository) ListEnabledClusters(ctx context.Context) ([]*Cluster, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT cluster_id, internal_gateway_url, weight, enabled, last_seen_at, created_at, updated_at
+		SELECT cluster_id, cluster_name, internal_gateway_url, weight, enabled, last_seen_at, created_at, updated_at
 		FROM scheduler_clusters
 		WHERE enabled = true
 		ORDER BY cluster_id
@@ -151,6 +155,7 @@ func (r *Repository) ListEnabledClusters(ctx context.Context) ([]*Cluster, error
 		var cluster Cluster
 		if err := rows.Scan(
 			&cluster.ClusterID,
+			&cluster.ClusterName,
 			&cluster.InternalGatewayURL,
 			&cluster.Weight,
 			&cluster.Enabled,
@@ -169,9 +174,9 @@ func (r *Repository) ListEnabledClusters(ctx context.Context) ([]*Cluster, error
 func (r *Repository) UpdateCluster(ctx context.Context, cluster *Cluster) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE scheduler_clusters
-		SET internal_gateway_url = $2, weight = $3, enabled = $4
+		SET cluster_name = $2, internal_gateway_url = $3, weight = $4, enabled = $5
 		WHERE cluster_id = $1
-	`, cluster.ClusterID, cluster.InternalGatewayURL, cluster.Weight, cluster.Enabled)
+	`, cluster.ClusterID, cluster.ClusterName, cluster.InternalGatewayURL, cluster.Weight, cluster.Enabled)
 	if err != nil {
 		return fmt.Errorf("update cluster: %w", err)
 	}
@@ -212,9 +217,9 @@ func (r *Repository) CreateTemplate(ctx context.Context, template *Template) err
 	}
 
 	_, err = r.pool.Exec(ctx, `
-		INSERT INTO scheduler_templates (template_id, scope, team_id, user_id, spec)
-		VALUES ($1, $2, $3, $4, $5)
-	`, template.TemplateID, template.Scope, template.TeamID, template.UserID, specJSON)
+		INSERT INTO scheduler_templates (template_id, template_name, scope, team_id, user_id, spec)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, template.TemplateID, template.TemplateName, template.Scope, template.TeamID, template.UserID, specJSON)
 	if err != nil {
 		return fmt.Errorf("create template: %w", err)
 	}
@@ -226,11 +231,12 @@ func (r *Repository) GetTemplate(ctx context.Context, scope, teamID, templateID 
 	var template Template
 	var specJSON []byte
 	err := r.pool.QueryRow(ctx, `
-		SELECT template_id, scope, team_id, user_id, spec, created_at, updated_at
+		SELECT template_id, template_name, scope, team_id, user_id, spec, created_at, updated_at
 		FROM scheduler_templates
 		WHERE scope = $1 AND team_id = $2 AND template_id = $3
 	`, scope, teamID, templateID).Scan(
 		&template.TemplateID,
+		&template.TemplateName,
 		&template.Scope,
 		&template.TeamID,
 		&template.UserID,
@@ -269,7 +275,7 @@ func (r *Repository) GetTemplateForTeam(ctx context.Context, teamID, templateID 
 // ListTemplates lists all templates
 func (r *Repository) ListTemplates(ctx context.Context) ([]*Template, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT template_id, scope, team_id, user_id, spec, created_at, updated_at
+		SELECT template_id, template_name, scope, team_id, user_id, spec, created_at, updated_at
 		FROM scheduler_templates
 		ORDER BY scope, team_id, template_id
 	`)
@@ -284,6 +290,7 @@ func (r *Repository) ListTemplates(ctx context.Context) ([]*Template, error) {
 		var specJSON []byte
 		if err := rows.Scan(
 			&template.TemplateID,
+			&template.TemplateName,
 			&template.Scope,
 			&template.TeamID,
 			&template.UserID,
@@ -304,7 +311,7 @@ func (r *Repository) ListTemplates(ctx context.Context) ([]*Template, error) {
 // ListVisibleTemplates lists templates visible to a team (public + that team's private).
 func (r *Repository) ListVisibleTemplates(ctx context.Context, teamID string) ([]*Template, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT template_id, scope, team_id, user_id, spec, created_at, updated_at
+		SELECT template_id, template_name, scope, team_id, user_id, spec, created_at, updated_at
 		FROM scheduler_templates
 		WHERE scope = 'public' OR (scope = 'team' AND team_id = $1)
 		ORDER BY scope, template_id
@@ -320,6 +327,7 @@ func (r *Repository) ListVisibleTemplates(ctx context.Context, teamID string) ([
 		var specJSON []byte
 		if err := rows.Scan(
 			&template.TemplateID,
+			&template.TemplateName,
 			&template.Scope,
 			&template.TeamID,
 			&template.UserID,
@@ -346,9 +354,9 @@ func (r *Repository) UpdateTemplate(ctx context.Context, template *Template) err
 
 	_, err = r.pool.Exec(ctx, `
 		UPDATE scheduler_templates
-		SET spec = $5, user_id = $4
+		SET spec = $6, user_id = $5, template_name = $4
 		WHERE scope = $1 AND team_id = $2 AND template_id = $3
-	`, template.Scope, template.TeamID, template.TemplateID, template.UserID, specJSON)
+	`, template.Scope, template.TeamID, template.TemplateID, template.TemplateName, template.UserID, specJSON)
 	if err != nil {
 		return fmt.Errorf("update template: %w", err)
 	}

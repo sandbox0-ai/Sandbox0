@@ -1,6 +1,9 @@
 package naming
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	ScopePublic = "public"
@@ -42,4 +45,27 @@ func TemplateNameForCluster(scope, teamID, templateID string) string {
 		return fmt.Sprintf("t-%s-%s", teamKey, shortHash(templateID))
 	}
 	return prefix + name
+}
+
+// ValidateTemplateName ensures template name is non-empty and safe for storage.
+func ValidateTemplateName(name string) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return fmt.Errorf("template_name is required")
+	}
+	if len(trimmed) > 255 {
+		return fmt.Errorf("template_name is too long (%d > 255)", len(trimmed))
+	}
+	if strings.Contains(trimmed, "/") {
+		return fmt.Errorf("template_name cannot contain '/'")
+	}
+	return nil
+}
+
+// TemplateIDFromName generates a stable template_id from template_name.
+func TemplateIDFromName(name string) (string, error) {
+	if err := ValidateTemplateName(name); err != nil {
+		return "", err
+	}
+	return slugWithHash(name, dnsLabelMaxLen)
 }
