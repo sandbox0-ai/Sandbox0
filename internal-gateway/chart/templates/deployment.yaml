@@ -1,5 +1,8 @@
 {{- $global := .Values.global | default dict }}
 {{- $jwt := (get $global "jwt") | default dict }}
+{{- $internalAuth := (get $global "internalAuth") | default dict }}
+{{- $controlPlane := (get $internalAuth "controlPlane") | default dict }}
+{{- $dataPlane := (get $internalAuth "dataPlane") | default dict }}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -60,16 +63,26 @@ spec:
             - name: internal-jwt-private-key
               mountPath: /secrets
               readOnly: true
+            - name: internal-jwt-public-key
+              mountPath: /config/internal_jwt_public.key
+              subPath: internal_jwt_public.key
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: {{ include "internal-gateway.fullname" . }}
         - name: internal-jwt-private-key
           secret:
-            secretName: {{ .Values.secrets.internalJwtSecretName | default $jwt.internalJwtSecretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName | default $dataPlane.secretName | default $jwt.internalJwtSecretName }}
             items:
-              - key: {{ .Values.secrets.internalJwtPrivateKeyKey | default $jwt.privateKeyKey }}
+              - key: {{ .Values.secrets.internalJwtPrivateKeyKey | default $dataPlane.privateKeyKey | default $jwt.privateKeyKey }}
                 path: internal_jwt_private.key
+        - name: internal-jwt-public-key
+          secret:
+            secretName: {{ .Values.secrets.internalJwtPublicSecretName | default $controlPlane.secretName | default $jwt.internalJwtSecretName }}
+            items:
+              - key: {{ .Values.secrets.internalJwtPublicKeyKey | default $controlPlane.publicKeyKey | default $jwt.publicKeyKey }}
+                path: internal_jwt_public.key
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

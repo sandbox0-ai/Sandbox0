@@ -78,10 +78,16 @@ Get database URL from config or global
 Get internal JWT secret name
 */}}
 {{- define "scheduler.internalJwtSecretName" -}}
+{{- $global := .Values.global | default dict }}
+{{- $internalAuth := (get $global "internalAuth") | default dict }}
+{{- $controlPlane := (get $internalAuth "controlPlane") | default dict }}
+{{- $jwt := (get $global "jwt") | default dict }}
 {{- if .Values.secrets.internalJwtSecretName }}
 {{- .Values.secrets.internalJwtSecretName }}
-{{- else if .Values.global.jwt.internalJwtSecretName }}
-{{- .Values.global.jwt.internalJwtSecretName }}
+{{- else if $controlPlane.secretName }}
+{{- $controlPlane.secretName }}
+{{- else if $jwt.internalJwtSecretName }}
+{{- $jwt.internalJwtSecretName }}
 {{- else }}
 {{- "sandbox0-internal-jwt" }}
 {{- end }}
@@ -91,10 +97,16 @@ Get internal JWT secret name
 Get internal JWT private key key
 */}}
 {{- define "scheduler.internalJwtPrivateKeyKey" -}}
+{{- $global := .Values.global | default dict }}
+{{- $internalAuth := (get $global "internalAuth") | default dict }}
+{{- $controlPlane := (get $internalAuth "controlPlane") | default dict }}
+{{- $jwt := (get $global "jwt") | default dict }}
 {{- if .Values.secrets.internalJwtPrivateKeyKey }}
 {{- .Values.secrets.internalJwtPrivateKeyKey }}
-{{- else if .Values.global.jwt.privateKeyKey }}
-{{- .Values.global.jwt.privateKeyKey }}
+{{- else if $controlPlane.privateKeyKey }}
+{{- $controlPlane.privateKeyKey }}
+{{- else if $jwt.privateKeyKey }}
+{{- $jwt.privateKeyKey }}
 {{- else }}
 {{- "private.key" }}
 {{- end }}
@@ -104,10 +116,16 @@ Get internal JWT private key key
 Get internal JWT public key key
 */}}
 {{- define "scheduler.internalJwtPublicKeyKey" -}}
+{{- $global := .Values.global | default dict }}
+{{- $internalAuth := (get $global "internalAuth") | default dict }}
+{{- $controlPlane := (get $internalAuth "controlPlane") | default dict }}
+{{- $jwt := (get $global "jwt") | default dict }}
 {{- if .Values.secrets.internalJwtPublicKeyKey }}
 {{- .Values.secrets.internalJwtPublicKeyKey }}
-{{- else if .Values.global.jwt.publicKeyKey }}
-{{- .Values.global.jwt.publicKeyKey }}
+{{- else if $controlPlane.publicKeyKey }}
+{{- $controlPlane.publicKeyKey }}
+{{- else if $jwt.publicKeyKey }}
+{{- $jwt.publicKeyKey }}
 {{- else }}
 {{- "public.key" }}
 {{- end }}

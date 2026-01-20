@@ -42,6 +42,8 @@ resources:
         memory: 128Mi
 secrets:
     internalJwtPrivateKeyKey: ""
+    internalJwtPublicKeyKey: ""
+    internalJwtPublicSecretName: ""
     internalJwtSecretName: ""
 securityContext:
     readOnlyRootFilesystem: true

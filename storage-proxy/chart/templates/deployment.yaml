@@ -1,5 +1,7 @@
 {{- $global := .Values.global | default dict }}
 {{- $jwt := (get $global "jwt") | default dict }}
+{{- $internalAuth := (get $global "internalAuth") | default dict }}
+{{- $dataPlane := (get $internalAuth "dataPlane") | default dict }}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -77,9 +79,9 @@ spec:
             name: {{ include "storage-proxy.fullname" . }}
         - name: internal-jwt-public-key
           secret:
-            secretName: {{ .Values.secrets.internalJwtSecretName | default $jwt.internalJwtSecretName }}
+            secretName: {{ .Values.secrets.internalJwtSecretName | default $dataPlane.secretName | default $jwt.internalJwtSecretName }}
             items:
-              - key: {{ .Values.secrets.internalJwtPublicKeyKey | default $jwt.publicKeyKey }}
+              - key: {{ .Values.secrets.internalJwtPublicKeyKey | default $dataPlane.publicKeyKey | default $jwt.publicKeyKey }}
                 path: internal_jwt_public.key
         - name: cache
           emptyDir: {}

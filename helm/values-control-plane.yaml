@@ -1,0 +1,24 @@
+# Control-plane installation values
+controlPlane:
+  enabled: true
+dataPlane:
+  enabled: false
+
+global:
+  internalAuth:
+    controlPlane:
+      secretName: "sandbox0-internal-jwt-control-plane"
+      privateKeyKey: "private.key"
+      publicKeyKey: "public.key"
+
+edge-gateway:
+  enabled: true
+
+scheduler:
+  enabled: false
+
+postgresql:
+  enabled: true
+
+rustfs:
+  enabled: true

@@ -62,11 +62,15 @@ func NewServer(
 	}
 
 	// Initialize internal auth keys
+	publicKey, err := internalauth.LoadEd25519PublicKeyFromFile(internalauth.DefaultInternalJWTPublicKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("load internal JWT public key: %w", err)
+	}
+
 	privateKey, err := internalauth.LoadEd25519PrivateKeyFromFile(internalauth.DefaultInternalJWTPrivateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("load internal JWT private key: %w", err)
 	}
-	publicKey := privateKey.Public().(internalauth.PublicKeyType)
 
 	// Create internal auth validator (for validating tokens from edge-gateway and optionally scheduler)
 	allowedCallers := cfg.AllowedCallers

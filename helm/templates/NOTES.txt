@@ -13,7 +13,7 @@ INSTALLATION SEQUENCE:
      - Namespace '{{ .Values.manager.config.default_template_namespace }}' (pre-install hook, weight -10)
      - CRDs (sandboxtemplates)
      - Manager deployment
-  3. Default SandboxTemplate CR '{{ .Values.defaultTemplate.name }}' (post-install hook, weight 10)
+  3. Default SandboxTemplate CR '{{ .Values.manager.config.default_template_name }}' (post-install hook, weight 10)
   4. Other services (storage-proxy, netd, internal-gateway, edge-gateway)
 
 NOTE: Network and bandwidth policies are stored as Pod annotations instead of CRDs.
@@ -33,11 +33,15 @@ VERIFY INSTALLATION:
 
 IMPORTANT: Before deploying to production, make sure to:
 
-1. Create the internal JWT secret with private/public key pair:
+1. Create the internal auth key pairs (control-plane + data-plane):
 
-   kubectl -n sandbox0-system create secret generic {{ .Values.global.jwt.internalJwtSecretName }} \
-     --from-file={{ .Values.global.jwt.privateKeyKey }}=/path/to/private.key \
-     --from-file={{ .Values.global.jwt.publicKeyKey }}=/path/to/public.key
+   kubectl -n sandbox0-system create secret generic {{ .Values.global.internalAuth.controlPlane.secretName }} \
+     --from-file={{ .Values.global.internalAuth.controlPlane.privateKeyKey }}=/path/to/control-plane.private.key \
+     --from-file={{ .Values.global.internalAuth.controlPlane.publicKeyKey }}=/path/to/control-plane.public.key
+
+   kubectl -n sandbox0-system create secret generic {{ .Values.global.internalAuth.dataPlane.secretName }} \
+     --from-file={{ .Values.global.internalAuth.dataPlane.privateKeyKey }}=/path/to/data-plane.private.key \
+     --from-file={{ .Values.global.internalAuth.dataPlane.publicKeyKey }}=/path/to/data-plane.public.key
 
 2. Update the following values in your values.yaml or via --set:
 

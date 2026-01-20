@@ -5,34 +5,40 @@ type: application
 version: 0.1.0
 appVersion: "v0.1.0"
 dependencies:
-  # Phase 1: Infrastructure dependencies (databases, storage)
+  # Control plane: infrastructure dependencies (databases, storage)
   - name: postgresql
     version: 18.2.0
     repository: https://charts.bitnami.com/bitnami
-    condition: postgresql.enabled
+    condition: controlPlane.enabled,postgresql.enabled
   - name: rustfs
     version: 0.0.79
     repository: https://charts.rustfs.com
-    condition: rustfs.enabled
-  
-  # Phase 2: Manager (installs CRDs and creates namespace)
+    condition: controlPlane.enabled,rustfs.enabled
+
+  # Data plane: manager (installs CRDs and creates namespace)
   - name: manager
     version: 0.1.0
-  
-  # Phase 3: Other services (after CRDs and namespace are ready)
+    condition: dataPlane.enabled,manager.enabled
+
+  # Data plane: other services (after CRDs and namespace are ready)
   # SandboxTemplate CR is created via templates/sandboxtemplate.yaml with post-install hook
   - name: storage-proxy
     version: 0.1.0
+    condition: dataPlane.enabled,storage-proxy.enabled
   - name: netd
     version: 0.1.0
+    condition: dataPlane.enabled,netd.enabled
   - name: internal-gateway
     version: 0.1.0
+    condition: dataPlane.enabled,internal-gateway.enabled
+
+  # Control plane: edge-gateway
   - name: edge-gateway
     version: 0.1.0
-  
-  # Phase 4: Optional control plane components
-  # Scheduler is optional and only needed for multi-cluster deployments
+    condition: controlPlane.enabled,edge-gateway.enabled
+
+  # Control plane: optional scheduler for multi-cluster
   - name: scheduler
     version: 0.1.0
-    condition: scheduler.enabled
+    condition: controlPlane.enabled,scheduler.enabled
 

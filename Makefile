@@ -156,7 +156,7 @@ clean:
 	rm -rf storage-proxy/proto/fs/*.pb.go
 	rm -rf vendor
 
-helm-update:
+helm-update: helm-configs
 	@mkdir -p helm/charts
 	@for service in $(SERVICES); do \
 		if [ -d "$$service/chart" ]; then \

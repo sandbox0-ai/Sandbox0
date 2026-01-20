@@ -1,3 +1,4 @@
+{{- if and .Values.dataPlane.enabled .Values.manager.enabled }}
 ---
 apiVersion: sandbox0.ai/v1alpha1
 kind: SandboxTemplate
@@ -46,3 +47,4 @@ spec:
 
   # Access control
   public: true
+{{- end }}

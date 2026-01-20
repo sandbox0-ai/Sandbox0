@@ -1,6 +1,7 @@
 # Sandbox0 Infrastructure Helm Chart
 
 This is the umbrella Helm chart for deploying all sandbox0 infrastructure services.
+It supports split installations by using different values files.
 
 ## Architecture
 
@@ -17,23 +18,33 @@ This chart includes the following sub-charts:
 - Helm 3.0+
 - PostgreSQL database (for metadata and JuiceFS)
 - S3-compatible object storage (for JuiceFS data blocks)
-- RSA key pair for internal JWT authentication
+- Ed25519 key pairs for internal service authentication (control-plane + data-plane)
 
 ## Installation
 
-### 1. Generate Internal JWT Key Pair
+### 1. Generate Internal Auth Key Pairs
 
 ```bash
-# Generate RSA private key
-openssl genrsa -out private.key 2048
+# Control-plane key pair (edge-gateway + scheduler)
+openssl genpkey -algorithm Ed25519 -out control-plane.private.key
+openssl pkey -in control-plane.private.key -pubout -out control-plane.public.key
+kubectl -n sandbox0-system create secret generic sandbox0-internal-jwt-control-plane \
+  --from-file=private.key=control-plane.private.key \
+  --from-file=public.key=control-plane.public.key
 
-# Generate RSA public key
-openssl rsa -in private.key -pubout -out public.key
+# Data-plane key pair (internal-gateway + manager + storage-proxy)
+openssl genpkey -algorithm Ed25519 -out data-plane.private.key
+openssl pkey -in data-plane.private.key -pubout -out data-plane.public.key
+kubectl -n sandbox0-system create secret generic sandbox0-internal-jwt-data-plane \
+  --from-file=private.key=data-plane.private.key \
+  --from-file=public.key=data-plane.public.key
 
-# Create Kubernetes secret
-kubectl -n sandbox0-system create secret generic sandbox0-internal-jwt \
-  --from-file=private.key=private.key \
-  --from-file=public.key=public.key
+For data-plane clusters, also copy the control-plane public key:
+
+```bash
+kubectl -n sandbox0-system create secret generic sandbox0-internal-jwt-control-plane \
+  --from-file=public.key=control-plane.public.key
+```
 ```
 
 ### 2. Create values.yaml
@@ -60,11 +71,17 @@ global:
   jwt:
     # For edge-gateway user authentication (use a strong random secret)
     secret: "your-strong-random-secret-here"
-    
-    # For internal service-to-service authentication (k8s secret name)
-    internalJwtSecretName: "sandbox0-internal-jwt"
-    privateKeyKey: "private.key"
-    publicKeyKey: "public.key"
+
+  # Internal auth key pairs
+  internalAuth:
+    controlPlane:
+      secretName: "sandbox0-internal-jwt-control-plane"
+      privateKeyKey: "private.key"
+      publicKeyKey: "public.key"
+    dataPlane:
+      secretName: "sandbox0-internal-jwt-data-plane"
+      privateKeyKey: "private.key"
+      publicKeyKey: "public.key"
   
   # Optional: create initial admin user
   initUser:
@@ -116,6 +133,18 @@ Enable/disable: set `postgresql.enabled`. Default service hostname is `postgresq
 helm install sandbox0 . -f values.yaml -n sandbox0-system --create-namespace
 ```
 
+### 4.1 Install Control Plane Only
+
+```bash
+helm install sandbox0-control-plane . -f values-control-plane.yaml -n sandbox0-system --create-namespace
+```
+
+### 4.2 Install Data Plane Only
+
+```bash
+helm install sandbox0-data-plane . -f values-data-plane.yaml -n sandbox0-system --create-namespace
+```
+
 ## Configuration
 
 ### Service-Specific Overrides
@@ -134,7 +163,7 @@ storage-proxy:
 
 Only file-based secrets (like RSA keys) are managed via Kubernetes Secrets and mounted as volumes:
 
-- Internal JWT keys: RSA private/public key pair for service-to-service authentication
+- Internal auth keys: Ed25519 key pairs for service-to-service authentication
 
 All other configuration (database URLs, S3 credentials, etc.) is stored in ConfigMaps as YAML configuration.
 

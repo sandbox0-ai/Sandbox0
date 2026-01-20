@@ -22,12 +22,28 @@ global:
   jwt:
     # For edge-gateway user authentication
     secret: "change-me-in-production-use-strong-random-secret"
-    
-    # For internal service-to-service authentication
-    # These are references to k8s secrets (created separately)
+
+    # Legacy internal auth secret references (kept for backward compatibility)
     internalJwtSecretName: "sandbox0-internal-jwt"
     privateKeyKey: "private.key"
     publicKeyKey: "public.key"
+
+  # Internal auth key pairs (control-plane vs data-plane)
+  internalAuth:
+    controlPlane:
+      secretName: "sandbox0-internal-jwt-control-plane"
+      privateKeyKey: "private.key"
+      publicKeyKey: "public.key"
+    dataPlane:
+      secretName: "sandbox0-internal-jwt-data-plane"
+      privateKeyKey: "private.key"
+      publicKeyKey: "public.key"
+
+# Plane toggles (used by dependency conditions)
+controlPlane:
+  enabled: true
+dataPlane:
+  enabled: true
   
   # Optional: built-in auth initial user (edge-gateway)
   initUser:
@@ -43,6 +59,7 @@ global:
 # Edge-gateway - Public API gateway
 # ------------------------------------------------------------------------------
 edge-gateway:
+  enabled: true
   replicaCount: 1
   
   image:
@@ -96,6 +113,7 @@ edge-gateway:
 # Internal-gateway - Internal service gateway
 # ------------------------------------------------------------------------------
 internal-gateway:
+  enabled: true
   replicaCount: 1
   
   image:
@@ -123,6 +141,7 @@ internal-gateway:
 # Manager - Kubernetes operator for sandbox lifecycle management
 # ------------------------------------------------------------------------------
 manager:
+  enabled: true
   replicaCount: 1
   
   image:
@@ -150,6 +169,7 @@ manager:
 # Storage-proxy - JuiceFS storage proxy for persistent volumes
 # ------------------------------------------------------------------------------
 storage-proxy:
+  enabled: true
   replicaCount: 1
   
   image:
@@ -172,6 +192,7 @@ storage-proxy:
 # Netd - Network daemon for L7 proxy and eBPF policies
 # ------------------------------------------------------------------------------
 netd:
+  enabled: true
   image:
     repository: sandbox0ai/infra
     tag: *globalTag
