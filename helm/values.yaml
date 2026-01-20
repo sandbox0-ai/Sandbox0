@@ -1,7 +1,7 @@
 # Global configuration shared across all services
 # Override these values in production!
 global:
-  tag: &globalTag "v0.1.0"
+  tag: &globalTag "v0.0.0"
   # Database configuration (shared by all services)
   database:
     url: "postgres://sandbox0:sandbox0@postgresql:5432/sandbox0?sslmode=disable"
@@ -60,6 +60,7 @@ dataPlane:
 # ------------------------------------------------------------------------------
 edge-gateway:
   enabled: true
+  fullnameOverride: "edge-gateway"
   replicaCount: 1
   
   image:
@@ -114,6 +115,7 @@ edge-gateway:
 # ------------------------------------------------------------------------------
 internal-gateway:
   enabled: true
+  fullnameOverride: "internal-gateway"
   replicaCount: 1
   
   image:
@@ -142,6 +144,7 @@ internal-gateway:
 # ------------------------------------------------------------------------------
 manager:
   enabled: true
+  fullnameOverride: "manager"
   replicaCount: 1
   
   image:
@@ -170,6 +173,7 @@ manager:
 # ------------------------------------------------------------------------------
 storage-proxy:
   enabled: true
+  fullnameOverride: "storage-proxy"
   replicaCount: 1
   
   image:
@@ -193,6 +197,7 @@ storage-proxy:
 # ------------------------------------------------------------------------------
 netd:
   enabled: true
+  fullnameOverride: "netd"
   image:
     repository: sandbox0ai/infra
     tag: *globalTag
@@ -221,6 +226,7 @@ netd:
 #   3. scheduler distributes templates to clusters via internal-gateway
 scheduler:
   enabled: false  # Set to true for multi-cluster mode
+  fullnameOverride: "scheduler"
   
   replicaCount: 1
   
@@ -245,6 +251,7 @@ scheduler:
 # ------------------------------------------------------------------------------
 rustfs:
   enabled: true
+  fullnameOverride: "rustfs"
 
   # For local/dev: keep it simple (1 pod + 1 PVC).
   replicaCount: 1
@@ -271,14 +278,15 @@ rustfs:
 
   # StorageClass used for RustFS PVCs.
   # Leave storageclass unset to use the cluster's default StorageClass
-  # storageclass:
-  #   name: ""
+  storageclass:
+    name: ""
 
 # ------------------------------------------------------------------------------
 # PostgreSQL - Built-in database (optional)
 # ------------------------------------------------------------------------------
 postgresql:
   enabled: true
+  fullnameOverride: "postgresql"
 
   # Create the primary app database/user.
   auth:

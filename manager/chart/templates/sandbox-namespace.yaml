@@ -1,9 +1,11 @@
 {{- if .Values.sandboxNamespace.create }}
+{{- $ns := .Values.config.default_template_namespace }}
+{{- if not (lookup "v1" "Namespace" "" $ns) }}
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ .Values.config.default_template_namespace }}
+  name: {{ $ns }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/instance: {{ .Release.Name }}
@@ -14,4 +16,5 @@ metadata:
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation
+{{- end }}
 {{- end }}

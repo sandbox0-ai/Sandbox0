@@ -1,6 +1,6 @@
 affinity: {}
 config:
-    database_url: postgres://sandbox0:sandbox0@postgresql:5432/sandbox0?sslmode=disable
+    database_url: ""
     http_port: 8080
     log_level: info
     reconcile_interval: 30s

@@ -21,6 +21,7 @@ import (
 	grpcserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/grpc"
 	httpserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/http"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/juicefs"
+	spmigrations "github.com/sandbox0-ai/infra/storage-proxy/migrations"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/watcher"
@@ -318,7 +319,8 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 	// Create a migration logger that writes to zap
 	migrateLogger := &zapLogger{logger: logger}
 
-	if err := migrate.Up(ctx, pool, "migrations",
+	if err := migrate.Up(ctx, pool,
+		migrate.WithBaseFS(spmigrations.FS),
 		migrate.WithLogger(migrateLogger),
 		migrate.WithSchema("sp"),
 	); err != nil {

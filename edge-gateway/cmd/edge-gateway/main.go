@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	egmigrations "github.com/sandbox0-ai/infra/edge-gateway/migrations"
 	"github.com/sandbox0-ai/infra/edge-gateway/pkg/config"
 	"github.com/sandbox0-ai/infra/edge-gateway/pkg/http"
 	"github.com/sandbox0-ai/infra/pkg/migrate"
@@ -156,7 +157,8 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 	// Create a migration logger that writes to zap
 	migrateLogger := &zapLogger{logger: logger}
 
-	if err := migrate.Up(ctx, pool, "migrations",
+	if err := migrate.Up(ctx, pool,
+		migrate.WithBaseFS(egmigrations.FS),
 		migrate.WithLogger(migrateLogger),
 		migrate.WithSchema("eg"),
 	); err != nil {

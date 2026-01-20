@@ -16,12 +16,16 @@ global:
 
 internal-gateway:
   enabled: true
+  fullnameOverride: "internal-gateway"
 
 manager:
   enabled: true
+  fullnameOverride: "manager"
 
 storage-proxy:
   enabled: true
+  fullnameOverride: "storage-proxy"
 
 netd:
   enabled: true
+  fullnameOverride: "netd"

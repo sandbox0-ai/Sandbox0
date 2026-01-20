@@ -63,7 +63,8 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: config
-              mountPath: /config
+              mountPath: /config/config.yaml
+              subPath: config.yaml
               readOnly: true
             - name: internal-jwt-public-key
               mountPath: /config/internal_jwt_public.key

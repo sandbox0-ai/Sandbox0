@@ -2,8 +2,8 @@ apiVersion: v2
 name: infra
 description: A Helm chart for sandbox0 infra
 type: application
-version: 0.1.0
-appVersion: "v0.1.0"
+version: 0.0.0
+appVersion: "v0.0.0"
 dependencies:
   # Control plane: infrastructure dependencies (databases, storage)
   - name: postgresql

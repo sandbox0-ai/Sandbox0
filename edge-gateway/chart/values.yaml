@@ -10,7 +10,7 @@ config:
             email: admin@localhost
             name: Admin
             password: admin123
-    database_url: postgres://localhost:5432/sandbox0?sslmode=disable
+    database_url: ""
     default_internal_gateway_url: http://internal-gateway.sandbox0-system:8443
     edition: self-hosted
     http_port: 8080

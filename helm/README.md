@@ -49,8 +49,6 @@ For data-plane clusters, also copy the control-plane public key:
 kubectl -n sandbox0-system create secret generic sandbox0-internal-jwt-control-plane \
   --from-file=public.key=control-plane.public.key
 ```
-```
-```
 
 ### 2. Create values.yaml
 

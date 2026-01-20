@@ -13,12 +13,16 @@ global:
 
 edge-gateway:
   enabled: true
+  fullnameOverride: "edge-gateway"
 
 scheduler:
   enabled: false
+  fullnameOverride: "scheduler"
 
 postgresql:
   enabled: true
+  fullnameOverride: "postgresql"
 
 rustfs:
   enabled: true
+  fullnameOverride: "rustfs"

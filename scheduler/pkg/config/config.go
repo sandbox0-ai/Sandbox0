@@ -29,7 +29,7 @@ func defaultConfig() *Config {
 	return &Config{
 		HTTPPort:          8080,
 		LogLevel:          "info",
-		DatabaseURL:       "postgres://sandbox0:sandbox0@postgresql:5432/sandbox0?sslmode=disable",
+		DatabaseURL:       "",
 		ReconcileInterval: 30 * time.Second,
 		ShutdownTimeout:   30 * time.Second,
 	}

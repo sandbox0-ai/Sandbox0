@@ -125,7 +125,7 @@ func defaultConfig() *Config {
 		Edition:                   "self-hosted",
 		HTTPPort:                  8080,
 		LogLevel:                  "info",
-		DatabaseURL:               "postgres://localhost:5432/sandbox0?sslmode=disable",
+		DatabaseURL:               "",
 		DefaultInternalGatewayURL: "http://internal-gateway.sandbox0-system:8443",
 		JWTSecret:                 "",
 		JWTAccessTokenTTL:         15 * time.Minute,
