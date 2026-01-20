@@ -157,7 +157,7 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 	// Create a migration logger that writes to zap
 	migrateLogger := &zapLogger{logger: logger}
 
-	if err := migrate.Up(ctx, pool, "migrations",
+	if err := migrate.Up(ctx, pool, ".",
 		migrate.WithBaseFS(egmigrations.FS),
 		migrate.WithLogger(migrateLogger),
 		migrate.WithSchema("eg"),

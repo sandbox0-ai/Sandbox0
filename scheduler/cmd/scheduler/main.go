@@ -142,7 +142,7 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 	logger.Info("Running database migrations")
 
 	migrateLogger := &zapLogger{logger: logger}
-	if err := migrate.Up(ctx, pool, "migrations",
+	if err := migrate.Up(ctx, pool, ".",
 		migrate.WithBaseFS(schedmigrations.FS),
 		migrate.WithLogger(migrateLogger),
 		migrate.WithSchema("sched"),
