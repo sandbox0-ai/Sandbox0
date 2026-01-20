@@ -65,7 +65,7 @@ func (a *HTTPAuthenticator) Middleware(next http.Handler) http.Handler {
 // HealthCheckMiddleware allows health check endpoints without authentication
 func (a *HTTPAuthenticator) HealthCheckMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" || r.URL.Path == "/ready" || r.URL.Path == "/metrics" {
+		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" || r.URL.Path == "/metrics" {
 			next.ServeHTTP(w, r)
 			return
 		}
