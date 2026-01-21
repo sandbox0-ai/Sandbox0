@@ -25,7 +25,6 @@ type EdgeGatewayConfig struct {
 	LogLevel string `yaml:"log_level" json:"logLevel"`
 
 	// Database configuration (for API key validation)
-	// +optional
 	DatabaseURL string `yaml:"database_url" json:"-"`
 	// +optional
 	// +kubebuilder:default=30
@@ -35,7 +34,6 @@ type EdgeGatewayConfig struct {
 	DatabaseMinConns int `yaml:"database_min_conns" json:"databaseMinConns"`
 
 	// Upstream service
-	// +optional
 	DefaultInternalGatewayURL string `yaml:"default_internal_gateway_url" json:"-"`
 
 	// Scheduler configuration (optional, for multi-cluster mode)
@@ -144,7 +142,6 @@ type BuiltInAuthConfig struct {
 	AdminOnly bool `yaml:"admin_only" json:"adminOnly"`
 
 	// InitUser is the initial admin user (for self-hosted)
-	// +optional
 	InitUser *InitUserConfig `yaml:"init_user" json:"-"`
 }
 

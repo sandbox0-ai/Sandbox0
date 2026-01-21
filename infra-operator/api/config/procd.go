@@ -16,7 +16,6 @@ import (
 
 // ProcdConfig holds all configuration for procd.
 type ProcdConfig struct {
-	// +optional
 	NodeName string `yaml:"node_name" json:"-"`
 
 	// Server configuration
@@ -28,12 +27,8 @@ type ProcdConfig struct {
 	LogLevel string `yaml:"log_level" json:"logLevel"`
 
 	// Storage Proxy configuration
-	// +optional
-	// +kubebuilder:default="storage-proxy"
 	StorageProxyBaseURL string `yaml:"storage_proxy_base_url" json:"-"`
-	// +optional
-	// +kubebuilder:default=8080
-	StorageProxyPort int `yaml:"storage_proxy_port" json:"-"`
+	StorageProxyPort    int    `yaml:"storage_proxy_port" json:"-"`
 	// +optional
 	// +kubebuilder:default=3
 	StorageProxyReplicas int `yaml:"storage_proxy_replicas" json:"storageProxyReplicas"`

@@ -32,7 +32,6 @@ type NetdConfig struct {
 	NodeName string `yaml:"node_name" json:"nodeName"`
 
 	// Namespace is the namespace to watch for sandbox pods
-	// +optional
 	Namespace string `yaml:"namespace" json:"-"`
 
 	// KubeConfig is the path to kubeconfig file (optional, uses in-cluster config if empty)

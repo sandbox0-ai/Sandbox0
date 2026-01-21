@@ -27,7 +27,6 @@ type StorageProxyConfig struct {
 	HTTPPort int `yaml:"http_port" json:"httpPort"`
 
 	// Database
-	// +optional
 	DatabaseURL string `yaml:"database_url" json:"-"`
 	// +optional
 	// +kubebuilder:default=30
@@ -40,19 +39,12 @@ type StorageProxyConfig struct {
 	DatabaseSchema string `yaml:"database_schema" json:"databaseSchema"`
 
 	// JuiceFS defaults
-	// +optional
-	MetaURL string `yaml:"meta_url" json:"-"`
-	// +optional
-	S3Bucket string `yaml:"s3_bucket" json:"-"`
-	// +optional
-	S3Region string `yaml:"s3_region" json:"-"`
-	// +optional
-	S3Endpoint string `yaml:"s3_endpoint" json:"-"`
-	// +optional
-	S3AccessKey string `yaml:"s3_access_key" json:"-"`
-	// +optional
-	S3SecretKey string `yaml:"s3_secret_key" json:"-"`
-	// +optional
+	MetaURL        string `yaml:"meta_url" json:"-"`
+	S3Bucket       string `yaml:"s3_bucket" json:"-"`
+	S3Region       string `yaml:"s3_region" json:"-"`
+	S3Endpoint     string `yaml:"s3_endpoint" json:"-"`
+	S3AccessKey    string `yaml:"s3_access_key" json:"-"`
+	S3SecretKey    string `yaml:"s3_secret_key" json:"-"`
 	S3SessionToken string `yaml:"s3_session_token" json:"-"`
 
 	// +optional
@@ -103,8 +95,7 @@ type StorageProxyConfig struct {
 	DefaultCacheSize string `yaml:"default_cache_size" json:"defaultCacheSize"`
 	// +optional
 	// +kubebuilder:default="/var/lib/storage-proxy/cache"
-	CacheDir string `yaml:"cache_dir" json:"cacheDir"`
-	// +optional
+	CacheDir         string `yaml:"cache_dir" json:"cacheDir"`
 	DefaultClusterId string `yaml:"default_cluster_id" json:"-"`
 
 	// Monitoring

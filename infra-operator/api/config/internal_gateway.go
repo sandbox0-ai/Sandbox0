@@ -20,9 +20,7 @@ type InternalGatewayConfig struct {
 	LogLevel string `yaml:"log_level" json:"logLevel"`
 
 	// Upstream services
-	// +optional
-	ManagerURL string `yaml:"manager_url" json:"-"`
-	// +optional
+	ManagerURL      string `yaml:"manager_url" json:"-"`
 	StorageProxyURL string `yaml:"storage_proxy_url" json:"-"`
 
 	// Internal authentication (for validating requests from edge-gateway and

@@ -17,7 +17,6 @@ type ManagerConfig struct {
 	HTTPPort int `yaml:"http_port" json:"httpPort"`
 
 	// manager docker image, used to copy the procd binary to sandbox pod
-	// +optional
 	ManagerImage string `yaml:"manager_image" json:"-"`
 
 	// template
@@ -29,8 +28,7 @@ type ManagerConfig struct {
 	// +optional
 	// +kubebuilder:default="sandbox0ai/otemplates:default-v0.1.0"
 	DefaultTemplateImage string `yaml:"default_template_image" json:"defaultTemplateImage"`
-	// +optional
-	DefaultClusterId string `yaml:"default_cluster_id" json:"-"`
+	DefaultClusterId     string `yaml:"default_cluster_id" json:"-"`
 
 	// Kubernetes
 	// +optional
@@ -43,7 +41,6 @@ type ManagerConfig struct {
 	ResyncPeriod metav1.Duration `yaml:"resync_period" json:"resyncPeriod"`
 
 	// Database
-	// +optional
 	DatabaseURL string `yaml:"database_url" json:"-"`
 
 	// Cleanup Controller

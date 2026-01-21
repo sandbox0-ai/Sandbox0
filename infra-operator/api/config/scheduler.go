@@ -20,7 +20,6 @@ type SchedulerConfig struct {
 	LogLevel string `yaml:"log_level" json:"logLevel"`
 
 	// Database configuration
-	// +optional
 	DatabaseURL string `yaml:"database_url" json:"-"`
 
 	// Reconciler configuration
