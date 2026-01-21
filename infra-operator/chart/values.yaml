@@ -164,3 +164,6 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+config:
+  imageRepo: "sandbox0ai/infra"

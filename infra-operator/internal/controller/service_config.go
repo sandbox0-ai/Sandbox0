@@ -199,7 +199,7 @@ func (r *Sandbox0InfraReconciler) buildManagerConfig(ctx context.Context, infra 
 		setIfMissing(config, "default_cluster_id", infra.Spec.Cluster.ID)
 	}
 
-	managerImage := fmt.Sprintf("%s:%s", defaultImageRepo, infra.Spec.Version)
+	managerImage := fmt.Sprintf("%s:%s", r.getImageRepo(ctx), infra.Spec.Version)
 	setIfMissing(config, "manager_image", managerImage)
 
 	procdConfig := getOrInitMap(config, "procd_config")

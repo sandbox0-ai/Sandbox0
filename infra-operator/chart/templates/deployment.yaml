@@ -52,7 +52,15 @@ spec:
           periodSeconds: 10
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/infra-operator
+          readOnly: true
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "infra-operator.fullname" . }}-config
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,9 +39,8 @@ import (
 )
 
 const (
-	finalizerName    = "sandbox0infra.infra.sandbox0.ai/finalizer"
-	requeueInterval  = 30 * time.Second
-	defaultImageRepo = "sandbox0ai/infra"
+	finalizerName   = "sandbox0infra.infra.sandbox0.ai/finalizer"
+	requeueInterval = 30 * time.Second
 )
 
 // Sandbox0InfraReconciler reconciles a Sandbox0Infra object
@@ -185,94 +185,120 @@ func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *i
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling all mode")
 
-	// Step 1: Reconcile internal auth (generate keys)
-	if err := r.reconcileInternalAuth(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionFalse, "KeyGenerationFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
+	steps := []reconcileStep{
+		{
+			Name:           "internal-auth",
+			Run:            func(ctx context.Context) error { return r.reconcileInternalAuth(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeInternalAuthReady,
+			SuccessReason:  "KeysReady",
+			SuccessMessage: "Internal auth keys are ready",
+			ErrorReason:    "KeyGenerationFailed",
+		},
+		{
+			Name:           "database",
+			Run:            func(ctx context.Context) error { return r.reconcileDatabase(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeDatabaseReady,
+			SuccessReason:  "DatabaseReady",
+			SuccessMessage: "Database is ready",
+			ErrorReason:    "DatabaseFailed",
+		},
+		{
+			Name:           "storage",
+			Run:            func(ctx context.Context) error { return r.reconcileStorage(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeStorageReady,
+			SuccessReason:  "StorageReady",
+			SuccessMessage: "Storage is ready",
+			ErrorReason:    "StorageFailed",
+		},
+		{
+			Name:           "edge-gateway",
+			Run:            func(ctx context.Context) error { return r.reconcileEdgeGateway(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeEdgeGatewayReady,
+			SuccessReason:  "EdgeGatewayReady",
+			SuccessMessage: "Edge gateway is ready",
+			ErrorReason:    "EdgeGatewayFailed",
+		},
+		{
+			Name:                 "scheduler-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileSchedulerRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeSchedulerReady,
+			ErrorReason:          "SchedulerRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "scheduler",
+			Run:            func(ctx context.Context) error { return r.reconcileScheduler(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeSchedulerReady,
+			SuccessReason:  "SchedulerReady",
+			SuccessMessage: "Scheduler is ready",
+			ErrorReason:    "SchedulerFailed",
+		},
+		{
+			Name:           "internal-gateway",
+			Run:            func(ctx context.Context) error { return r.reconcileInternalGateway(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeInternalGatewayReady,
+			SuccessReason:  "InternalGatewayReady",
+			SuccessMessage: "Internal gateway is ready",
+			ErrorReason:    "InternalGatewayFailed",
+		},
+		{
+			Name:                 "manager-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileManagerRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeManagerReady,
+			ErrorReason:          "ManagerRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "manager",
+			Run:            func(ctx context.Context) error { return r.reconcileManager(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeManagerReady,
+			SuccessReason:  "ManagerReady",
+			SuccessMessage: "Manager is ready",
+			ErrorReason:    "ManagerFailed",
+		},
+		{
+			Name:                 "storage-proxy-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileStorageProxyRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeStorageProxyReady,
+			ErrorReason:          "StorageProxyRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "storage-proxy",
+			Run:            func(ctx context.Context) error { return r.reconcileStorageProxy(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeStorageProxyReady,
+			SuccessReason:  "StorageProxyReady",
+			SuccessMessage: "Storage proxy is ready",
+			ErrorReason:    "StorageProxyFailed",
+		},
+		{
+			Name:                 "netd-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileNetdRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeNetdReady,
+			ErrorReason:          "NetdRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "netd",
+			Run:            func(ctx context.Context) error { return r.reconcileNetd(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeNetdReady,
+			SuccessReason:  "NetdReady",
+			SuccessMessage: "Netd is ready",
+			ErrorReason:    "NetdFailed",
+		},
+		{
+			Name: "init-user",
+			Run: func(ctx context.Context) error {
+				if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled {
+					return r.reconcileInitUser(ctx, infra)
+				}
+				return nil
+			},
+			IgnoreError: true,
+		},
 	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionTrue, "KeysReady", "Internal auth keys are ready")
 
-	// Step 2: Reconcile database
-	if err := r.reconcileDatabase(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "DatabaseFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "Database is ready")
-
-	// Step 3: Reconcile storage
-	if err := r.reconcileStorage(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageReady, metav1.ConditionFalse, "StorageFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageReady, metav1.ConditionTrue, "StorageReady", "Storage is ready")
-
-	// Step 4: Reconcile control plane services
-	if err := r.reconcileEdgeGateway(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeEdgeGatewayReady, metav1.ConditionFalse, "EdgeGatewayFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeEdgeGatewayReady, metav1.ConditionTrue, "EdgeGatewayReady", "Edge gateway is ready")
-
-	if err := r.reconcileSchedulerRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeSchedulerReady, metav1.ConditionFalse, "SchedulerRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileScheduler(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeSchedulerReady, metav1.ConditionFalse, "SchedulerFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeSchedulerReady, metav1.ConditionTrue, "SchedulerReady", "Scheduler is ready")
-
-	// Step 5: Reconcile data plane services
-	if err := r.reconcileInternalGateway(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalGatewayReady, metav1.ConditionFalse, "InternalGatewayFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalGatewayReady, metav1.ConditionTrue, "InternalGatewayReady", "Internal gateway is ready")
-
-	if err := r.reconcileManagerRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeManagerReady, metav1.ConditionFalse, "ManagerRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileManager(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeManagerReady, metav1.ConditionFalse, "ManagerFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeManagerReady, metav1.ConditionTrue, "ManagerReady", "Manager is ready")
-
-	if err := r.reconcileStorageProxyRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageProxyReady, metav1.ConditionFalse, "StorageProxyRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileStorageProxy(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageProxyReady, metav1.ConditionFalse, "StorageProxyFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageProxyReady, metav1.ConditionTrue, "StorageProxyReady", "Storage proxy is ready")
-
-	if err := r.reconcileNetdRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeNetdReady, metav1.ConditionFalse, "NetdRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileNetd(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeNetdReady, metav1.ConditionFalse, "NetdFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeNetdReady, metav1.ConditionTrue, "NetdReady", "Netd is ready")
-
-	// Step 6: Reconcile init user if configured
-	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled {
-		if err := r.reconcileInitUser(ctx, infra); err != nil {
-			logger.Error(err, "Failed to create init user")
-			// Don't fail the reconciliation for init user
-		}
-	}
-
-	return ctrl.Result{RequeueAfter: requeueInterval}, nil
+	return r.runSteps(ctx, infra, steps)
 }
 
 // reconcileControlPlaneMode reconciles control plane components only
@@ -280,47 +306,57 @@ func (r *Sandbox0InfraReconciler) reconcileControlPlaneMode(ctx context.Context,
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling control-plane mode")
 
-	// Step 1: Reconcile internal auth
-	if err := r.reconcileInternalAuth(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionFalse, "KeyGenerationFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
+	steps := []reconcileStep{
+		{
+			Name:           "internal-auth",
+			Run:            func(ctx context.Context) error { return r.reconcileInternalAuth(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeInternalAuthReady,
+			SuccessReason:  "KeysReady",
+			SuccessMessage: "Internal auth keys are ready",
+			ErrorReason:    "KeyGenerationFailed",
+		},
+		{
+			Name:           "external-database",
+			Run:            func(ctx context.Context) error { return r.validateExternalDatabase(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeDatabaseReady,
+			SuccessReason:  "DatabaseReady",
+			SuccessMessage: "External database connected",
+			ErrorReason:    "DatabaseConnectionFailed",
+		},
+		{
+			Name:           "external-storage",
+			Run:            func(ctx context.Context) error { return r.validateExternalStorage(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeStorageReady,
+			SuccessReason:  "StorageReady",
+			SuccessMessage: "External storage accessible",
+			ErrorReason:    "StorageConnectionFailed",
+		},
+		{
+			Name:           "edge-gateway",
+			Run:            func(ctx context.Context) error { return r.reconcileEdgeGateway(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeEdgeGatewayReady,
+			SuccessReason:  "EdgeGatewayReady",
+			SuccessMessage: "Edge gateway is ready",
+			ErrorReason:    "EdgeGatewayFailed",
+		},
+		{
+			Name:                 "scheduler-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileSchedulerRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeSchedulerReady,
+			ErrorReason:          "SchedulerRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "scheduler",
+			Run:            func(ctx context.Context) error { return r.reconcileScheduler(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeSchedulerReady,
+			SuccessReason:  "SchedulerReady",
+			SuccessMessage: "Scheduler is ready",
+			ErrorReason:    "SchedulerFailed",
+		},
 	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionTrue, "KeysReady", "Internal auth keys are ready")
 
-	// Step 2: Validate external database connection
-	if err := r.validateExternalDatabase(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "DatabaseConnectionFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "External database connected")
-
-	// Step 3: Validate external storage
-	if err := r.validateExternalStorage(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageReady, metav1.ConditionFalse, "StorageConnectionFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageReady, metav1.ConditionTrue, "StorageReady", "External storage accessible")
-
-	// Step 4: Reconcile edge-gateway
-	if err := r.reconcileEdgeGateway(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeEdgeGatewayReady, metav1.ConditionFalse, "EdgeGatewayFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeEdgeGatewayReady, metav1.ConditionTrue, "EdgeGatewayReady", "Edge gateway is ready")
-
-	// Step 5: Reconcile scheduler if enabled
-	if err := r.reconcileSchedulerRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeSchedulerReady, metav1.ConditionFalse, "SchedulerRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileScheduler(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeSchedulerReady, metav1.ConditionFalse, "SchedulerFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeSchedulerReady, metav1.ConditionTrue, "SchedulerReady", "Scheduler is ready")
-
-	return ctrl.Result{RequeueAfter: requeueInterval}, nil
+	return r.runSteps(ctx, infra, steps)
 }
 
 // reconcileDataPlaneMode reconciles data plane components only
@@ -328,98 +364,129 @@ func (r *Sandbox0InfraReconciler) reconcileDataPlaneMode(ctx context.Context, in
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling data-plane mode")
 
-	// Step 1: Validate control plane public key exists
-	if infra.Spec.ControlPlane == nil {
-		err := fmt.Errorf("controlPlane configuration is required for data-plane mode")
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionFalse, "MissingControlPlane", err.Error())
-		return ctrl.Result{}, err
+	steps := []reconcileStep{
+		{
+			Name: "control-plane-config",
+			Run: func(ctx context.Context) error {
+				if infra.Spec.ControlPlane == nil {
+					return fmt.Errorf("controlPlane configuration is required for data-plane mode")
+				}
+				return nil
+			},
+			ConditionType:        infrav1alpha1.ConditionTypeInternalAuthReady,
+			ErrorReason:          "MissingControlPlane",
+			SkipSuccessCondition: true,
+			ErrorResult:          &ctrl.Result{},
+		},
+		{
+			Name: "control-plane-public-key",
+			Run: func(ctx context.Context) error {
+				publicKeySecret := &corev1.Secret{}
+				return r.Get(ctx, types.NamespacedName{
+					Name:      infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name,
+					Namespace: infra.Namespace,
+				}, publicKeySecret)
+			},
+			ConditionType:        infrav1alpha1.ConditionTypeInternalAuthReady,
+			ErrorReason:          "PublicKeySecretNotFound",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "internal-auth",
+			Run:            func(ctx context.Context) error { return r.reconcileInternalAuth(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeInternalAuthReady,
+			SuccessReason:  "KeysReady",
+			SuccessMessage: "Internal auth keys are ready",
+			ErrorReason:    "KeyGenerationFailed",
+		},
+		{
+			Name:           "external-database",
+			Run:            func(ctx context.Context) error { return r.validateExternalDatabase(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeDatabaseReady,
+			SuccessReason:  "DatabaseReady",
+			SuccessMessage: "External database connected",
+			ErrorReason:    "DatabaseConnectionFailed",
+		},
+		{
+			Name:           "external-storage",
+			Run:            func(ctx context.Context) error { return r.validateExternalStorage(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeStorageReady,
+			SuccessReason:  "StorageReady",
+			SuccessMessage: "External storage accessible",
+			ErrorReason:    "StorageConnectionFailed",
+		},
+		{
+			Name:           "internal-gateway",
+			Run:            func(ctx context.Context) error { return r.reconcileInternalGateway(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeInternalGatewayReady,
+			SuccessReason:  "InternalGatewayReady",
+			SuccessMessage: "Internal gateway is ready",
+			ErrorReason:    "InternalGatewayFailed",
+		},
+		{
+			Name:                 "manager-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileManagerRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeManagerReady,
+			ErrorReason:          "ManagerRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "manager",
+			Run:            func(ctx context.Context) error { return r.reconcileManager(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeManagerReady,
+			SuccessReason:  "ManagerReady",
+			SuccessMessage: "Manager is ready",
+			ErrorReason:    "ManagerFailed",
+		},
+		{
+			Name:                 "storage-proxy-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileStorageProxyRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeStorageProxyReady,
+			ErrorReason:          "StorageProxyRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "storage-proxy",
+			Run:            func(ctx context.Context) error { return r.reconcileStorageProxy(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeStorageProxyReady,
+			SuccessReason:  "StorageProxyReady",
+			SuccessMessage: "Storage proxy is ready",
+			ErrorReason:    "StorageProxyFailed",
+		},
+		{
+			Name:                 "netd-rbac",
+			Run:                  func(ctx context.Context) error { return r.reconcileNetdRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeNetdReady,
+			ErrorReason:          "NetdRBACFailed",
+			SkipSuccessCondition: true,
+		},
+		{
+			Name:           "netd",
+			Run:            func(ctx context.Context) error { return r.reconcileNetd(ctx, infra) },
+			ConditionType:  infrav1alpha1.ConditionTypeNetdReady,
+			SuccessReason:  "NetdReady",
+			SuccessMessage: "Netd is ready",
+			ErrorReason:    "NetdFailed",
+		},
+		{
+			Name: "register-cluster",
+			Run: func(ctx context.Context) error {
+				if infra.Spec.Cluster != nil {
+					return r.registerCluster(ctx, infra)
+				}
+				return nil
+			},
+			IgnoreError: true,
+		},
 	}
 
-	// Check control plane public key secret
-	publicKeySecret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{
-		Name:      infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name,
-		Namespace: infra.Namespace,
-	}, publicKeySecret); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionFalse, "PublicKeySecretNotFound", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	// Step 2: Reconcile data plane internal auth keys
-	if err := r.reconcileInternalAuth(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionFalse, "KeyGenerationFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalAuthReady, metav1.ConditionTrue, "KeysReady", "Internal auth keys are ready")
-
-	// Step 3: Validate external database
-	if err := r.validateExternalDatabase(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeDatabaseReady, metav1.ConditionFalse, "DatabaseConnectionFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeDatabaseReady, metav1.ConditionTrue, "DatabaseReady", "External database connected")
-
-	// Step 4: Validate external storage
-	if err := r.validateExternalStorage(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageReady, metav1.ConditionFalse, "StorageConnectionFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageReady, metav1.ConditionTrue, "StorageReady", "External storage accessible")
-
-	// Step 5: Reconcile data plane services
-	if err := r.reconcileInternalGateway(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalGatewayReady, metav1.ConditionFalse, "InternalGatewayFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeInternalGatewayReady, metav1.ConditionTrue, "InternalGatewayReady", "Internal gateway is ready")
-
-	if err := r.reconcileManagerRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeManagerReady, metav1.ConditionFalse, "ManagerRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileManager(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeManagerReady, metav1.ConditionFalse, "ManagerFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeManagerReady, metav1.ConditionTrue, "ManagerReady", "Manager is ready")
-
-	if err := r.reconcileStorageProxyRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageProxyReady, metav1.ConditionFalse, "StorageProxyRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileStorageProxy(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageProxyReady, metav1.ConditionFalse, "StorageProxyFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeStorageProxyReady, metav1.ConditionTrue, "StorageProxyReady", "Storage proxy is ready")
-
-	if err := r.reconcileNetdRBAC(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeNetdReady, metav1.ConditionFalse, "NetdRBACFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-
-	if err := r.reconcileNetd(ctx, infra); err != nil {
-		r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeNetdReady, metav1.ConditionFalse, "NetdFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueInterval}, err
-	}
-	r.setCondition(ctx, infra, infrav1alpha1.ConditionTypeNetdReady, metav1.ConditionTrue, "NetdReady", "Netd is ready")
-
-	// Step 6: Register cluster with control plane
-	if infra.Spec.Cluster != nil {
-		if err := r.registerCluster(ctx, infra); err != nil {
-			logger.Error(err, "Failed to register cluster")
-			// Don't fail reconciliation for registration failure
-		}
-	}
-
-	return ctrl.Result{RequeueAfter: requeueInterval}, nil
+	return r.runSteps(ctx, infra, steps)
 }
 
 // updateOverallStatus updates the overall status based on conditions
 func (r *Sandbox0InfraReconciler) updateOverallStatus(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	logger := log.FromContext(ctx)
+	original := infra.Status.DeepCopy()
 
 	// Check if all required conditions are true
 	allReady := true
@@ -460,6 +527,9 @@ func (r *Sandbox0InfraReconciler) updateOverallStatus(ctx context.Context, infra
 	}
 
 	// Update status
+	if reflect.DeepEqual(original, &infra.Status) {
+		return nil
+	}
 	if err := r.Status().Update(ctx, infra); err != nil {
 		logger.Error(err, "Failed to update status")
 		return err
