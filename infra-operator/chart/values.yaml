@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: sandbox0ai/operator
+  repository: sandbox0ai/infra
   pullPolicy: IfNotPresent
   tag: "latest"
 

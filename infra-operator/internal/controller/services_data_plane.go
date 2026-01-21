@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrav1alpha1 "github.com/sandbox0-ai/infra-operator/api/v1alpha1"
+	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 )
 
 // reconcileInternalGateway reconciles the internal-gateway deployment

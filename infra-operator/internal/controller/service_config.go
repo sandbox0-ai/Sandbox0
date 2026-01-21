@@ -28,7 +28,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/yaml"
 
-	infrav1alpha1 "github.com/sandbox0-ai/infra-operator/api/v1alpha1"
+	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 )
 
 func (r *Sandbox0InfraReconciler) reconcileServiceConfigMap(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, name string, labels map[string]string, config map[string]any) error {

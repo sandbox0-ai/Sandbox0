@@ -8,7 +8,7 @@ $(LOCALBIN):
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
 
-SERVICES := edge-gateway internal-gateway manager scheduler storage-proxy netd k8s-plugin procd
+SERVICES := edge-gateway internal-gateway manager scheduler storage-proxy netd k8s-plugin procd infra-operator
 
 # Default version
 VERSION ?= latest
@@ -49,6 +49,9 @@ build-all: manifests
 	@printf "$(GREEN)Building k8s-plugin...$(RESET)\n"
 	@mkdir -p k8s-plugin/bin
 	@go build -v -o k8s-plugin/bin/k8s-plugin ./k8s-plugin
+	@printf "$(GREEN)Building infra-operator...$(RESET)\n"
+	@mkdir -p infra-operator/bin
+	@go build -v -o infra-operator/bin/manager ./infra-operator/cmd/main.go
 
 # Build specific service: make build <service>
 build: manifests
@@ -85,6 +88,10 @@ build: manifests
 		elif [ "$$service" = "k8s-plugin" ]; then \
 			mkdir -p k8s-plugin/bin; \
 			go build -v -o k8s-plugin/bin/k8s-plugin ./k8s-plugin; \
+		elif [ "$$service" = "infra-operator" ]; then \
+			$(MAKE) operator-manifests; \
+			mkdir -p infra-operator/bin; \
+			go build -v -o infra-operator/bin/manager ./infra-operator/cmd/main.go; \
 		fi; \
 	else \
 		echo "Error: Unknown service '$$service'"; \
@@ -125,6 +132,8 @@ test:
 			GOTOOLCHAIN=go1.25.0+auto go test -v -race -cover ./netd/...; \
 		elif [ "$$service" = "k8s-plugin" ]; then \
 			GOTOOLCHAIN=go1.25.0+auto go test -v -race -cover ./k8s-plugin/...; \
+		elif [ "$$service" = "infra-operator" ]; then \
+			GOTOOLCHAIN=go1.25.0+auto go test -v -race -cover ./infra-operator/...; \
 		fi; \
 	else \
 		echo "Error: Unknown service '$$service'"; \
@@ -139,7 +148,7 @@ test-all:
 	done
 
 # Prevent make from treating service names as targets
-edge-gateway internal-gateway manager scheduler storage-proxy netd k8s-plugin procd:
+edge-gateway internal-gateway manager scheduler storage-proxy netd k8s-plugin procd infra-operator:
 	@:
 
 lint:
@@ -184,3 +193,17 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 manifests: controller-gen
 	@printf "$(CYAN)Generating manager CRDs...$(RESET)\n"
 	@$(CONTROLLER_GEN) crd paths="./manager/pkg/apis/..." output:crd:artifacts:config=infra-operator/chart/crds/
+
+.PHONY: operator-manifests
+operator-manifests: controller-gen
+	@printf "$(CYAN)Generating infra-operator manifests...$(RESET)\n"
+	@$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./infra-operator/..." output:crd:artifacts:config=infra-operator/chart/crds output:rbac:artifacts:config=infra-operator/chart/crds output:webhook:artifacts:config=infra-operator/chart/crds
+	@rm -f infra-operator/chart/crds/role.yaml
+
+.PHONY: operator-install
+operator-install: operator-manifests
+	kubectl apply -f infra-operator/chart/crds/
+
+.PHONY: operator-run
+operator-run: operator-manifests
+	go run ./infra-operator/cmd/main.go

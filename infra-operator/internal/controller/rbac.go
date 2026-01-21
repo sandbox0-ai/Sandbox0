@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	infrav1alpha1 "github.com/sandbox0-ai/infra-operator/api/v1alpha1"
+	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 )
 
 // reconcileServiceAccount creates or updates a ServiceAccount for a service.

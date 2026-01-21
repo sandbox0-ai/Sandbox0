@@ -38,6 +38,9 @@ spec:
         - /manager
         args:
         - --leader-elect
+        env:
+        - name: SERVICE
+          value: infra-operator
         livenessProbe:
           httpGet:
             path: /healthz

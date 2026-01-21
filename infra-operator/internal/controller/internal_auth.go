@@ -31,7 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	infrav1alpha1 "github.com/sandbox0-ai/infra-operator/api/v1alpha1"
+	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 )
 
 const (

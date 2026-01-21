@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	infrav1alpha1 "github.com/sandbox0-ai/infra-operator/api/v1alpha1"
+	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 )
 
 func TestRunStepsSetsConditions(t *testing.T) {
