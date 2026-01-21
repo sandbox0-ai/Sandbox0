@@ -147,7 +147,7 @@ func (r *Sandbox0InfraReconciler) reconcileDatabasePVC(ctx context.Context, infr
 				AccessModes: []corev1.PersistentVolumeAccessMode{
 					corev1.ReadWriteOnce,
 				},
-				Resources: corev1.ResourceRequirements{
+				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: size,
 					},

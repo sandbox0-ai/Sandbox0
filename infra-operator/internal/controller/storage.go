@@ -114,9 +114,9 @@ func (r *Sandbox0InfraReconciler) reconcileStorageSecret(ctx context.Context, in
 			},
 			Type: corev1.SecretTypeOpaque,
 			StringData: map[string]string{
-				"accessKey": accessKey,
-				"secretKey": secretKey,
-				"endpoint":  fmt.Sprintf("http://%s-rustfs:%d", infra.Name, rustfsPort),
+				"RUSTFS_ACCESS_KEY": accessKey,
+				"RUSTFS_SECRET_KEY": secretKey,
+				"endpoint":          fmt.Sprintf("http://%s-rustfs:%d", infra.Name, rustfsPort),
 			},
 		}
 
@@ -155,7 +155,7 @@ func (r *Sandbox0InfraReconciler) reconcileStoragePVC(ctx context.Context, infra
 				AccessModes: []corev1.PersistentVolumeAccessMode{
 					corev1.ReadWriteOnce,
 				},
-				Resources: corev1.ResourceRequirements{
+				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceStorage: size,
 					},
@@ -200,8 +200,7 @@ func (r *Sandbox0InfraReconciler) reconcileStorageStatefulSet(ctx context.Contex
 		"app.kubernetes.io/managed-by": "sandbox0infra-operator",
 	}
 
-	// Using MinIO as a reference S3-compatible storage
-	// In production, this would be replaced with RustFS
+	// Using RustFS as the built-in S3-compatible storage
 	desiredSts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      stsName,
@@ -220,12 +219,12 @@ func (r *Sandbox0InfraReconciler) reconcileStorageStatefulSet(ctx context.Contex
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "minio",
-							Image: "minio/minio:latest",
-							Args:  []string{"server", "/data", "--console-address", fmt.Sprintf(":%d", rustfsConsole)},
+							Name:    "rustfs",
+							Image:   "rustfs/rustfs:1.0.0-alpha.79",
+							Command: []string{"/usr/bin/rustfs"},
 							Ports: []corev1.ContainerPort{
 								{
-									Name:          "api",
+									Name:          "endpoint",
 									ContainerPort: rustfsPort,
 								},
 								{
@@ -235,26 +234,58 @@ func (r *Sandbox0InfraReconciler) reconcileStorageStatefulSet(ctx context.Contex
 							},
 							Env: []corev1.EnvVar{
 								{
-									Name: "MINIO_ROOT_USER",
+									Name: "RUSTFS_ACCESS_KEY",
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
 												Name: secretName,
 											},
-											Key: "accessKey",
+											Key: "RUSTFS_ACCESS_KEY",
 										},
 									},
 								},
 								{
-									Name: "MINIO_ROOT_PASSWORD",
+									Name: "RUSTFS_SECRET_KEY",
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
 												Name: secretName,
 											},
-											Key: "secretKey",
+											Key: "RUSTFS_SECRET_KEY",
 										},
 									},
+								},
+								{
+									Name:  "RUSTFS_ADDRESS",
+									Value: fmt.Sprintf(":%d", rustfsPort),
+								},
+								{
+									Name:  "RUSTFS_CONSOLE_ADDRESS",
+									Value: fmt.Sprintf(":%d", rustfsConsole),
+								},
+								{
+									Name:  "RUSTFS_CONSOLE_ENABLE",
+									Value: "true",
+								},
+								{
+									Name:  "RUSTFS_VOLUMES",
+									Value: "/data",
+								},
+								{
+									Name:  "RUSTFS_REGION",
+									Value: "us-east-1",
+								},
+								{
+									Name:  "RUSTFS_OBS_LOG_DIRECTORY",
+									Value: "/data/logs",
+								},
+								{
+									Name:  "RUSTFS_OBS_LOGGER_LEVEL",
+									Value: "debug",
+								},
+								{
+									Name:  "RUSTFS_OBS_ENVIRONMENT",
+									Value: "develop",
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
@@ -276,21 +307,21 @@ func (r *Sandbox0InfraReconciler) reconcileStorageStatefulSet(ctx context.Contex
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/minio/health/live",
+										Path: "/health",
 										Port: intstr.FromInt(rustfsPort),
 									},
 								},
-								InitialDelaySeconds: 30,
-								PeriodSeconds:       10,
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       5,
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/minio/health/ready",
+										Path: "/health",
 										Port: intstr.FromInt(rustfsPort),
 									},
 								},
-								InitialDelaySeconds: 5,
+								InitialDelaySeconds: 30,
 								PeriodSeconds:       5,
 							},
 						},
@@ -402,8 +433,8 @@ func (r *Sandbox0InfraReconciler) getStorageConfig(ctx context.Context, infra *i
 			return nil, err
 		}
 		config.Endpoint = string(secret.Data["endpoint"])
-		config.AccessKey = string(secret.Data["accessKey"])
-		config.SecretKey = string(secret.Data["secretKey"])
+		config.AccessKey = string(secret.Data["RUSTFS_ACCESS_KEY"])
+		config.SecretKey = string(secret.Data["RUSTFS_SECRET_KEY"])
 		config.SecretName = secretName
 		config.Bucket = "sandbox0"
 		config.Region = "us-east-1"
