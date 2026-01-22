@@ -14,6 +14,7 @@ import (
 
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"github.com/sandbox0-ai/infra/netd/pkg/ebpf"
+	"github.com/sandbox0-ai/infra/netd/pkg/netdiscovery"
 	"github.com/sandbox0-ai/infra/netd/pkg/watcher"
 	"go.uber.org/zap"
 )
@@ -493,11 +494,27 @@ func (dp *DataPlane) applyBandwidthRules(
 	policy *v1alpha1.BandwidthPolicySpec,
 	rules *SandboxRules,
 ) error {
-	// Find the veth interface for this pod
-	// This is a simplified implementation - in production, you'd need to
-	// find the actual veth pair for the pod network namespace
-	vethName := fmt.Sprintf("%s%s", dp.vethPrefix, info.SandboxID[:8])
-	rules.VethName = vethName
+	// Discover the network interface for this pod using routing table.
+	// This supports both standard containers (veth) and Kata Containers (tap).
+	deviceInfo, err := netdiscovery.FindDeviceBySandboxID(info.SandboxID, info.PodIP)
+	if err != nil {
+		dp.logger.Warn("Failed to discover network device, skipping bandwidth control",
+			zap.String("sandboxID", info.SandboxID),
+			zap.String("podIP", info.PodIP),
+			zap.Error(err),
+		)
+		// Don't fail - just log and skip bandwidth control
+		// Security policies (iptables) will still work
+		return nil
+	}
+
+	rules.VethName = deviceInfo.Name
+	dp.logger.Info("Network device discovered for sandbox",
+		zap.String("sandboxID", info.SandboxID),
+		zap.String("podIP", info.PodIP),
+		zap.String("deviceName", deviceInfo.Name),
+		zap.String("deviceType", deviceInfo.Type),
+	)
 
 	// Get rate limits
 	var egressRateBps, ingressRateBps, burstBytes int64
@@ -519,7 +536,7 @@ func (dp *DataPlane) applyBandwidthRules(
 	if dp.ebpfMgr != nil && dp.useEBPF {
 		cfg := &ebpf.RateLimitConfig{
 			SandboxID:      info.SandboxID,
-			Iface:          vethName,
+			Iface:          deviceInfo.Name,
 			EgressRateBps:  egressRateBps,
 			IngressRateBps: ingressRateBps,
 			BurstBytes:     burstBytes,
@@ -531,7 +548,7 @@ func (dp *DataPlane) applyBandwidthRules(
 				zap.String("sandboxID", info.SandboxID),
 				zap.Error(err),
 			)
-			return dp.applyTCBandwidthRules(ctx, info, vethName, egressRateBps, burstBytes, rules)
+			return dp.applyTCBandwidthRules(ctx, info, deviceInfo.Name, egressRateBps, burstBytes, rules)
 		}
 
 		rules.TCClass = "ebpf:fq"
@@ -539,7 +556,7 @@ func (dp *DataPlane) applyBandwidthRules(
 	}
 
 	// Fall back to traditional tc htb
-	return dp.applyTCBandwidthRules(ctx, info, vethName, egressRateBps, burstBytes, rules)
+	return dp.applyTCBandwidthRules(ctx, info, deviceInfo.Name, egressRateBps, burstBytes, rules)
 }
 
 // applyTCBandwidthRules applies bandwidth rules using traditional tc htb
