@@ -855,6 +855,8 @@ spec:
                                 type: string
                               pool:
                                 default: {}
+                                description: DefaultTemplatePoolConfig holds pool
+                                  defaults for the installed template.
                                 properties:
                                   autoScale:
                                     default: true
@@ -869,9 +871,6 @@ spec:
                                     type: integer
                                 type: object
                             type: object
-                          templateNamespace:
-                            default: sandbox0
-                            type: string
                           httpPort:
                             default: 8080
                             description: HTTP Server
@@ -952,6 +951,9 @@ spec:
                             type: string
                           shutdownTimeout:
                             default: 30s
+                            type: string
+                          templateNamespace:
+                            default: sandbox0
                             type: string
                           webhookCertPath:
                             default: /tmp/k8s-webhook-server/serving-certs/tls.crt
