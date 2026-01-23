@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
+	"github.com/sandbox0-ai/infra/pkg/dbpool"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/k8s"
 	"github.com/sandbox0-ai/infra/pkg/migrate"
@@ -298,35 +299,26 @@ func initDatabase(ctx context.Context, databaseURL string, cfg *config.StoragePr
 		return nil, fmt.Errorf("database URL is empty")
 	}
 
-	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	schema := cfg.DatabaseSchema
+	if schema == "" {
+		schema = "sp"
+	}
+
+	pool, err := dbpool.New(ctx, dbpool.Options{
+		DatabaseURL:     databaseURL,
+		MaxConns:        int32(cfg.DatabaseMaxConns),
+		MinConns:        int32(cfg.DatabaseMinConns),
+		DefaultMaxConns: 30,
+		DefaultMinConns: 5,
+		Schema:          schema,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse database URL: %w", err)
-	}
-
-	// Configure pool
-	poolConfig.MaxConns = int32(cfg.DatabaseMaxConns)
-	poolConfig.MinConns = int32(cfg.DatabaseMinConns)
-	if poolConfig.MaxConns == 0 {
-		poolConfig.MaxConns = 30
-	}
-	if poolConfig.MinConns == 0 {
-		poolConfig.MinConns = 5
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create connection pool: %w", err)
-	}
-
-	// Test connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, err
 	}
 
 	logger.Info("Database connection established",
-		zap.Int32("max_conns", poolConfig.MaxConns),
-		zap.Int32("min_conns", poolConfig.MinConns),
+		zap.Int32("max_conns", pool.Config().MaxConns),
+		zap.Int32("min_conns", pool.Config().MinConns),
 	)
 
 	return pool, nil

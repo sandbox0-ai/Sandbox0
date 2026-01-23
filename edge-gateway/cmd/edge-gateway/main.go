@@ -11,6 +11,7 @@ import (
 	egmigrations "github.com/sandbox0-ai/infra/edge-gateway/migrations"
 	"github.com/sandbox0-ai/infra/edge-gateway/pkg/http"
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
+	"github.com/sandbox0-ai/infra/pkg/dbpool"
 	"github.com/sandbox0-ai/infra/pkg/migrate"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -122,29 +123,19 @@ func initLogger(level string) (*zap.Logger, error) {
 
 // initDatabase initializes the database connection pool
 func initDatabase(ctx context.Context, cfg *config.EdgeGatewayConfig, logger *zap.Logger) (*pgxpool.Pool, error) {
-	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	pool, err := dbpool.New(ctx, dbpool.Options{
+		DatabaseURL: cfg.DatabaseURL,
+		MaxConns:    int32(cfg.DatabaseMaxConns),
+		MinConns:    int32(cfg.DatabaseMinConns),
+		Schema:      "eg",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse database URL: %w", err)
-	}
-
-	// Configure pool
-	poolConfig.MaxConns = int32(cfg.DatabaseMaxConns)
-	poolConfig.MinConns = int32(cfg.DatabaseMinConns)
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create connection pool: %w", err)
-	}
-
-	// Test connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, err
 	}
 
 	logger.Info("Database connection established",
-		zap.Int32("max_conns", poolConfig.MaxConns),
-		zap.Int32("min_conns", poolConfig.MinConns),
+		zap.Int32("max_conns", pool.Config().MaxConns),
+		zap.Int32("min_conns", pool.Config().MinConns),
 	)
 
 	return pool, nil

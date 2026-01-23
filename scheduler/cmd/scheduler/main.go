@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
 	"github.com/sandbox0-ai/infra/pkg/clock"
+	"github.com/sandbox0-ai/infra/pkg/dbpool"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/migrate"
 	"github.com/sandbox0-ai/infra/pkg/pubsub"
@@ -212,42 +213,32 @@ func (z *zapLogger) Fatalf(format string, args ...any) {
 }
 
 func initDatabase(ctx context.Context, cfg *config.SchedulerConfig, logger *zap.Logger) (*pgxpool.Pool, error) {
-	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	maxConnLifetime := cfg.DatabasePool.MaxConnLifetime.Duration
+	if maxConnLifetime == 0 {
+		maxConnLifetime = 30 * time.Minute
+	}
+	maxConnIdleTime := cfg.DatabasePool.MaxConnIdleTime.Duration
+	if maxConnIdleTime == 0 {
+		maxConnIdleTime = 5 * time.Minute
+	}
+
+	pool, err := dbpool.New(ctx, dbpool.Options{
+		DatabaseURL:     cfg.DatabaseURL,
+		MaxConns:        cfg.DatabasePool.MaxConns,
+		MinConns:        cfg.DatabasePool.MinConns,
+		DefaultMaxConns: 10,
+		DefaultMinConns: 2,
+		MaxConnLifetime: maxConnLifetime,
+		MaxConnIdleTime: maxConnIdleTime,
+		Schema:          "sched",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse database URL: %w", err)
-	}
-
-	poolConfig.MaxConns = cfg.DatabasePool.MaxConns
-	if poolConfig.MaxConns == 0 {
-		poolConfig.MaxConns = 10
-	}
-	poolConfig.MinConns = cfg.DatabasePool.MinConns
-	if poolConfig.MinConns == 0 {
-		poolConfig.MinConns = 2
-	}
-	poolConfig.MaxConnLifetime = cfg.DatabasePool.MaxConnLifetime.Duration
-	if poolConfig.MaxConnLifetime == 0 {
-		poolConfig.MaxConnLifetime = 30 * time.Minute
-	}
-	poolConfig.MaxConnIdleTime = cfg.DatabasePool.MaxConnIdleTime.Duration
-	if poolConfig.MaxConnIdleTime == 0 {
-		poolConfig.MaxConnIdleTime = 5 * time.Minute
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create connection pool: %w", err)
-	}
-
-	// Test connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, err
 	}
 
 	logger.Info("Connected to database",
-		zap.Int32("max_conns", poolConfig.MaxConns),
-		zap.Int32("min_conns", poolConfig.MinConns),
+		zap.Int32("max_conns", pool.Config().MaxConns),
+		zap.Int32("min_conns", pool.Config().MinConns),
 	)
 
 	return pool, nil

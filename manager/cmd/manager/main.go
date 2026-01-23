@@ -20,6 +20,7 @@ import (
 	"github.com/sandbox0-ai/infra/manager/pkg/service"
 	"github.com/sandbox0-ai/infra/manager/pkg/webhook"
 	"github.com/sandbox0-ai/infra/pkg/clock"
+	"github.com/sandbox0-ai/infra/pkg/dbpool"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -381,29 +382,18 @@ func startMetricsServer(port int, logger *zap.Logger) {
 
 // initDatabase initializes the database connection pool
 func initDatabase(ctx context.Context, databaseURL string, maxConns, minConns int32, logger *zap.Logger) (*pgxpool.Pool, error) {
-	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	pool, err := dbpool.New(ctx, dbpool.Options{
+		DatabaseURL: databaseURL,
+		MaxConns:    maxConns,
+		MinConns:    minConns,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse database URL: %w", err)
-	}
-
-	// Configure pool
-	poolConfig.MaxConns = maxConns
-	poolConfig.MinConns = minConns
-
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		return nil, fmt.Errorf("create connection pool: %w", err)
-	}
-
-	// Test connection
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("ping database: %w", err)
+		return nil, err
 	}
 
 	logger.Info("Database connection established",
-		zap.Int32("max_conns", poolConfig.MaxConns),
-		zap.Int32("min_conns", poolConfig.MinConns),
+		zap.Int32("max_conns", pool.Config().MaxConns),
+		zap.Int32("min_conns", pool.Config().MinConns),
 	)
 
 	return pool, nil
