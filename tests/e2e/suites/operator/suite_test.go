@@ -31,6 +31,10 @@ var _ = BeforeSuite(func() {
 	cluster := framework.NewCluster(cfg.ClusterName)
 	testCtx = framework.NewTestContext(cluster)
 
+	lockRelease, err := framework.AcquireE2ELock(testCtx.Context, cfg.ClusterName, 0)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(lockRelease)
+
 	if !cfg.UseExistingCluster {
 		fmt.Printf("Setting up Kind cluster %q...\n", cfg.ClusterName)
 		err = cluster.CreateKind(testCtx.Context, cfg.KindConfigPath)

@@ -42,12 +42,15 @@ import (
 type ResourceManager struct {
 	Client client.Client
 	Scheme *runtime.Scheme
+	// ImagePullPolicy overrides container pull policy when set.
+	ImagePullPolicy *corev1.PullPolicy
 }
 
-func NewResourceManager(client client.Client, scheme *runtime.Scheme) *ResourceManager {
+func NewResourceManager(client client.Client, scheme *runtime.Scheme, imagePullPolicy *corev1.PullPolicy) *ResourceManager {
 	return &ResourceManager{
-		Client: client,
-		Scheme: scheme,
+		Client:          client,
+		Scheme:          scheme,
+		ImagePullPolicy: imagePullPolicy,
 	}
 }
 
@@ -58,6 +61,7 @@ type ServiceDefinition struct {
 	TargetPort         int32
 	Ports              []corev1.ContainerPort
 	Image              string
+	ImagePullPolicy    *corev1.PullPolicy
 	Command            []string
 	Args               []string
 	EnvVars            []corev1.EnvVar
@@ -109,16 +113,17 @@ func (r *ResourceManager) ReconcileDeployment(ctx context.Context, infra *infrav
 					ServiceAccountName: def.ServiceAccountName,
 					Containers: []corev1.Container{
 						{
-							Name:           def.Name,
-							Image:          def.Image,
-							Command:        def.Command,
-							Args:           def.Args,
-							Env:            def.EnvVars,
-							VolumeMounts:   def.VolumeMounts,
-							Ports:          ResolveContainerPorts(def),
-							Resources:      defaultResources,
-							LivenessProbe:  def.LivenessProbe,
-							ReadinessProbe: def.ReadinessProbe,
+							Name:            def.Name,
+							Image:           def.Image,
+							ImagePullPolicy: ResolveImagePullPolicy(def, r.ImagePullPolicy),
+							Command:         def.Command,
+							Args:            def.Args,
+							Env:             def.EnvVars,
+							VolumeMounts:    def.VolumeMounts,
+							Ports:           ResolveContainerPorts(def),
+							Resources:       defaultResources,
+							LivenessProbe:   def.LivenessProbe,
+							ReadinessProbe:  def.ReadinessProbe,
 						},
 					},
 					Volumes: def.Volumes,
@@ -181,11 +186,12 @@ func (r *ResourceManager) ReconcileDaemonSet(ctx context.Context, infra *infrav1
 					DNSPolicy:          corev1.DNSClusterFirstWithHostNet,
 					Containers: []corev1.Container{
 						{
-							Name:         def.Name,
-							Image:        def.Image,
-							Env:          def.EnvVars,
-							VolumeMounts: def.VolumeMounts,
-							Ports:        ResolveContainerPorts(def),
+							Name:            def.Name,
+							Image:           def.Image,
+							ImagePullPolicy: ResolveImagePullPolicy(def, r.ImagePullPolicy),
+							Env:             def.EnvVars,
+							VolumeMounts:    def.VolumeMounts,
+							Ports:           ResolveContainerPorts(def),
 							SecurityContext: &corev1.SecurityContext{
 								Privileged: BoolPtr(true),
 								Capabilities: &corev1.Capabilities{
@@ -228,6 +234,16 @@ func ResolveContainerPorts(def ServiceDefinition) []corev1.ContainerPort {
 			ContainerPort: def.TargetPort,
 		},
 	}
+}
+
+func ResolveImagePullPolicy(def ServiceDefinition, fallback *corev1.PullPolicy) corev1.PullPolicy {
+	if def.ImagePullPolicy != nil {
+		return *def.ImagePullPolicy
+	}
+	if fallback != nil {
+		return *fallback
+	}
+	return ""
 }
 
 func ResolveServiceType(config *infrav1alpha1.ServiceNetworkConfig) corev1.ServiceType {

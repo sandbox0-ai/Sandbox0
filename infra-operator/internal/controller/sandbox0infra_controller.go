@@ -40,8 +40,8 @@ import (
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/rbac"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/database"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/edgegateway"
-	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/internalgateway"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/internalauth"
+	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/internalgateway"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/manager"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/netd"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/scheduler"
@@ -196,7 +196,7 @@ func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *i
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling all mode")
 
-	resources := common.NewResourceManager(r.Client, r.Scheme)
+	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
 	imageRepo := r.getImageRepo(ctx)
 	authReconciler := internalauth.NewReconciler(resources)
 	dbReconciler := database.NewReconciler(resources)
@@ -331,7 +331,7 @@ func (r *Sandbox0InfraReconciler) reconcileControlPlaneMode(ctx context.Context,
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling control-plane mode")
 
-	resources := common.NewResourceManager(r.Client, r.Scheme)
+	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
 	imageRepo := r.getImageRepo(ctx)
 	authReconciler := internalauth.NewReconciler(resources)
 	edgeGatewayReconciler := edgegateway.NewReconciler(resources)
@@ -396,7 +396,7 @@ func (r *Sandbox0InfraReconciler) reconcileDataPlaneMode(ctx context.Context, in
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling data-plane mode")
 
-	resources := common.NewResourceManager(r.Client, r.Scheme)
+	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
 	imageRepo := r.getImageRepo(ctx)
 	authReconciler := internalauth.NewReconciler(resources)
 	internalGatewayReconciler := internalgateway.NewReconciler(resources)

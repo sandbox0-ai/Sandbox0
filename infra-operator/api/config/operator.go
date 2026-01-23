@@ -29,7 +29,8 @@ const (
 )
 
 type OperatorConfig struct {
-	ImageRepo string `json:"imageRepo" yaml:"imageRepo"`
+	ImageRepo       string `json:"imageRepo" yaml:"imageRepo"`
+	ImagePullPolicy string `json:"imagePullPolicy" yaml:"imagePullPolicy"`
 }
 
 func LoadOperatorConfig(configPath string) (OperatorConfig, error) {

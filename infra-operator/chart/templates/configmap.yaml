@@ -7,3 +7,6 @@ metadata:
 data:
   config.yaml: |
     imageRepo: {{ .Values.config.imageRepo | default "sandbox0ai/infra" }}
+    {{ if .Values.config.imagePullPolicy }}
+    imagePullPolicy: {{ .Values.config.imagePullPolicy }}
+    {{ end }}

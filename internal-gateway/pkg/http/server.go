@@ -126,6 +126,11 @@ func NewServer(
 	return server, nil
 }
 
+// Handler exposes the HTTP handler for tests.
+func (s *Server) Handler() http.Handler {
+	return s.router
+}
+
 // setupRoutes configures all HTTP routes
 func (s *Server) setupRoutes() {
 	// Global middleware (order matters)

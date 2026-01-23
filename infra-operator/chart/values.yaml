@@ -164,4 +164,6 @@ tolerations: []
 affinity: {}
 
 config:
+  # For infra services: edge-gateway, internal-gateway, manager, storage-proxy, netd, etc.
   imageRepo: "sandbox0ai/infra"
+  imagePullPolicy: ""

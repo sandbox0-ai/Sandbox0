@@ -206,6 +206,12 @@ var _ = Describe("Operator entrypoint", Ordered, func() {
 			err = framework.WaitForSandbox0InfraReady(testCtx.Context, cfg.Kubeconfig, allInOne, "20m")
 			Expect(err).NotTo(HaveOccurred())
 
+			err = framework.KubectlRolloutStatus(testCtx.Context, cfg.Kubeconfig, allInOne.Namespace, fmt.Sprintf("statefulset/%s-postgres", allInOne.Name), "10m")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = framework.KubectlRolloutStatus(testCtx.Context, cfg.Kubeconfig, allInOne.Namespace, fmt.Sprintf("statefulset/%s-rustfs", allInOne.Name), "10m")
+			Expect(err).NotTo(HaveOccurred())
+
 			err = framework.KubectlRolloutStatus(testCtx.Context, cfg.Kubeconfig, allInOne.Namespace, fmt.Sprintf("deployment/%s-edge-gateway", allInOne.Name), "5m")
 			Expect(err).NotTo(HaveOccurred())
 
@@ -224,11 +230,6 @@ var _ = Describe("Operator entrypoint", Ordered, func() {
 			err = framework.KubectlRolloutStatus(testCtx.Context, cfg.Kubeconfig, allInOne.Namespace, fmt.Sprintf("daemonset/%s-netd", allInOne.Name), "5m")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = framework.KubectlRolloutStatus(testCtx.Context, cfg.Kubeconfig, allInOne.Namespace, fmt.Sprintf("statefulset/%s-postgres", allInOne.Name), "10m")
-			Expect(err).NotTo(HaveOccurred())
-
-			err = framework.KubectlRolloutStatus(testCtx.Context, cfg.Kubeconfig, allInOne.Namespace, fmt.Sprintf("statefulset/%s-rustfs", allInOne.Name), "10m")
-			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

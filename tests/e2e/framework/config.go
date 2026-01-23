@@ -18,13 +18,14 @@ type Config struct {
 	SkipOperatorUninstall bool
 	TestMode              string
 
-	OperatorChartPath      string
-	OperatorNamespace      string
-	OperatorReleaseName    string
-	OperatorDeploymentName string
-	OperatorValuesPath     string
-	OperatorImageRepo      string
-	OperatorImageTag       string
+	OperatorChartPath       string
+	OperatorNamespace       string
+	OperatorReleaseName     string
+	OperatorDeploymentName  string
+	OperatorValuesPath      string
+	OperatorImageRepo       string
+	OperatorImageTag        string
+	OperatorImagePullPolicy string
 
 	InfraNamespace                string
 	InfraControlPlaneManifestPath string
@@ -59,13 +60,14 @@ func LoadConfig() (Config, error) {
 		SkipOperatorUninstall: envBool("E2E_SKIP_OPERATOR_UNINSTALL", false),
 		TestMode:              envString("E2E_TEST_MODE", "all"),
 
-		OperatorChartPath:      envString("E2E_OPERATOR_CHART", defaultOperatorChart),
-		OperatorNamespace:      envString("E2E_OPERATOR_NAMESPACE", "infra-operator"),
-		OperatorReleaseName:    envString("E2E_OPERATOR_RELEASE", "infra-operator"),
-		OperatorDeploymentName: envString("E2E_OPERATOR_DEPLOYMENT", "infra-operator-manager"),
-		OperatorValuesPath:     envString("E2E_OPERATOR_VALUES", defaultOperatorValues),
-		OperatorImageRepo:      envString("E2E_OPERATOR_IMAGE_REPO", ""),
-		OperatorImageTag:       envString("E2E_OPERATOR_IMAGE_TAG", ""),
+		OperatorChartPath:       envString("E2E_OPERATOR_CHART", defaultOperatorChart),
+		OperatorNamespace:       envString("E2E_OPERATOR_NAMESPACE", "infra-operator"),
+		OperatorReleaseName:     envString("E2E_OPERATOR_RELEASE", "infra-operator"),
+		OperatorDeploymentName:  envString("E2E_OPERATOR_DEPLOYMENT", "infra-operator-manager"),
+		OperatorValuesPath:      envString("E2E_OPERATOR_VALUES", defaultOperatorValues),
+		OperatorImageRepo:       envString("E2E_OPERATOR_IMAGE_REPO", ""),
+		OperatorImageTag:        envString("E2E_OPERATOR_IMAGE_TAG", ""),
+		OperatorImagePullPolicy: envString("E2E_OPERATOR_IMAGE_PULL_POLICY", "IfNotPresent"),
 
 		InfraNamespace:                envString("E2E_INFRA_NAMESPACE", "sandbox0-system"),
 		InfraControlPlaneManifestPath: envString("E2E_INFRA_CONTROL_PLANE_MANIFEST", defaultInfraControlPlane),

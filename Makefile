@@ -162,7 +162,7 @@ E2E_TEST_MODE ?= combined
 # E2E tests
 test-e2e:
 	@printf "$(CYAN)Running E2E tests (mode: $(E2E_TEST_MODE))...$(RESET)\n"
-	unset http_proxy && unset https_proxy && unset all_proxy && E2E_TEST_MODE=$(E2E_TEST_MODE) go test -v ./tests/e2e/... -timeout=30m
+	unset http_proxy && unset https_proxy && unset all_proxy && E2E_TEST_MODE=$(E2E_TEST_MODE) go test -v -count=1 ./tests/e2e/... -timeout=30m
 
 test-e2e-kind:
 	@printf "$(CYAN)Creating Kind cluster...$(RESET)\n"

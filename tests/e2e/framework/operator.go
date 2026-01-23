@@ -19,6 +19,9 @@ func InstallOperator(ctx context.Context, cfg Config) error {
 	if cfg.OperatorImageTag != "" {
 		setValues = append(setValues, fmt.Sprintf("image.tag=%s", cfg.OperatorImageTag))
 	}
+	if cfg.OperatorImagePullPolicy != "" {
+		setValues = append(setValues, fmt.Sprintf("config.imagePullPolicy=%s", cfg.OperatorImagePullPolicy))
+	}
 
 	return HelmUpgradeInstall(
 		ctx,

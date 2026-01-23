@@ -33,8 +33,14 @@ func (c *Cluster) CreateKind(ctx context.Context, configPath string) error {
 	if err == nil {
 		output, err := RunCommandOutput(ctx, "kind", "get", "clusters")
 		if err == nil && strings.Contains(output, c.Name) {
-			fmt.Printf("Kind cluster %q already exists, skipping creation.\n", c.Name)
-			return nil
+			if err := c.ensureKubeconfigAvailable(ctx); err == nil {
+				fmt.Printf("Kind cluster %q already exists, skipping creation.\n", c.Name)
+				return nil
+			}
+			fmt.Printf("Kind cluster %q exists but looks unhealthy, recreating.\n", c.Name)
+			if err := c.DeleteKind(ctx); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -44,6 +50,21 @@ func (c *Cluster) CreateKind(ctx context.Context, configPath string) error {
 		args = append(args, "--config", configPath)
 	}
 
+	err = RunCommand(ctx, "kind", args...)
+	if err == nil {
+		return nil
+	}
+
+	if !isKindNameConflict(err) {
+		return err
+	}
+
+	fmt.Printf("Detected leftover Kind containers for %q, cleaning up and retrying.\n", c.Name)
+	if cleanupErr := c.cleanupStaleContainers(ctx); cleanupErr != nil {
+		return fmt.Errorf("failed to clean stale Kind containers: %w", cleanupErr)
+	}
+
+	fmt.Printf("Retrying Kind cluster %q creation...\n", c.Name)
 	return RunCommand(ctx, "kind", args...)
 }
 
@@ -68,6 +89,43 @@ func (c *Cluster) LoadDockerImage(ctx context.Context, image string) error {
 
 	fmt.Printf("Loading Docker image %q into Kind cluster %q...\n", image, c.Name)
 	return RunCommand(ctx, "kind", "load", "docker-image", image, "--name", c.Name)
+}
+
+func (c *Cluster) ensureKubeconfigAvailable(ctx context.Context) error {
+	_, err := RunCommandOutput(ctx, "kind", "get", "kubeconfig", "--name", c.Name)
+	return err
+}
+
+func (c *Cluster) cleanupStaleContainers(ctx context.Context) error {
+	names, err := RunCommandOutput(ctx, "docker", "ps", "-a", "--filter", fmt.Sprintf("name=%s", c.Name), "--format", "{{.Names}}")
+	if err != nil {
+		return err
+	}
+	names = strings.TrimSpace(names)
+	if names == "" {
+		return nil
+	}
+
+	for _, name := range strings.Split(names, "\n") {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		if err := RunCommand(ctx, "docker", "rm", "-f", name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func isKindNameConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "already exists for a cluster") ||
+		strings.Contains(msg, "already in use") ||
+		strings.Contains(msg, "node(s) already exist")
 }
 
 // ExportKubeconfig exports the cluster kubeconfig to a temporary file and returns the path.
