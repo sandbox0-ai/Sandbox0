@@ -1,2 +1,7 @@
 .git
+.gitignore
+.github
 */bin/*
+tests/
+Makefile
+Dockerfile

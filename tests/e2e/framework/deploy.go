@@ -3,7 +3,6 @@ package framework
 import (
 	"context"
 	"fmt"
-	"os/exec"
 )
 
 // ApplyManifest applies a YAML manifest to the cluster using kubectl.
@@ -17,8 +16,7 @@ func ApplyManifest(ctx context.Context, kubeconfig, manifestPath string) error {
 		args = append(args, "--kubeconfig", kubeconfig)
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	return cmd.Run()
+	return RunCommand(ctx, "kubectl", args...)
 }
 
 // WaitForDeployment waits until a deployment is ready.
@@ -41,6 +39,5 @@ func WaitForDeployment(ctx context.Context, kubeconfig, namespace, name string, 
 		args = append(args, "--kubeconfig", kubeconfig)
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	return cmd.Run()
+	return RunCommand(ctx, "kubectl", args...)
 }

@@ -3,7 +3,6 @@ package framework
 import (
 	"context"
 	"fmt"
-	"os/exec"
 )
 
 // Cluster manages a Kind-backed Kubernetes cluster for E2E tests.
@@ -30,8 +29,7 @@ func (c *Cluster) CreateKind(ctx context.Context, configPath string) error {
 		args = append(args, "--config", configPath)
 	}
 
-	cmd := exec.CommandContext(ctx, "kind", args...)
-	return cmd.Run()
+	return RunCommand(ctx, "kind", args...)
 }
 
 // DeleteKind deletes the Kind cluster.
@@ -40,8 +38,7 @@ func (c *Cluster) DeleteKind(ctx context.Context) error {
 		return fmt.Errorf("cluster is nil")
 	}
 
-	cmd := exec.CommandContext(ctx, "kind", "delete", "cluster", "--name", c.Name)
-	return cmd.Run()
+	return RunCommand(ctx, "kind", "delete", "cluster", "--name", c.Name)
 }
 
 // LoadDockerImage loads a local Docker image into the cluster.
@@ -53,6 +50,5 @@ func (c *Cluster) LoadDockerImage(ctx context.Context, image string) error {
 		return fmt.Errorf("image is required")
 	}
 
-	cmd := exec.CommandContext(ctx, "kind", "load", "docker-image", image, "--name", c.Name)
-	return cmd.Run()
+	return RunCommand(ctx, "kind", "load", "docker-image", image, "--name", c.Name)
 }

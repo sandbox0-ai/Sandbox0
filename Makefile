@@ -159,9 +159,15 @@ test-integration-verbose:
 # E2E tests
 test-e2e: test-integration
 	@printf "$(CYAN)Running E2E tests...$(RESET)\n"
-	kind create cluster --config tests/e2e/kind-config.yaml || true
-	kind load docker-image sandbox0ai/infra:latest || true
-	go test -v ./tests/e2e/... -timeout=30m
+	@$(MAKE) docker-build
+	@if [ "$(E2E_USE_EXISTING_CLUSTER)" != "true" ]; then \
+		kind create cluster --config tests/e2e/kind-config.yaml || true; \
+	fi
+	@if [ "$(E2E_USE_EXISTING_CLUSTER)" != "true" ]; then \
+		kind load docker-image sandbox0ai/infra:latest || true; \
+	fi
+	E2E_TEST_MODE?=combined
+	E2E_TEST_MODE=$(E2E_TEST_MODE) go test -v ./tests/e2e/... -timeout=30m
 
 test-e2e-kind:
 	@printf "$(CYAN)Creating Kind cluster...$(RESET)\n"
