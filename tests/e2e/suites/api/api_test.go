@@ -1,4 +1,4 @@
-package suites
+package api
 
 import (
 	. "github.com/onsi/ginkgo/v2"

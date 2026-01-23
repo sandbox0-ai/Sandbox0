@@ -55,6 +55,11 @@ func NewServer(
 	return server
 }
 
+// Handler exposes the HTTP handler for tests.
+func (s *Server) Handler() http.Handler {
+	return s.router
+}
+
 // setupRoutes sets up the HTTP routes
 func (s *Server) setupRoutes() {
 	// Health check (no auth required)

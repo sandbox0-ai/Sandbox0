@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -67,4 +68,31 @@ func (c *Cluster) LoadDockerImage(ctx context.Context, image string) error {
 
 	fmt.Printf("Loading Docker image %q into Kind cluster %q...\n", image, c.Name)
 	return RunCommand(ctx, "kind", "load", "docker-image", image, "--name", c.Name)
+}
+
+// ExportKubeconfig exports the cluster kubeconfig to a temporary file and returns the path.
+func (c *Cluster) ExportKubeconfig(ctx context.Context) (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("cluster is nil")
+	}
+
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("kubeconfig-%s-*.yaml", c.Name))
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file for kubeconfig: %w", err)
+	}
+	tempPath := tempFile.Name()
+	tempFile.Close()
+
+	fmt.Printf("Exporting kubeconfig for cluster %q to %q...\n", c.Name, tempPath)
+	output, err := RunCommandOutput(ctx, "kind", "get", "kubeconfig", "--name", c.Name)
+	if err != nil {
+		return "", fmt.Errorf("failed to get kubeconfig from kind: %w", err)
+	}
+
+	if err := os.WriteFile(tempPath, []byte(output), 0o600); err != nil {
+		return "", fmt.Errorf("failed to write kubeconfig to %q: %w", tempPath, err)
+	}
+
+	c.Kubeconfig = tempPath
+	return tempPath, nil
 }

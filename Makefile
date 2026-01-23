@@ -162,11 +162,11 @@ E2E_TEST_MODE ?= combined
 # E2E tests
 test-e2e:
 	@printf "$(CYAN)Running E2E tests (mode: $(E2E_TEST_MODE))...$(RESET)\n"
-	E2E_TEST_MODE=$(E2E_TEST_MODE) go test -v ./tests/e2e/... -timeout=30m
+	unset http_proxy && unset https_proxy && unset all_proxy && E2E_TEST_MODE=$(E2E_TEST_MODE) go test -v ./tests/e2e/... -timeout=30m
 
 test-e2e-kind:
 	@printf "$(CYAN)Creating Kind cluster...$(RESET)\n"
-	kind create cluster --config tests/e2e/kind-config.yaml --name sandbox0-e2e
+	unset http_proxy && unset https_proxy && unset all_proxy && kind create cluster --config tests/e2e/kind-config.yaml --name sandbox0-e2e
 
 test-e2e-destroy:
 	@printf "$(YELLOW)Destroying Kind cluster...$(RESET)\n"
@@ -179,7 +179,7 @@ test-e2e-specific:
 		exit 1; \
 	fi
 	@printf "$(CYAN)Running E2E test: $(SPEC)...$(RESET)\n"
-	go test -v ./tests/e2e/... -focus="$(SPEC)" -timeout=30m
+	unset http_proxy && unset https_proxy && unset all_proxy && go test -v ./tests/e2e/... -focus="$(SPEC)" -timeout=30m
 
 # Prevent make from treating service names as targets
 edge-gateway internal-gateway manager scheduler storage-proxy netd k8s-plugin procd infra-operator:

@@ -1,7 +1,9 @@
-package suites
+package api
 
 import (
 	"fmt"
+	"os"
+	"testing"
 	"time"
 
 	"github.com/sandbox0-ai/infra/tests/e2e/framework"
@@ -14,6 +16,11 @@ var (
 	cfg     framework.Config
 	testCtx *framework.TestContext
 )
+
+func TestApi(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "API E2E Suite")
+}
 
 var _ = BeforeSuite(func() {
 	var err error
@@ -40,6 +47,16 @@ var _ = BeforeSuite(func() {
 		}
 	}
 
+	if cfg.Kubeconfig == "" {
+		kubeconfig, err := cluster.ExportKubeconfig(testCtx.Context)
+		Expect(err).NotTo(HaveOccurred())
+		cfg.Kubeconfig = kubeconfig
+		DeferCleanup(func() {
+			fmt.Printf("Cleaning up temporary kubeconfig %q...\n", kubeconfig)
+			_ = os.Remove(kubeconfig)
+		})
+	}
+
 	if !cfg.SkipOperatorInstall {
 		fmt.Printf("Installing infra-operator...\n")
 		err = framework.InstallOperator(testCtx.Context, cfg)
@@ -59,5 +76,5 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	fmt.Printf("Suite teardown completed.\n")
+	fmt.Printf("API suite teardown completed.\n")
 })
