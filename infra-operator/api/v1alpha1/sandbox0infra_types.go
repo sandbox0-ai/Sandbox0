@@ -655,6 +655,10 @@ type Sandbox0InfraStatus struct {
 	// +optional
 	LastOperation *LastOperation `json:"lastOperation,omitempty"`
 
+	// LastMessage is the most recent status message (success or error)
+	// +optional
+	LastMessage string `json:"lastMessage,omitempty"`
+
 	// Progress shows readiness progress in "ready/total" format
 	// +optional
 	Progress string `json:"progress,omitempty"`

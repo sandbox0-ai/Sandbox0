@@ -1993,6 +1993,10 @@ spec:
                     - secretName
                     type: object
                 type: object
+              lastMessage:
+                description: LastMessage is the most recent status message (success
+                  or error)
+                type: string
               lastOperation:
                 description: LastOperation contains the last operation information
                 properties:

@@ -17,9 +17,17 @@ limitations under the License.
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
+	"time"
 
+	"github.com/juicedata/juicefs/pkg/object"
+	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
+	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -30,9 +38,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
-	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
 )
 
 const (
@@ -56,12 +61,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	switch infra.Spec.Storage.Type {
 	case infrav1alpha1.StorageTypeBuiltin:
 		logger.Info("Reconciling builtin storage (RustFS)")
-		return r.reconcileBuiltinStorage(ctx, infra)
+		if err := r.reconcileBuiltinStorage(ctx, infra); err != nil {
+			return err
+		}
+		return r.ensureStorageBucket(ctx, infra)
 	case infrav1alpha1.StorageTypeS3, infrav1alpha1.StorageTypeOSS:
 		logger.Info("Using external storage")
-		return ValidateExternalStorage(ctx, r.Resources.Client, infra)
+		if err := ValidateExternalStorage(ctx, r.Resources.Client, infra); err != nil {
+			return err
+		}
+		return r.ensureStorageBucket(ctx, infra)
 	default:
-		return r.reconcileBuiltinStorage(ctx, infra)
+		if err := r.reconcileBuiltinStorage(ctx, infra); err != nil {
+			return err
+		}
+		return r.ensureStorageBucket(ctx, infra)
 	}
 }
 
@@ -450,6 +464,131 @@ func (r *Reconciler) reconcileStorageService(ctx context.Context, infra *infrav1
 	// Update existing Service
 	svc.Spec = desiredSvc.Spec
 	return r.Resources.Client.Update(ctx, svc)
+}
+
+func (r *Reconciler) ensureStorageBucket(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
+	config, err := GetStorageConfig(ctx, r.Resources.Client, infra)
+	if err != nil {
+		return err
+	}
+
+	if config.Type == infrav1alpha1.StorageTypeBuiltin {
+		if err := r.ensureBuiltinStorageReady(ctx, infra, config); err != nil {
+			return err
+		}
+	}
+
+	store, err := r.createObjectStorage(config)
+	if err != nil {
+		return err
+	}
+
+	if _, err := store.Head(""); err == nil {
+		return nil
+	}
+
+	markerData := bytes.NewReader([]byte("initialized"))
+	if err := store.Put(".sandbox0-bucket-marker", markerData); err != nil {
+		return fmt.Errorf("failed to create bucket marker in %q: %w", config.Bucket, err)
+	}
+
+	return nil
+}
+
+func (r *Reconciler) ensureBuiltinStorageReady(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, config *StorageConfig) error {
+	stsName := fmt.Sprintf("%s-rustfs", infra.Name)
+	sts := &appsv1.StatefulSet{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: stsName, Namespace: infra.Namespace}, sts); err != nil {
+		return err
+	}
+
+	replicas := int32(1)
+	if sts.Spec.Replicas != nil {
+		replicas = *sts.Spec.Replicas
+	}
+	if sts.Status.ReadyReplicas < replicas {
+		return fmt.Errorf("rustfs statefulset %q not ready: %d/%d ready", stsName, sts.Status.ReadyReplicas, replicas)
+	}
+
+	endpoint := strings.TrimSpace(config.Endpoint)
+	if endpoint == "" {
+		endpoint = fmt.Sprintf("http://%s-rustfs:%d", infra.Name, rustfsPort)
+	}
+	host, port, err := parseEndpointHostPort(endpoint, rustfsPort)
+	if err != nil {
+		return err
+	}
+	if err := waitForTCP(ctx, host, port, 3*time.Second); err != nil {
+		return fmt.Errorf("rustfs endpoint %q not reachable: %w", endpoint, err)
+	}
+
+	return nil
+}
+
+func (r *Reconciler) createObjectStorage(config *StorageConfig) (object.ObjectStorage, error) {
+	endpoint := strings.TrimRight(strings.TrimSpace(config.Endpoint), "/")
+	if endpoint == "" && config.Type == infrav1alpha1.StorageTypeS3 {
+		endpoint = fmt.Sprintf("https://s3.%s.amazonaws.com", config.Region)
+	}
+	if endpoint == "" {
+		return nil, fmt.Errorf("storage endpoint is required to verify bucket")
+	}
+
+	bucketURL := fmt.Sprintf("%s/%s", endpoint, config.Bucket)
+	storageType := "s3"
+	if config.Type == infrav1alpha1.StorageTypeOSS {
+		storageType = "oss"
+	}
+
+	store, err := object.CreateStorage(
+		storageType,
+		bucketURL,
+		config.AccessKey,
+		config.SecretKey,
+		config.SessionToken,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create storage client: %w", err)
+	}
+
+	return store, nil
+}
+
+func parseEndpointHostPort(endpoint string, fallbackPort int32) (string, int32, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse storage endpoint %q: %w", endpoint, err)
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", 0, fmt.Errorf("storage endpoint %q missing host", endpoint)
+	}
+	portValue := parsed.Port()
+	if portValue == "" {
+		return host, fallbackPort, nil
+	}
+	portInt, err := net.LookupPort("tcp", portValue)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse storage endpoint port %q: %w", portValue, err)
+	}
+	return host, int32(portInt), nil
+}
+
+func waitForTCP(ctx context.Context, host string, port int32, timeout time.Duration) error {
+	dialer := net.Dialer{}
+	dialCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		dialCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	conn, err := dialer.DialContext(dialCtx, "tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+	if err != nil {
+		return err
+	}
+	_ = conn.Close()
+	return nil
 }
 
 // StorageConfig contains storage configuration for services.

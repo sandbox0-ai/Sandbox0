@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,6 +47,7 @@ func (r *Sandbox0InfraReconciler) runSteps(ctx context.Context, infra *infrav1al
 			if step.ConditionType != "" {
 				r.setCondition(ctx, infra, step.ConditionType, metav1.ConditionFalse, step.ErrorReason, err.Error())
 			}
+			r.setLastMessage(infra, err.Error())
 			result := ctrl.Result{RequeueAfter: requeueInterval}
 			if step.ErrorResult != nil {
 				result = *step.ErrorResult
@@ -56,7 +58,19 @@ func (r *Sandbox0InfraReconciler) runSteps(ctx context.Context, infra *infrav1al
 		if step.ConditionType != "" && !step.SkipSuccessCondition {
 			r.setCondition(ctx, infra, step.ConditionType, metav1.ConditionTrue, step.SuccessReason, step.SuccessMessage)
 		}
+		if step.SuccessMessage != "" {
+			r.setLastMessage(infra, step.SuccessMessage)
+		} else if step.Name != "" {
+			r.setLastMessage(infra, fmt.Sprintf("%s completed", step.Name))
+		}
 	}
 
 	return ctrl.Result{RequeueAfter: requeueInterval}, nil
+}
+
+func (r *Sandbox0InfraReconciler) setLastMessage(infra *infrav1alpha1.Sandbox0Infra, message string) {
+	if infra == nil {
+		return
+	}
+	infra.Status.LastMessage = message
 }
