@@ -1,4 +1,4 @@
-.PHONY: all build build-all test test-all test-integration test-integration-verbose test-e2e test-e2e-kind test-e2e-destroy test-e2e-specific lint tidy vendor clean helm-update helm-configs release docker-build docker-push proto manifests
+.PHONY: all build test test-all test-integration test-integration-verbose test-e2e test-e2e-kind test-e2e-destroy test-e2e-specific lint tidy vendor clean helm-update helm-configs release docker-build docker-build-local build-local-all docker-push proto manifests
 
 # Tool Binaries
 LOCALBIN ?= $(shell pwd)/bin
@@ -20,90 +20,64 @@ GREEN  := \033[1;32m
 CYAN   := \033[1;36m
 RESET  := \033[0m
 
-all: build-all
-
-# Build all services
-build-all: manifests
-	@$(MAKE) proto
-	@printf "$(GREEN)Building edge-gateway...$(RESET)\n"
-	@mkdir -p edge-gateway/bin
-	@go build -v -o edge-gateway/bin/edge-gateway ./edge-gateway/cmd/edge-gateway
-	@printf "$(GREEN)Building internal-gateway...$(RESET)\n"
-	@mkdir -p internal-gateway/bin
-	@go build -v -o internal-gateway/bin/internal-gateway ./internal-gateway/cmd/internal-gateway
-	@printf "$(GREEN)Building manager...$(RESET)\n"
-	@mkdir -p manager/bin
-	@go build -v -o manager/bin/manager ./manager/cmd/manager
-	@printf "$(GREEN)Building procd...$(RESET)\n"
-	@mkdir -p manager/bin
-	@go build -v -o manager/bin/procd ./manager/cmd/procd
-	@printf "$(GREEN)Building scheduler...$(RESET)\n"
-	@mkdir -p scheduler/bin
-	@go build -v -o scheduler/bin/scheduler ./scheduler/cmd/scheduler
-	@printf "$(GREEN)Building storage-proxy...$(RESET)\n"
-	@mkdir -p storage-proxy/bin
-	@go build -v -o storage-proxy/bin/storage-proxy ./storage-proxy/cmd/storage-proxy
-	@printf "$(GREEN)Building k8s-plugin...$(RESET)\n"
-	@mkdir -p k8s-plugin/bin
-	@go build -v -o k8s-plugin/bin/k8s-plugin ./k8s-plugin
-	@printf "$(GREEN)Building infra-operator...$(RESET)\n"
-	@mkdir -p infra-operator/bin
-	@go build -v -o infra-operator/bin/manager ./infra-operator/cmd/infra-operator
+all: manifests proto
+	@for service in $(SERVICES); do \
+		$(MAKE) build SERVICE=$$service; \
+	done
 
 # Build specific service: make build <service>
-build: manifests
-	@service="$(filter-out build build-all test test-all lint tidy vendor clean helm-update docker-build docker-push,$(MAKECMDGOALS))"; \
-	if [ -z "$$service" ]; then \
-		echo "Error: Please specify a service or use 'make build-all'"; \
-		echo "Available services: $(SERVICES)"; \
-		echo "Usage: make build <service> or make build-<service>"; \
-		exit 1; \
-	elif echo "$(SERVICES)" | grep -qw "$$service"; then \
-		printf "$(GREEN)Building $$service...$(RESET)\n"; \
-		if [ "$$service" = "edge-gateway" ]; then \
-			mkdir -p edge-gateway/bin; \
-			go build -v -o edge-gateway/bin/edge-gateway ./edge-gateway/cmd/edge-gateway; \
-		elif [ "$$service" = "internal-gateway" ]; then \
-			mkdir -p internal-gateway/bin; \
-			go build -v -o internal-gateway/bin/internal-gateway ./internal-gateway/cmd/internal-gateway; \
-		elif [ "$$service" = "manager" ]; then \
-			mkdir -p manager/bin; \
-			go build -v -o manager/bin/manager ./manager/cmd/manager; \
-		elif [ "$$service" = "procd" ]; then \
-			mkdir -p manager/bin; \
-			go build -v -o manager/bin/procd ./manager/cmd/procd; \
-		elif [ "$$service" = "scheduler" ]; then \
-			mkdir -p scheduler/bin; \
-			go build -v -o scheduler/bin/scheduler ./scheduler/cmd/scheduler; \
-		elif [ "$$service" = "storage-proxy" ]; then \
-			$(MAKE) proto; \
-			mkdir -p storage-proxy/bin; \
-			go build -v -o storage-proxy/bin/storage-proxy ./storage-proxy/cmd/storage-proxy; \
-		elif [ "$$service" = "k8s-plugin" ]; then \
-			mkdir -p k8s-plugin/bin; \
-			go build -v -o k8s-plugin/bin/k8s-plugin ./k8s-plugin; \
-		elif [ "$$service" = "infra-operator" ]; then \
-			$(MAKE) operator-manifests; \
-			mkdir -p infra-operator/bin; \
-			go build -v -o infra-operator/bin/infra-operator ./infra-operator/cmd/infra-operator; \
+build: manifests proto
+	@service="$(filter-out build test test-all lint tidy vendor clean helm-update docker-build docker-build-local build-local-all docker-push,$(MAKECMDGOALS))"; \
+	[ -z "$$service" ] && service="$(SERVICE)"; \
+	for s in $$service; do \
+		if ! echo "$(SERVICES)" | grep -qw "$$s"; then \
+			echo "Error: Unknown service '$$s'"; exit 1; \
 		fi; \
-	else \
-		echo "Error: Unknown service '$$service'"; \
-		echo "Available services: $(SERVICES)"; \
-		exit 1; \
-	fi
+		printf "$(GREEN)Building $$s...$(RESET)\n"; \
+		if [ "$$s" = "procd" ]; then \
+			dir="manager"; bin="procd"; src="./manager/cmd/procd"; \
+		elif [ "$$s" = "infra-operator" ]; then \
+			$(MAKE) operator-manifests; \
+			dir="infra-operator"; bin="infra-operator"; src="./infra-operator/cmd/infra-operator"; \
+		elif [ "$$s" = "k8s-plugin" ]; then \
+			dir="k8s-plugin"; bin="k8s-plugin"; src="./k8s-plugin"; \
+		else \
+			dir="$$s"; bin="$$s"; src="./$$s/cmd/$$s"; \
+		fi; \
+		if [ -n "$(BIN_DIR)" ]; then \
+			mkdir -p $(BIN_DIR); \
+			out="$(BIN_DIR)/$$s"; \
+		else \
+			mkdir -p $$dir/bin; \
+			out="$$dir/bin/$$bin"; \
+		fi; \
+		if [ "$$s" = "storage-proxy" ]; then \
+			CGO_ENABLED=1 go build -v -o $$out $$src; \
+		else \
+			CGO_ENABLED=0 go build -v -o $$out $$src; \
+		fi || exit 1; \
+	done
 
 docker-build:
 	@printf "$(GREEN)Docker building unified infra image...$(RESET)\n"
 	docker build -t sandbox0ai/infra:$(TAG) -f Dockerfile .
-	#docker buildx build --platform=linux/amd64 -t sandbox0ai/infra:v0.0.0 -f Dockerfile .
+	#docker buildx build --platform=linux/amd64 -t sandbox0ai/infra:$(TAG) -f Dockerfile .
 
 docker-push:
 	@printf "$(GREEN)Docker pushing unified infra image...$(RESET)\n"
 	docker push sandbox0ai/infra:$(TAG)
 
+build-local-all: manifests proto
+	@for service in $(SERVICES); do \
+		$(MAKE) build SERVICE=$$service BIN_DIR=$(shell pwd)/bin; \
+	done
+
+docker-build-local: build-local-all
+	@printf "$(GREEN)Docker building with local binaries...$(RESET)\n"
+	docker build -t sandbox0ai/infra:$(TAG) -f Dockerfile.local .
+
 test:
-	@service="$(filter-out build build-all test test-all lint tidy vendor clean helm-update,$(MAKECMDGOALS))"; \
+	@service="$(filter-out build test test-all lint tidy vendor clean helm-update,$(MAKECMDGOALS))"; \
 	if [ -z "$$service" ]; then \
 		echo "Available services: $(SERVICES)"; \
 		echo "Usage: make test <service> or make test-all"; \
@@ -197,6 +171,7 @@ clean:
 	done
 	rm -rf storage-proxy/proto/fs/*.pb.go
 	rm -rf vendor
+	rm -rf bin
 
 app-configs:
 	@printf "$(CYAN)Generating default Helm configs...$(RESET)\n"

@@ -25,7 +25,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -114,9 +113,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	}
 
 	if err := r.Resources.ReconcileNamespace(ctx, cfg.InstallNamespace); err != nil {
-		return err
-	}
-	if err := r.ensureInstallerRBAC(ctx, infra); err != nil {
 		return err
 	}
 
@@ -213,66 +209,6 @@ func extractImageTag(image string) string {
 	tag = strings.TrimPrefix(tag, "v")
 	tag = strings.Split(tag, "-")[0]
 	return tag
-}
-
-func (r *Reconciler) ensureInstallerRBAC(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
-	name := fmt.Sprintf("%s-cilium-installer", infra.Name)
-	labels := common.GetServiceLabels(infra.Name, "cilium-installer")
-
-	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: infra.Namespace,
-			Labels:    labels,
-		},
-	}
-	if err := controllerutil.SetControllerReference(infra, sa, r.Resources.Scheme); err != nil {
-		return err
-	}
-	existingSA := &corev1.ServiceAccount{}
-	err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, existingSA)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			if err := r.Resources.Client.Create(ctx, sa); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-
-	binding := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: labels,
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     "cluster-admin",
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      name,
-				Namespace: infra.Namespace,
-			},
-		},
-	}
-
-	existingBinding := &rbacv1.ClusterRoleBinding{}
-	err = r.Resources.Client.Get(ctx, types.NamespacedName{Name: name}, existingBinding)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return r.Resources.Client.Create(ctx, binding)
-		}
-		return err
-	}
-
-	existingBinding.RoleRef = binding.RoleRef
-	existingBinding.Subjects = binding.Subjects
-	existingBinding.Labels = binding.Labels
-	return r.Resources.Client.Update(ctx, existingBinding)
 }
 
 func (r *Reconciler) reconcileInstallJob(
@@ -443,5 +379,5 @@ func buildCLIImage(version string) string {
 	if version == "" {
 		version = defaultInstallVersion
 	}
-	return fmt.Sprintf("quay.io/cilium/cilium-cli:v%s", strings.TrimPrefix(version, "v"))
+	return fmt.Sprintf("cilium/cilium:v%s", strings.TrimPrefix(version, "v"))
 }

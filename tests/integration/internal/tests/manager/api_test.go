@@ -104,6 +104,7 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 		podLister,
 		templateLister,
 		nil,
+		nil,
 		opts.internalTokenGenerator,
 		opts.procdTokenGenerator,
 		nil,
@@ -114,7 +115,7 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 		sandboxService.SetProcdClient(opts.procdClient)
 	}
 
-	templateService := service.NewTemplateService(crdClient, templateLister, logger)
+	templateService := service.NewTemplateService(crdClient, templateLister, nil, logger)
 	clusterService := service.NewClusterService(
 		k8sClient,
 		podLister,

@@ -32,7 +32,7 @@ RUN BUILD_GOOS="${TARGETOS:-$(go env GOOS)}" && \
 
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata iptables ip6tables iproute2 sqlite-libs zstd-libs lz4-libs
+RUN apk add --no-cache ca-certificates tzdata zstd-libs lz4-libs
 
 COPY --from=builder /out/ /usr/local/bin/
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint

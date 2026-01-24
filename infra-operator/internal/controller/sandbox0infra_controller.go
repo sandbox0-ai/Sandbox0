@@ -65,8 +65,9 @@ type Sandbox0InfraReconciler struct {
 //+kubebuilder:rbac:groups=infra.sandbox0.ai,resources=sandbox0infras/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets;replicasets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services;secrets;configmaps;persistentvolumeclaims;serviceaccounts;pods;pods/exec;pods/status;nodes;events;namespaces,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete;bind
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations;mutatingwebhookconfigurations,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=sandbox0.ai,resources=sandboxtemplates;sandboxtemplates/status,verbs=get;list;watch;create;update;patch;delete
@@ -267,6 +268,13 @@ func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *i
 		},
 	}
 	if cilium.IsEnabled(infra) {
+		steps = append(steps, reconcileStep{
+			Name:                 "cilium-rbac",
+			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileCiliumInstallerRBAC(ctx, infra) },
+			ConditionType:        infrav1alpha1.ConditionTypeCiliumReady,
+			ErrorReason:          "CiliumRBACFailed",
+			SkipSuccessCondition: true,
+		})
 		steps = append(steps, reconcileStep{
 			Name:           "cilium",
 			Run:            func(ctx context.Context) error { return ciliumReconciler.Reconcile(ctx, infra) },
@@ -543,6 +551,33 @@ func (r *Sandbox0InfraReconciler) updateOverallStatus(ctx context.Context, infra
 		infra.Status.Progress = ""
 	}
 
+	statusMessage := ""
+	if allReady && totalCount > 0 {
+		statusMessage = "All services are healthy"
+	} else {
+		for _, conditionType := range expectedConditions {
+			cond := meta.FindStatusCondition(infra.Status.Conditions, conditionType)
+			if cond == nil {
+				statusMessage = fmt.Sprintf("%s not reported yet", conditionType)
+				break
+			}
+			if cond.Status != metav1.ConditionTrue {
+				switch {
+				case cond.Message != "":
+					statusMessage = cond.Message
+				case cond.Reason != "":
+					statusMessage = cond.Reason
+				default:
+					statusMessage = fmt.Sprintf("%s not ready", conditionType)
+				}
+				break
+			}
+		}
+	}
+	if statusMessage != "" {
+		infra.Status.LastMessage = statusMessage
+	}
+
 	// Update phase
 	if allReady && totalCount > 0 {
 		infra.Status.Phase = infrav1alpha1.PhaseReady
@@ -552,17 +587,26 @@ func (r *Sandbox0InfraReconciler) updateOverallStatus(ctx context.Context, infra
 			infra.Status.LastOperation.Status = "Succeeded"
 		}
 	} else {
-		// Check if any condition failed
-		hasFailed := false
-		for _, conditionType := range expectedConditions {
-			cond := meta.FindStatusCondition(infra.Status.Conditions, conditionType)
-			if cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason != "" {
-				hasFailed = true
-				break
+		if infra.Status.LastOperation != nil && infra.Status.LastOperation.Status == "InProgress" {
+			switch infra.Status.LastOperation.Type {
+			case "Upgrade":
+				infra.Status.Phase = infrav1alpha1.PhaseUpgrading
+			default:
+				infra.Status.Phase = infrav1alpha1.PhaseInstalling
 			}
-		}
-		if hasFailed {
-			infra.Status.Phase = infrav1alpha1.PhaseDegraded
+		} else {
+			// Check if any condition failed
+			hasFailed := false
+			for _, conditionType := range expectedConditions {
+				cond := meta.FindStatusCondition(infra.Status.Conditions, conditionType)
+				if cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason != "" {
+					hasFailed = true
+					break
+				}
+			}
+			if hasFailed {
+				infra.Status.Phase = infrav1alpha1.PhaseDegraded
+			}
 		}
 	}
 

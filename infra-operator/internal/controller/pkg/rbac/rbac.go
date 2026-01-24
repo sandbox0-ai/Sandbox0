@@ -39,6 +39,18 @@ func NewReconciler(resources *common.ResourceManager) *Reconciler {
 	return &Reconciler{Resources: resources}
 }
 
+// ReconcileCiliumInstallerRBAC reconciles RBAC for the Cilium installer job.
+func (r *Reconciler) ReconcileCiliumInstallerRBAC(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
+	name := fmt.Sprintf("%s-cilium-installer", infra.Name)
+	labels := common.GetServiceLabels(infra.Name, "cilium-installer")
+
+	if err := r.reconcileServiceAccount(ctx, infra, name, labels); err != nil {
+		return err
+	}
+
+	return r.reconcileClusterRoleBinding(ctx, infra, name, labels, "cluster-admin", name)
+}
+
 // ReconcileManagerRBAC reconciles RBAC for the manager service.
 func (r *Reconciler) ReconcileManagerRBAC(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	name := fmt.Sprintf("%s-manager", infra.Name)

@@ -76,18 +76,20 @@ func writeInternalGatewayKeys(t *testing.T) (internalauth.PrivateKeyType, intern
 		t.Fatalf("generate internal keypair: %v", err)
 	}
 
-	if err := os.MkdirAll("/config", 0o755); err != nil {
-		t.Fatalf("create /config: %v", err)
-	}
-	if err := os.MkdirAll("/secrets", 0o755); err != nil {
-		t.Fatalf("create /secrets: %v", err)
-	}
-	if err := os.WriteFile(internalauth.DefaultInternalJWTPublicKeyPath, publicPEM, 0o600); err != nil {
+	tempDir := t.TempDir()
+	pubPath := tempDir + "/internal_jwt_public.key"
+	privPath := tempDir + "/internal_jwt_private.key"
+
+	if err := os.WriteFile(pubPath, publicPEM, 0o600); err != nil {
 		t.Fatalf("write public key: %v", err)
 	}
-	if err := os.WriteFile(internalauth.DefaultInternalJWTPrivateKeyPath, privatePEM, 0o600); err != nil {
+	if err := os.WriteFile(privPath, privatePEM, 0o600); err != nil {
 		t.Fatalf("write private key: %v", err)
 	}
+
+	// Override default paths for testing
+	internalauth.DefaultInternalJWTPublicKeyPath = pubPath
+	internalauth.DefaultInternalJWTPrivateKeyPath = privPath
 
 	privateKey, err := internalauth.LoadEd25519PrivateKey(privatePEM)
 	if err != nil {

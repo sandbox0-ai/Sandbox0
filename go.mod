@@ -19,7 +19,6 @@ require (
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.3
-	github.com/vishvananda/netlink v1.1.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.47.0
 	golang.org/x/net v0.48.0
@@ -233,7 +232,6 @@ require (
 	github.com/vbauerster/mpb/v7 v7.0.3 // indirect
 	github.com/viki-org/dnscache v0.0.0-20130720023526-c70c1f23c5d8 // indirect
 	github.com/vimeo/go-util v1.4.1 // indirect
-	github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df // indirect
 	github.com/vmware/go-nfs-client v0.0.0-20190605212624-d43b92724c1b // indirect
 	github.com/volcengine/ve-tos-golang-sdk/v2 v2.7.8 // indirect
 	github.com/winfsp/cgofuse v1.6.0 // indirect

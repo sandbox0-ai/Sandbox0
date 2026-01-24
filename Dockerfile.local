@@ -1,0 +1,14 @@
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata zstd-libs lz4-libs
+
+# Copy all binaries from the local bin directory to /usr/local/bin/
+# We expect the binaries to be pre-built for Linux/AMD64 or Linux/ARM64
+COPY bin/ /usr/local/bin/
+
+# Copy entrypoint script
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint
+RUN chmod +x /usr/local/bin/entrypoint
+
+ENTRYPOINT ["/usr/local/bin/entrypoint"]

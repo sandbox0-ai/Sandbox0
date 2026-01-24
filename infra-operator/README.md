@@ -197,7 +197,6 @@ Available condition types:
 - `InternalGatewayReady`: Internal gateway health
 - `ManagerReady`: Manager service health
 - `StorageProxyReady`: Storage proxy health
-- `NetdReady`: Netd daemon health
 - `SchedulerReady`: Scheduler health
 - `InternalAuthReady`: Key generation status
 
