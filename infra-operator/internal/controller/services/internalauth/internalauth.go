@@ -52,24 +52,18 @@ func NewReconciler(resources *common.ResourceManager) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	logger := log.FromContext(ctx)
 
-	switch infra.Spec.Mode {
-	case infrav1alpha1.DeploymentModeAll:
-		// Generate both control plane and data plane keys
+	enableControlPlane := infrav1alpha1.HasControlPlaneServices(infra)
+	enableDataPlane := infrav1alpha1.HasDataPlaneServices(infra)
+	if !enableControlPlane && !enableDataPlane {
+		logger.Info("No services require internal auth, skipping")
+		return nil
+	}
+	if enableControlPlane {
 		if err := r.reconcileControlPlaneKeys(ctx, infra); err != nil {
 			return err
 		}
-		if err := r.reconcileDataPlaneKeys(ctx, infra); err != nil {
-			return err
-		}
-
-	case infrav1alpha1.DeploymentModeControlPlane:
-		// Only generate control plane keys
-		if err := r.reconcileControlPlaneKeys(ctx, infra); err != nil {
-			return err
-		}
-
-	case infrav1alpha1.DeploymentModeDataPlane:
-		// Only generate data plane keys
+	}
+	if enableDataPlane {
 		if err := r.reconcileDataPlaneKeys(ctx, infra); err != nil {
 			return err
 		}
@@ -213,27 +207,17 @@ func updateInternalAuthStatus(infra *infrav1alpha1.Sandbox0Infra) {
 		infra.Status.InternalAuth = &infrav1alpha1.InternalAuthStatus{}
 	}
 
-	switch infra.Spec.Mode {
-	case infrav1alpha1.DeploymentModeAll:
-		controlPlaneSecret, _, controlPlanePublicKey := GetControlPlaneKeyRefs(infra)
-		dataPlaneSecret, _, dataPlanePublicKey := GetDataPlaneKeyRefs(infra)
-		infra.Status.InternalAuth.ControlPlanePublicKey = &infrav1alpha1.SecretKeyStatus{
-			SecretName: controlPlaneSecret,
-			SecretKey:  controlPlanePublicKey,
-		}
-		infra.Status.InternalAuth.DataPlanePublicKey = &infrav1alpha1.SecretKeyStatus{
-			SecretName: dataPlaneSecret,
-			SecretKey:  dataPlanePublicKey,
-		}
+	infra.Status.InternalAuth.ControlPlanePublicKey = nil
+	infra.Status.InternalAuth.DataPlanePublicKey = nil
 
-	case infrav1alpha1.DeploymentModeControlPlane:
+	if infrav1alpha1.HasControlPlaneServices(infra) {
 		secretName, _, publicKey := GetControlPlaneKeyRefs(infra)
 		infra.Status.InternalAuth.ControlPlanePublicKey = &infrav1alpha1.SecretKeyStatus{
 			SecretName: secretName,
 			SecretKey:  publicKey,
 		}
-
-	case infrav1alpha1.DeploymentModeDataPlane:
+	}
+	if infrav1alpha1.HasDataPlaneServices(infra) {
 		secretName, _, publicKey := GetDataPlaneKeyRefs(infra)
 		infra.Status.InternalAuth.DataPlanePublicKey = &infrav1alpha1.SecretKeyStatus{
 			SecretName: secretName,

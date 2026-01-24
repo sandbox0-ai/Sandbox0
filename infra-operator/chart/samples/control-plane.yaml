@@ -1,0 +1,42 @@
+# Example: Local development mode (all components with builtin database/storage)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox0-system
+---
+apiVersion: infra.sandbox0.ai/v1alpha1
+kind: Sandbox0Infra
+metadata:
+  name: sandbox0-control-plane
+  namespace: sandbox0-system
+spec:
+  version: "latest"
+  database:
+    type: builtin
+    builtin:
+      enabled: true
+      persistence:
+        enabled: true
+        size: "20Gi"
+  # If you already have a database, switch to an external config like this:
+  # database:
+  #   type: external
+  #   external:
+  #     host: your-db.rds.amazonaws.com
+  #     port: 5432
+  #     database: sandbox0
+  #     username: sandbox0
+  #     passwordSecret:
+  #       name: db-credentials
+  #       key: password
+  #     sslMode: require
+  services:
+    edgeGateway:
+      enabled: true
+      replicas: 1
+      service:
+        type: NodePort
+        port: 80
+    scheduler:
+      enabled: true
+      replicas: 1

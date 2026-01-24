@@ -10,7 +10,6 @@ metadata:
   name: sandbox0-dev
   namespace: sandbox0-system
 spec:
-  mode: all
   version: "latest"
   network:
     provider: cilium
@@ -27,7 +26,7 @@ spec:
       enabled: true
       persistence:
         enabled: true
-        size: "50Gi"
+        size: "20Gi"
   services:
     edgeGateway:
       enabled: true

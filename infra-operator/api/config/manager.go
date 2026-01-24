@@ -150,7 +150,7 @@ type DefaultTemplatePoolConfig struct {
 type NetworkProviderConfig struct {
 	// Provider is the network provider name (noop, cilium).
 	// +optional
-	// +kubebuilder:default="cilium"
+	// +kubebuilder:default="noop"
 	// +kubebuilder:validation:Enum=noop;cilium
 	Provider string `yaml:"provider" json:"provider"`
 

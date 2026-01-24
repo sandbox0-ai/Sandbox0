@@ -4,11 +4,7 @@ Kubernetes Operator for managing sandbox0 infrastructure deployment.
 
 ## Overview
 
-The Sandbox0Infra Operator automates the deployment and management of sandbox0 infrastructure components. It supports three deployment modes:
-
-- **all**: Local development mode with all components and builtin database/storage
-- **control-plane**: Cloud control plane with edge-gateway and scheduler
-- **data-plane**: Cloud data plane with internal-gateway, manager, storage-proxy, and Cilium
+The Sandbox0Infra Operator automates the deployment and management of sandbox0 infrastructure components. Components are enabled through `spec.services`, so you can combine control-plane and data-plane services as needed.
 
 ## Features
 
@@ -46,7 +42,7 @@ kubectl apply -k config/default
 
 ## Usage
 
-### Local Development Mode (all)
+### Local Development (all components)
 
 Deploy all components with builtin PostgreSQL and MinIO:
 
@@ -57,12 +53,22 @@ metadata:
   name: sandbox0-dev
   namespace: default
 spec:
-  mode: all
   version: "v0.1.0"
   database:
     type: builtin
   storage:
     type: builtin
+  services:
+    edgeGateway:
+      enabled: true
+    scheduler:
+      enabled: true
+    internalGateway:
+      enabled: true
+    manager:
+      enabled: true
+    storageProxy:
+      enabled: true
   initUser:
     enabled: true
     email: "admin@localhost"
@@ -82,7 +88,7 @@ Then apply the CR:
 kubectl apply -f config/samples/infra_v1alpha1_sandbox0infra.yaml
 ```
 
-### Cloud Control Plane Mode
+### Cloud Control Plane
 
 Deploy control plane with external database and storage:
 
@@ -93,7 +99,6 @@ metadata:
   name: sandbox0-control-plane
   namespace: sandbox0-system
 spec:
-  mode: control-plane
   version: "v0.1.0"
   database:
     type: postgres
@@ -112,12 +117,15 @@ spec:
         name: aws-credentials
   services:
     edgeGateway:
+      enabled: true
       replicas: 3
       ingress:
         enabled: true
         className: nginx
         host: api.sandbox0.io
         tlsSecret: api-tls
+    scheduler:
+      enabled: true
 ```
 
 After deployment, get the public key for data plane:
@@ -126,7 +134,7 @@ After deployment, get the public key for data plane:
 kubectl get sandbox0infra sandbox0-control-plane -o jsonpath='{.status.internalAuth.controlPlanePublicKey}'
 ```
 
-### Cloud Data Plane Mode
+### Cloud Data Plane
 
 Deploy data plane connecting to control plane:
 
@@ -137,7 +145,6 @@ metadata:
   name: sandbox0-data-plane
   namespace: sandbox0-system
 spec:
-  mode: data-plane
   version: "v0.1.0"
   database:
     type: postgres
@@ -161,6 +168,13 @@ spec:
   cluster:
     id: cluster-001
     name: Production US East 1
+  services:
+    internalGateway:
+      enabled: true
+    manager:
+      enabled: true
+    storageProxy:
+      enabled: true
 ```
 
 First, copy the control plane public key to data plane cluster:

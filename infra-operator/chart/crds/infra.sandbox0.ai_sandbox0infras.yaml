@@ -17,9 +17,6 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.mode
-      name: Mode
-      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -101,8 +98,7 @@ spec:
                 - id
                 type: object
               controlPlane:
-                description: ControlPlane configures external control plane connection
-                  (only for data-plane mode)
+                description: ControlPlane configures external control plane connection.
                 properties:
                   internalAuthPublicKeySecret:
                     description: InternalAuthPublicKeySecret references the secret
@@ -367,15 +363,6 @@ spec:
                       metadata
                     type: boolean
                 type: object
-              mode:
-                default: all
-                description: 'Mode specifies the deployment mode: all, control-plane,
-                  or data-plane'
-                enum:
-                - all
-                - control-plane
-                - data-plane
-                type: string
               network:
                 default: {}
                 description: Network configures cluster-wide network provider settings.
@@ -1707,7 +1694,7 @@ spec:
                     type: string
                 type: object
               version:
-                default: v0.1.0
+                default: latest
                 description: Version specifies the version of sandbox0 components
                   to deploy
                 type: string

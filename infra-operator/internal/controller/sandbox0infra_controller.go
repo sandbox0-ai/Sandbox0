@@ -110,21 +110,9 @@ func (r *Sandbox0InfraReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// Set default values
 	r.setDefaults(infra)
 
-	// Main reconciliation logic based on mode
-	var result ctrl.Result
-	var err error
-
-	switch infra.Spec.Mode {
-	case infrav1alpha1.DeploymentModeAll:
-		result, err = r.reconcileAllMode(ctx, infra)
-	case infrav1alpha1.DeploymentModeControlPlane:
-		result, err = r.reconcileControlPlaneMode(ctx, infra)
-	case infrav1alpha1.DeploymentModeDataPlane:
-		result, err = r.reconcileDataPlaneMode(ctx, infra)
-	default:
-		// Default to all mode
-		result, err = r.reconcileAllMode(ctx, infra)
-	}
+	// Main reconciliation logic based on configured components
+	plan := r.buildComponentPlan(infra)
+	result, err := r.reconcileComponentPlan(ctx, infra, plan)
 
 	// Update overall status
 	if updateErr := r.updateOverallStatus(ctx, infra); updateErr != nil {
@@ -139,11 +127,8 @@ func (r *Sandbox0InfraReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 // setDefaults sets default values for the spec
 func (r *Sandbox0InfraReconciler) setDefaults(infra *infrav1alpha1.Sandbox0Infra) {
-	if infra.Spec.Mode == "" {
-		infra.Spec.Mode = infrav1alpha1.DeploymentModeAll
-	}
 	if infra.Spec.Version == "" {
-		infra.Spec.Version = "v0.1.0"
+		infra.Spec.Version = "latest"
 	}
 	if infra.Spec.Database.Type == "" {
 		infra.Spec.Database.Type = infrav1alpha1.DatabaseTypeBuiltin
@@ -192,10 +177,76 @@ func (r *Sandbox0InfraReconciler) reconcileDelete(ctx context.Context, infra *in
 	return ctrl.Result{}, nil
 }
 
-// reconcileAllMode reconciles all components (local development mode)
-func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) (ctrl.Result, error) {
+type componentPlan struct {
+	HasControlPlane           bool
+	HasDataPlane              bool
+	EnableEdgeGateway         bool
+	EnableScheduler           bool
+	EnableInternalGateway     bool
+	EnableManager             bool
+	EnableStorageProxy        bool
+	EnableInternalAuth        bool
+	EnableDatabase            bool
+	EnableStorage             bool
+	EnableCilium              bool
+	EnableInitUser            bool
+	EnableClusterRegistration bool
+	RequireControlPlaneConfig bool
+}
+
+func (r *Sandbox0InfraReconciler) buildComponentPlan(infra *infrav1alpha1.Sandbox0Infra) componentPlan {
+	enableEdgeGateway := infrav1alpha1.IsEdgeGatewayEnabled(infra)
+	enableScheduler := infrav1alpha1.IsSchedulerEnabled(infra)
+	enableInternalGateway := infrav1alpha1.IsInternalGatewayEnabled(infra)
+	enableManager := infrav1alpha1.IsManagerEnabled(infra)
+	enableStorageProxy := infrav1alpha1.IsStorageProxyEnabled(infra)
+
+	hasControlPlane := enableEdgeGateway || enableScheduler
+	hasDataPlane := enableInternalGateway || enableManager || enableStorageProxy
+
+	return componentPlan{
+		HasControlPlane:           hasControlPlane,
+		HasDataPlane:              hasDataPlane,
+		EnableEdgeGateway:         enableEdgeGateway,
+		EnableScheduler:           enableScheduler,
+		EnableInternalGateway:     enableInternalGateway,
+		EnableManager:             enableManager,
+		EnableStorageProxy:        enableStorageProxy,
+		EnableInternalAuth:        hasControlPlane || hasDataPlane,
+		EnableDatabase:            infrav1alpha1.IsDatabaseEnabled(infra),
+		EnableStorage:             infrav1alpha1.IsStorageEnabled(infra),
+		EnableCilium:              cilium.IsEnabled(infra),
+		EnableInitUser:            hasControlPlane && infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled,
+		EnableClusterRegistration: hasDataPlane && infra.Spec.Cluster != nil,
+		RequireControlPlaneConfig: hasDataPlane,
+	}
+}
+
+func (r *Sandbox0InfraReconciler) validateComponentPlan(infra *infrav1alpha1.Sandbox0Infra, plan componentPlan) error {
+	if plan.RequireControlPlaneConfig && infra.Spec.ControlPlane == nil {
+		return fmt.Errorf("controlPlane configuration is required when data-plane services are enabled")
+	}
+	if plan.RequireControlPlaneConfig && infra.Spec.ControlPlane != nil &&
+		infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name == "" {
+		return fmt.Errorf("controlPlane.internalAuthPublicKeySecret.name is required when data-plane services are enabled")
+	}
+	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled && !plan.HasControlPlane {
+		return fmt.Errorf("initUser can only be enabled when control-plane services are enabled")
+	}
+	if infra.Spec.Cluster != nil && !plan.HasDataPlane {
+		return fmt.Errorf("cluster configuration requires at least one data-plane service")
+	}
+	return nil
+}
+
+// reconcileComponentPlan reconciles components based on spec configuration.
+func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, plan componentPlan) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Reconciling all mode")
+	logger.Info("Reconciling components", "controlPlane", plan.HasControlPlane, "dataPlane", plan.HasDataPlane)
+
+	if err := r.validateComponentPlan(infra, plan); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
 	imageRepo := r.getImageRepo(ctx)
@@ -210,64 +261,105 @@ func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *i
 	ciliumReconciler := cilium.NewReconciler(resources)
 	rbacReconciler := rbac.NewReconciler(resources)
 
-	steps := []reconcileStep{
-		{
+	steps := []reconcileStep{}
+	if plan.RequireControlPlaneConfig {
+		steps = append(steps, reconcileStep{
+			Name: "control-plane-config",
+			Run: func(ctx context.Context) error {
+				if infra.Spec.ControlPlane == nil {
+					return fmt.Errorf("controlPlane configuration is required when data-plane services are enabled")
+				}
+				return nil
+			},
+			ConditionType:        infrav1alpha1.ConditionTypeInternalAuthReady,
+			ErrorReason:          "MissingControlPlane",
+			SkipSuccessCondition: true,
+			ErrorResult:          &ctrl.Result{},
+		})
+		steps = append(steps, reconcileStep{
+			Name: "control-plane-public-key",
+			Run: func(ctx context.Context) error {
+				publicKeySecret := &corev1.Secret{}
+				return r.Get(ctx, types.NamespacedName{
+					Name:      infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name,
+					Namespace: infra.Namespace,
+				}, publicKeySecret)
+			},
+			ConditionType:        infrav1alpha1.ConditionTypeInternalAuthReady,
+			ErrorReason:          "PublicKeySecretNotFound",
+			SkipSuccessCondition: true,
+		})
+	}
+	if plan.EnableInternalAuth {
+		steps = append(steps, reconcileStep{
 			Name:           "internal-auth",
 			Run:            func(ctx context.Context) error { return authReconciler.Reconcile(ctx, infra) },
 			ConditionType:  infrav1alpha1.ConditionTypeInternalAuthReady,
 			SuccessReason:  "KeysReady",
 			SuccessMessage: "Internal auth keys are ready",
 			ErrorReason:    "KeyGenerationFailed",
-		},
-		{
+		})
+	}
+	if plan.EnableDatabase {
+		steps = append(steps, reconcileStep{
 			Name:           "database",
 			Run:            func(ctx context.Context) error { return dbReconciler.Reconcile(ctx, infra) },
 			ConditionType:  infrav1alpha1.ConditionTypeDatabaseReady,
 			SuccessReason:  "DatabaseReady",
 			SuccessMessage: "Database is ready",
 			ErrorReason:    "DatabaseFailed",
-		},
-		{
+		})
+	}
+	if plan.EnableStorage {
+		steps = append(steps, reconcileStep{
 			Name:           "storage",
 			Run:            func(ctx context.Context) error { return storageReconciler.Reconcile(ctx, infra) },
 			ConditionType:  infrav1alpha1.ConditionTypeStorageReady,
 			SuccessReason:  "StorageReady",
 			SuccessMessage: "Storage is ready",
 			ErrorReason:    "StorageFailed",
-		},
-		{
+		})
+	}
+	if plan.EnableEdgeGateway {
+		steps = append(steps, reconcileStep{
 			Name:           "edge-gateway",
 			Run:            func(ctx context.Context) error { return edgeGatewayReconciler.Reconcile(ctx, infra, imageRepo) },
 			ConditionType:  infrav1alpha1.ConditionTypeEdgeGatewayReady,
 			SuccessReason:  "EdgeGatewayReady",
 			SuccessMessage: "Edge gateway is ready",
 			ErrorReason:    "EdgeGatewayFailed",
-		},
-		{
-			Name:                 "scheduler-rbac",
-			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileSchedulerRBAC(ctx, infra) },
-			ConditionType:        infrav1alpha1.ConditionTypeSchedulerReady,
-			ErrorReason:          "SchedulerRBACFailed",
-			SkipSuccessCondition: true,
-		},
-		{
-			Name:           "scheduler",
-			Run:            func(ctx context.Context) error { return schedulerReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeSchedulerReady,
-			SuccessReason:  "SchedulerReady",
-			SuccessMessage: "Scheduler is ready",
-			ErrorReason:    "SchedulerFailed",
-		},
-		{
+		})
+	}
+	if plan.EnableScheduler {
+		steps = append(steps,
+			reconcileStep{
+				Name:                 "scheduler-rbac",
+				Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileSchedulerRBAC(ctx, infra) },
+				ConditionType:        infrav1alpha1.ConditionTypeSchedulerReady,
+				ErrorReason:          "SchedulerRBACFailed",
+				SkipSuccessCondition: true,
+			},
+			reconcileStep{
+				Name:           "scheduler",
+				Run:            func(ctx context.Context) error { return schedulerReconciler.Reconcile(ctx, infra, imageRepo) },
+				ConditionType:  infrav1alpha1.ConditionTypeSchedulerReady,
+				SuccessReason:  "SchedulerReady",
+				SuccessMessage: "Scheduler is ready",
+				ErrorReason:    "SchedulerFailed",
+			},
+		)
+	}
+	if plan.EnableInternalGateway {
+		steps = append(steps, reconcileStep{
 			Name:           "internal-gateway",
 			Run:            func(ctx context.Context) error { return internalGatewayReconciler.Reconcile(ctx, infra, imageRepo) },
 			ConditionType:  infrav1alpha1.ConditionTypeInternalGatewayReady,
 			SuccessReason:  "InternalGatewayReady",
 			SuccessMessage: "Internal gateway is ready",
 			ErrorReason:    "InternalGatewayFailed",
-		},
+		})
 	}
-	if cilium.IsEnabled(infra) {
+	if plan.EnableCilium {
 		steps = append(steps, reconcileStep{
 			Name:                 "cilium-rbac",
 			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileCiliumInstallerRBAC(ctx, infra) },
@@ -284,40 +376,45 @@ func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *i
 			ErrorReason:    "CiliumFailed",
 		})
 	}
-	steps = append(steps,
-		reconcileStep{
-			Name:                 "manager-rbac",
-			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileManagerRBAC(ctx, infra) },
-			ConditionType:        infrav1alpha1.ConditionTypeManagerReady,
-			ErrorReason:          "ManagerRBACFailed",
-			SkipSuccessCondition: true,
-		},
-		reconcileStep{
-			Name:           "manager",
-			Run:            func(ctx context.Context) error { return managerReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeManagerReady,
-			SuccessReason:  "ManagerReady",
-			SuccessMessage: "Manager is ready",
-			ErrorReason:    "ManagerFailed",
-		},
-		reconcileStep{
-			Name:                 "storage-proxy-rbac",
-			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileStorageProxyRBAC(ctx, infra) },
-			ConditionType:        infrav1alpha1.ConditionTypeStorageProxyReady,
-			ErrorReason:          "StorageProxyRBACFailed",
-			SkipSuccessCondition: true,
-		},
-		reconcileStep{
-			Name:           "storage-proxy",
-			Run:            func(ctx context.Context) error { return storageProxyReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeStorageProxyReady,
-			SuccessReason:  "StorageProxyReady",
-			SuccessMessage: "Storage proxy is ready",
-			ErrorReason:    "StorageProxyFailed",
-		},
-	)
-
-	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled {
+	if plan.EnableManager {
+		steps = append(steps,
+			reconcileStep{
+				Name:                 "manager-rbac",
+				Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileManagerRBAC(ctx, infra) },
+				ConditionType:        infrav1alpha1.ConditionTypeManagerReady,
+				ErrorReason:          "ManagerRBACFailed",
+				SkipSuccessCondition: true,
+			},
+			reconcileStep{
+				Name:           "manager",
+				Run:            func(ctx context.Context) error { return managerReconciler.Reconcile(ctx, infra, imageRepo) },
+				ConditionType:  infrav1alpha1.ConditionTypeManagerReady,
+				SuccessReason:  "ManagerReady",
+				SuccessMessage: "Manager is ready",
+				ErrorReason:    "ManagerFailed",
+			},
+		)
+	}
+	if plan.EnableStorageProxy {
+		steps = append(steps,
+			reconcileStep{
+				Name:                 "storage-proxy-rbac",
+				Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileStorageProxyRBAC(ctx, infra) },
+				ConditionType:        infrav1alpha1.ConditionTypeStorageProxyReady,
+				ErrorReason:          "StorageProxyRBACFailed",
+				SkipSuccessCondition: true,
+			},
+			reconcileStep{
+				Name:           "storage-proxy",
+				Run:            func(ctx context.Context) error { return storageProxyReconciler.Reconcile(ctx, infra, imageRepo) },
+				ConditionType:  infrav1alpha1.ConditionTypeStorageProxyReady,
+				SuccessReason:  "StorageProxyReady",
+				SuccessMessage: "Storage proxy is ready",
+				ErrorReason:    "StorageProxyFailed",
+			},
+		)
+	}
+	if plan.EnableInitUser {
 		steps = append(steps, reconcileStep{
 			Name:           "init-user",
 			Run:            func(ctx context.Context) error { return r.reconcileInitUser(ctx, infra) },
@@ -327,193 +424,7 @@ func (r *Sandbox0InfraReconciler) reconcileAllMode(ctx context.Context, infra *i
 			ErrorReason:    "InitUserFailed",
 		})
 	}
-
-	return r.runSteps(ctx, infra, steps)
-}
-
-// reconcileControlPlaneMode reconciles control plane components only
-func (r *Sandbox0InfraReconciler) reconcileControlPlaneMode(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling control-plane mode")
-
-	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
-	imageRepo := r.getImageRepo(ctx)
-	authReconciler := internalauth.NewReconciler(resources)
-	edgeGatewayReconciler := edgegateway.NewReconciler(resources)
-	schedulerReconciler := scheduler.NewReconciler(resources)
-	rbacReconciler := rbac.NewReconciler(resources)
-
-	steps := []reconcileStep{
-		{
-			Name:           "internal-auth",
-			Run:            func(ctx context.Context) error { return authReconciler.Reconcile(ctx, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeInternalAuthReady,
-			SuccessReason:  "KeysReady",
-			SuccessMessage: "Internal auth keys are ready",
-			ErrorReason:    "KeyGenerationFailed",
-		},
-		{
-			Name:           "external-database",
-			Run:            func(ctx context.Context) error { return database.ValidateExternalDatabase(ctx, r.Client, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeDatabaseReady,
-			SuccessReason:  "DatabaseReady",
-			SuccessMessage: "External database connected",
-			ErrorReason:    "DatabaseConnectionFailed",
-		},
-		{
-			Name:           "external-storage",
-			Run:            func(ctx context.Context) error { return storage.ValidateExternalStorage(ctx, r.Client, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeStorageReady,
-			SuccessReason:  "StorageReady",
-			SuccessMessage: "External storage accessible",
-			ErrorReason:    "StorageConnectionFailed",
-		},
-		{
-			Name:           "edge-gateway",
-			Run:            func(ctx context.Context) error { return edgeGatewayReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeEdgeGatewayReady,
-			SuccessReason:  "EdgeGatewayReady",
-			SuccessMessage: "Edge gateway is ready",
-			ErrorReason:    "EdgeGatewayFailed",
-		},
-		{
-			Name:                 "scheduler-rbac",
-			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileSchedulerRBAC(ctx, infra) },
-			ConditionType:        infrav1alpha1.ConditionTypeSchedulerReady,
-			ErrorReason:          "SchedulerRBACFailed",
-			SkipSuccessCondition: true,
-		},
-		{
-			Name:           "scheduler",
-			Run:            func(ctx context.Context) error { return schedulerReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeSchedulerReady,
-			SuccessReason:  "SchedulerReady",
-			SuccessMessage: "Scheduler is ready",
-			ErrorReason:    "SchedulerFailed",
-		},
-	}
-
-	return r.runSteps(ctx, infra, steps)
-}
-
-// reconcileDataPlaneMode reconciles data plane components only
-func (r *Sandbox0InfraReconciler) reconcileDataPlaneMode(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling data-plane mode")
-
-	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
-	imageRepo := r.getImageRepo(ctx)
-	authReconciler := internalauth.NewReconciler(resources)
-	internalGatewayReconciler := internalgateway.NewReconciler(resources)
-	managerReconciler := manager.NewReconciler(resources)
-	storageProxyReconciler := storageproxy.NewReconciler(resources)
-	ciliumReconciler := cilium.NewReconciler(resources)
-	rbacReconciler := rbac.NewReconciler(resources)
-
-	steps := []reconcileStep{
-		{
-			Name: "control-plane-config",
-			Run: func(ctx context.Context) error {
-				if infra.Spec.ControlPlane == nil {
-					return fmt.Errorf("controlPlane configuration is required for data-plane mode")
-				}
-				return nil
-			},
-			ConditionType:        infrav1alpha1.ConditionTypeInternalAuthReady,
-			ErrorReason:          "MissingControlPlane",
-			SkipSuccessCondition: true,
-			ErrorResult:          &ctrl.Result{},
-		},
-		{
-			Name: "control-plane-public-key",
-			Run: func(ctx context.Context) error {
-				publicKeySecret := &corev1.Secret{}
-				return r.Get(ctx, types.NamespacedName{
-					Name:      infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name,
-					Namespace: infra.Namespace,
-				}, publicKeySecret)
-			},
-			ConditionType:        infrav1alpha1.ConditionTypeInternalAuthReady,
-			ErrorReason:          "PublicKeySecretNotFound",
-			SkipSuccessCondition: true,
-		},
-		{
-			Name:           "internal-auth",
-			Run:            func(ctx context.Context) error { return authReconciler.Reconcile(ctx, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeInternalAuthReady,
-			SuccessReason:  "KeysReady",
-			SuccessMessage: "Internal auth keys are ready",
-			ErrorReason:    "KeyGenerationFailed",
-		},
-		{
-			Name:           "external-database",
-			Run:            func(ctx context.Context) error { return database.ValidateExternalDatabase(ctx, r.Client, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeDatabaseReady,
-			SuccessReason:  "DatabaseReady",
-			SuccessMessage: "External database connected",
-			ErrorReason:    "DatabaseConnectionFailed",
-		},
-		{
-			Name:           "external-storage",
-			Run:            func(ctx context.Context) error { return storage.ValidateExternalStorage(ctx, r.Client, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeStorageReady,
-			SuccessReason:  "StorageReady",
-			SuccessMessage: "External storage accessible",
-			ErrorReason:    "StorageConnectionFailed",
-		},
-		{
-			Name:           "internal-gateway",
-			Run:            func(ctx context.Context) error { return internalGatewayReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeInternalGatewayReady,
-			SuccessReason:  "InternalGatewayReady",
-			SuccessMessage: "Internal gateway is ready",
-			ErrorReason:    "InternalGatewayFailed",
-		},
-	}
-	if cilium.IsEnabled(infra) {
-		steps = append(steps, reconcileStep{
-			Name:           "cilium",
-			Run:            func(ctx context.Context) error { return ciliumReconciler.Reconcile(ctx, infra) },
-			ConditionType:  infrav1alpha1.ConditionTypeCiliumReady,
-			SuccessReason:  "CiliumReady",
-			SuccessMessage: "Cilium is ready",
-			ErrorReason:    "CiliumFailed",
-		})
-	}
-	steps = append(steps,
-		reconcileStep{
-			Name:                 "manager-rbac",
-			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileManagerRBAC(ctx, infra) },
-			ConditionType:        infrav1alpha1.ConditionTypeManagerReady,
-			ErrorReason:          "ManagerRBACFailed",
-			SkipSuccessCondition: true,
-		},
-		reconcileStep{
-			Name:           "manager",
-			Run:            func(ctx context.Context) error { return managerReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeManagerReady,
-			SuccessReason:  "ManagerReady",
-			SuccessMessage: "Manager is ready",
-			ErrorReason:    "ManagerFailed",
-		},
-		reconcileStep{
-			Name:                 "storage-proxy-rbac",
-			Run:                  func(ctx context.Context) error { return rbacReconciler.ReconcileStorageProxyRBAC(ctx, infra) },
-			ConditionType:        infrav1alpha1.ConditionTypeStorageProxyReady,
-			ErrorReason:          "StorageProxyRBACFailed",
-			SkipSuccessCondition: true,
-		},
-		reconcileStep{
-			Name:           "storage-proxy",
-			Run:            func(ctx context.Context) error { return storageProxyReconciler.Reconcile(ctx, infra, imageRepo) },
-			ConditionType:  infrav1alpha1.ConditionTypeStorageProxyReady,
-			SuccessReason:  "StorageProxyReady",
-			SuccessMessage: "Storage proxy is ready",
-			ErrorReason:    "StorageProxyFailed",
-		},
-	)
-
-	if infra.Spec.Cluster != nil {
+	if plan.EnableClusterRegistration {
 		steps = append(steps, reconcileStep{
 			Name:           "register-cluster",
 			Run:            func(ctx context.Context) error { return r.registerCluster(ctx, infra) },
@@ -630,50 +541,42 @@ func (r *Sandbox0InfraReconciler) updateOverallStatus(ctx context.Context, infra
 }
 
 func (r *Sandbox0InfraReconciler) expectedConditionTypes(infra *infrav1alpha1.Sandbox0Infra) []string {
-	switch infra.Spec.Mode {
-	case infrav1alpha1.DeploymentModeControlPlane:
-		return []string{
-			infrav1alpha1.ConditionTypeInternalAuthReady,
-			infrav1alpha1.ConditionTypeDatabaseReady,
-			infrav1alpha1.ConditionTypeStorageReady,
-			infrav1alpha1.ConditionTypeEdgeGatewayReady,
-			infrav1alpha1.ConditionTypeSchedulerReady,
-		}
-	case infrav1alpha1.DeploymentModeDataPlane:
-		conditions := []string{
-			infrav1alpha1.ConditionTypeInternalAuthReady,
-			infrav1alpha1.ConditionTypeDatabaseReady,
-			infrav1alpha1.ConditionTypeStorageReady,
-			infrav1alpha1.ConditionTypeInternalGatewayReady,
-			infrav1alpha1.ConditionTypeManagerReady,
-			infrav1alpha1.ConditionTypeStorageProxyReady,
-		}
-		if cilium.IsEnabled(infra) {
-			conditions = append(conditions, infrav1alpha1.ConditionTypeCiliumReady)
-		}
-		if infra.Spec.Cluster != nil {
-			conditions = append(conditions, infrav1alpha1.ConditionTypeClusterRegistered)
-		}
-		return conditions
-	default:
-		conditions := []string{
-			infrav1alpha1.ConditionTypeInternalAuthReady,
-			infrav1alpha1.ConditionTypeDatabaseReady,
-			infrav1alpha1.ConditionTypeStorageReady,
-			infrav1alpha1.ConditionTypeEdgeGatewayReady,
-			infrav1alpha1.ConditionTypeSchedulerReady,
-			infrav1alpha1.ConditionTypeInternalGatewayReady,
-			infrav1alpha1.ConditionTypeManagerReady,
-			infrav1alpha1.ConditionTypeStorageProxyReady,
-		}
-		if cilium.IsEnabled(infra) {
-			conditions = append(conditions, infrav1alpha1.ConditionTypeCiliumReady)
-		}
-		if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled {
-			conditions = append(conditions, infrav1alpha1.ConditionTypeInitUserReady)
-		}
-		return conditions
+	plan := r.buildComponentPlan(infra)
+	conditions := []string{}
+	if plan.EnableInternalAuth {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeInternalAuthReady)
 	}
+	if plan.EnableDatabase {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeDatabaseReady)
+	}
+	if plan.EnableStorage {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeStorageReady)
+	}
+	if plan.EnableEdgeGateway {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeEdgeGatewayReady)
+	}
+	if plan.EnableScheduler {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeSchedulerReady)
+	}
+	if plan.EnableInternalGateway {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeInternalGatewayReady)
+	}
+	if plan.EnableManager {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeManagerReady)
+	}
+	if plan.EnableStorageProxy {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeStorageProxyReady)
+	}
+	if plan.EnableCilium {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeCiliumReady)
+	}
+	if plan.EnableInitUser {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeInitUserReady)
+	}
+	if plan.EnableClusterRegistration {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeClusterRegistered)
+	}
+	return conditions
 }
 
 // setCondition sets or updates a condition

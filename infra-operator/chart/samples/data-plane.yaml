@@ -1,0 +1,71 @@
+# Example: Local development mode (all components with builtin database/storage)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox0-system
+---
+apiVersion: infra.sandbox0.ai/v1alpha1
+kind: Sandbox0Infra
+metadata:
+  name: sandbox0-data-plane
+  namespace: sandbox0-system
+spec:
+  version: "latest"
+  network:
+    provider: cilium
+  database:
+    type: builtin
+    builtin:
+      enabled: true
+      persistence:
+        enabled: true
+        size: "20Gi"
+  # If you already have a database, switch to an external config like this:
+  # database:
+  #   type: external
+  #   external:
+  #     host: your-db.rds.amazonaws.com
+  #     port: 5432
+  #     database: sandbox0
+  #     username: sandbox0
+  #     passwordSecret:
+  #       name: db-credentials
+  #       key: password
+  #     sslMode: require
+  storage:
+    type: builtin
+    builtin:
+      enabled: true
+      persistence:
+        enabled: true
+        size: "20Gi"
+  # If you already have object storage, switch to an external config like this:
+  # storage:
+  #   type: s3
+  #   s3:
+  #     bucket: sandbox0-prod-us-east-1
+  #     region: us-east-1
+  #     credentialsSecret:
+  #       name: aws-credentials
+  #       accessKeyKey: accessKeyId
+  #       secretKeyKey: secretAccessKey
+  services:
+    internalGateway:
+      enabled: true
+      replicas: 1
+    manager:
+      enabled: true
+      replicas: 1
+      config:
+        templateNamespace: sandbox0
+        defaultTemplate:
+          name: default
+          image: sandbox0ai/otemplates:default-v0.1.0
+          pool:
+            minIdle: 1
+            maxIdle: 5
+            # autoScale lets manager scale the template pool between minIdle and maxIdle.
+            autoScale: true
+    storageProxy:
+      enabled: true
+      replicas: 1

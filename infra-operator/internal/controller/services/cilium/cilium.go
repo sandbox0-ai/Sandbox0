@@ -55,13 +55,7 @@ func IsEnabled(infra *infrav1alpha1.Sandbox0Infra) bool {
 	if infra == nil {
 		return false
 	}
-	if infra.Spec.Mode == infrav1alpha1.DeploymentModeControlPlane {
-		return false
-	}
-	if infra.Spec.Services != nil && infra.Spec.Services.Manager != nil && !infra.Spec.Services.Manager.Enabled {
-		return false
-	}
-	provider := "cilium"
+	provider := "noop"
 	if cfg := getNetworkConfig(infra); cfg != nil && cfg.Provider != "" {
 		provider = cfg.Provider
 	}

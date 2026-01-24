@@ -24,27 +24,13 @@ import (
 	config "github.com/sandbox0-ai/infra/infra-operator/api/config"
 )
 
-// DeploymentMode defines the deployment mode of sandbox0 infrastructure
-// +kubebuilder:validation:Enum=all;control-plane;data-plane
-type DeploymentMode string
-
-const (
-	// DeploymentModeAll deploys all components with builtin postgres/rustfs (local development)
-	DeploymentModeAll DeploymentMode = "all"
-	// DeploymentModeControlPlane deploys control plane components only
-	DeploymentModeControlPlane DeploymentMode = "control-plane"
-	// DeploymentModeDataPlane deploys data plane components only
-	DeploymentModeDataPlane DeploymentMode = "data-plane"
-)
-
 // DatabaseType defines the type of database
-// +kubebuilder:validation:Enum=builtin;postgres;mysql
+// +kubebuilder:validation:Enum=builtin;external
 type DatabaseType string
 
 const (
 	DatabaseTypeBuiltin  DatabaseType = "builtin"
-	DatabaseTypePostgres DatabaseType = "postgres"
-	DatabaseTypeMySQL    DatabaseType = "mysql"
+	DatabaseTypeExternal DatabaseType = "external"
 )
 
 // StorageType defines the type of storage backend
@@ -71,12 +57,8 @@ const (
 
 // Sandbox0InfraSpec defines the desired state of Sandbox0Infra
 type Sandbox0InfraSpec struct {
-	// Mode specifies the deployment mode: all, control-plane, or data-plane
-	// +kubebuilder:default=all
-	Mode DeploymentMode `json:"mode,omitempty"`
-
 	// Version specifies the version of sandbox0 components to deploy
-	// +kubebuilder:default="v0.1.0"
+	// +kubebuilder:default="latest"
 	Version string `json:"version,omitempty"`
 
 	// Database configures the main database for sandbox0
@@ -89,7 +71,7 @@ type Sandbox0InfraSpec struct {
 	// Storage configures the storage backend (JuiceFS S3 backend)
 	Storage StorageConfig `json:"storage,omitempty"`
 
-	// ControlPlane configures external control plane connection (only for data-plane mode)
+	// ControlPlane configures external control plane connection.
 	// +optional
 	ControlPlane *ControlPlaneConfig `json:"controlPlane,omitempty"`
 
@@ -122,7 +104,7 @@ type Sandbox0InfraSpec struct {
 
 // DatabaseConfig defines database configuration
 type DatabaseConfig struct {
-	// Type specifies the database type: builtin, postgres, or mysql
+	// Type specifies the postgres database type: builtin, or external
 	// +kubebuilder:default=builtin
 	Type DatabaseType `json:"type,omitempty"`
 
@@ -531,6 +513,97 @@ type StorageProxyServiceConfig struct {
 	Config *config.StorageProxyConfig `json:"config,omitempty"`
 }
 
+// IsEdgeGatewayEnabled returns true when edge-gateway is enabled.
+func IsEdgeGatewayEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.EdgeGateway == nil {
+		return false
+	}
+	return infra.Spec.Services.EdgeGateway.Enabled
+}
+
+// IsSchedulerEnabled returns true when scheduler is enabled.
+func IsSchedulerEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.Scheduler == nil {
+		return false
+	}
+	return infra.Spec.Services.Scheduler.Enabled
+}
+
+// IsInternalGatewayEnabled returns true when internal-gateway is enabled.
+func IsInternalGatewayEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.InternalGateway == nil {
+		return false
+	}
+	return infra.Spec.Services.InternalGateway.Enabled
+}
+
+// IsManagerEnabled returns true when manager is enabled.
+func IsManagerEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.Manager == nil {
+		return false
+	}
+	return infra.Spec.Services.Manager.Enabled
+}
+
+// IsStorageProxyEnabled returns true when storage-proxy is enabled.
+func IsStorageProxyEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.StorageProxy == nil {
+		return false
+	}
+	return infra.Spec.Services.StorageProxy.Enabled
+}
+
+// IsDatabaseEnabled returns true when database should be reconciled.
+func IsDatabaseEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil {
+		return false
+	}
+	switch infra.Spec.Database.Type {
+	case DatabaseTypeBuiltin:
+		if infra.Spec.Database.Builtin != nil {
+			return infra.Spec.Database.Builtin.Enabled
+		}
+		return true
+	case DatabaseTypeExternal:
+		return true
+	default:
+		return true
+	}
+}
+
+// IsStorageEnabled returns true when storage should be reconciled.
+func IsStorageEnabled(infra *Sandbox0Infra) bool {
+	if infra == nil {
+		return false
+	}
+	switch infra.Spec.Storage.Type {
+	case StorageTypeBuiltin:
+		if infra.Spec.Storage.Builtin != nil {
+			return infra.Spec.Storage.Builtin.Enabled
+		}
+		return true
+	case StorageTypeS3, StorageTypeOSS:
+		return true
+	default:
+		return true
+	}
+}
+
+// HasControlPlaneServices returns true when any control-plane service is enabled.
+func HasControlPlaneServices(infra *Sandbox0Infra) bool {
+	return IsEdgeGatewayEnabled(infra) || IsSchedulerEnabled(infra)
+}
+
+// HasDataPlaneServices returns true when any data-plane service is enabled.
+func HasDataPlaneServices(infra *Sandbox0Infra) bool {
+	return IsInternalGatewayEnabled(infra) || IsManagerEnabled(infra) || IsStorageProxyEnabled(infra)
+}
+
+// HasAnyServiceEnabled returns true when at least one service is enabled.
+func HasAnyServiceEnabled(infra *Sandbox0Infra) bool {
+	return HasControlPlaneServices(infra) || HasDataPlaneServices(infra)
+}
+
 // ServiceNetworkConfig defines service network configuration
 type ServiceNetworkConfig struct {
 	// Type specifies the service type
@@ -602,7 +675,7 @@ type ResourceCapacity struct {
 // InitUserConfig defines initial admin user configuration
 type InitUserConfig struct {
 	// Enabled enables initial user creation
-	// +kubebuilder:default=true
+	// +kubebuilder:default=false
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Email is the admin user's email
@@ -749,7 +822,6 @@ const (
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:shortName=s0i
-//+kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 //+kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 //+kubebuilder:printcolumn:name="Progress",type=string,JSONPath=`.status.progress`
 //+kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.lastMessage`
