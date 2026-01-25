@@ -218,17 +218,14 @@ func (r *Sandbox0InfraReconciler) buildComponentPlan(infra *infrav1alpha1.Sandbo
 		EnableCilium:              cilium.IsEnabled(infra),
 		EnableInitUser:            hasControlPlane && infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled,
 		EnableClusterRegistration: hasDataPlane && infra.Spec.Cluster != nil,
-		RequireControlPlaneConfig: hasDataPlane,
+		RequireControlPlaneConfig: hasDataPlane && infra.Spec.ControlPlane != nil,
 	}
 }
 
 func (r *Sandbox0InfraReconciler) validateComponentPlan(infra *infrav1alpha1.Sandbox0Infra, plan componentPlan) error {
-	if plan.RequireControlPlaneConfig && infra.Spec.ControlPlane == nil {
-		return fmt.Errorf("controlPlane configuration is required when data-plane services are enabled")
-	}
 	if plan.RequireControlPlaneConfig && infra.Spec.ControlPlane != nil &&
 		infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name == "" {
-		return fmt.Errorf("controlPlane.internalAuthPublicKeySecret.name is required when data-plane services are enabled")
+		return fmt.Errorf("controlPlane.internalAuthPublicKeySecret.name is required when controlPlane are enabled")
 	}
 	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled && !plan.HasControlPlane {
 		return fmt.Errorf("initUser can only be enabled when control-plane services are enabled")
