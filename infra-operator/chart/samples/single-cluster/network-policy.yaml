@@ -7,7 +7,7 @@ metadata:
 apiVersion: infra.sandbox0.ai/v1alpha1
 kind: Sandbox0Infra
 metadata:
-  name: s0
+  name: network-policy
   namespace: sandbox0-system
 spec:
   version: "latest"

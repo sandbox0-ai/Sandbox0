@@ -1,6 +1,8 @@
 package cases
 
 import (
+	"strings"
+
 	"github.com/sandbox0-ai/infra/tests/e2e/framework"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -10,45 +12,29 @@ import (
 // RegisterApiSuite defines API coverage for a scenario.
 func RegisterApiSuite(envProvider func() *framework.ScenarioEnv) {
 	Describe("API entrypoint", func() {
-		BeforeEach(func() {
-			env := envProvider()
-			Expect(env).NotTo(BeNil())
-		})
 
-		Context("template lifecycle", func() {
-			It("creates, updates, and deletes templates", func() {
-				Skip("TODO: implement template lifecycle via API")
-			})
-		})
+		env := envProvider()
+		Expect(env).NotTo(BeNil())
 
-		Context("sandbox lifecycle", func() {
-			It("claims, releases, and destroys sandboxes", func() {
-				Skip("TODO: implement sandbox lifecycle via API")
-			})
-		})
+		switch strings.ToLower(strings.TrimSpace(env.Infra.Name)) {
+		case "minimal":
+			registerApiMinimalSuite(env)
+		case "network-policy":
+			registerApiNetworkPolicySuite(env)
+		case "volumes":
+			registerApiVolumesSuite(env)
+		case "fullmode":
+			registerApiFullModeSuite(env)
+		default:
+			registerApiUnknownSuite(env.Infra.Name)
+		}
+	})
+}
 
-		Context("snapshot and restore", func() {
-			It("restores from snapshot with consistent data", func() {
-				Skip("TODO: implement snapshot restore via API")
-			})
-		})
-
-		Context("filesystem and process capabilities", func() {
-			It("performs file operations and command execution", func() {
-				Skip("TODO: implement filesystem and process APIs")
-			})
-		})
-
-		Context("concurrency and isolation", func() {
-			It("prevents conflicts across concurrent users", func() {
-				Skip("TODO: implement concurrent claim isolation")
-			})
-		})
-
-		Context("key SLOs", func() {
-			It("meets cold start and restore latency targets", func() {
-				Skip("TODO: implement latency assertions")
-			})
+func registerApiUnknownSuite(infraName string) {
+	Describe("API entrypoint for unknown scenario", func() {
+		It("skips until scenario-specific tests exist", func() {
+			Skip("no API suite registered for Sandbox0Infra name: " + infraName)
 		})
 	})
 }
