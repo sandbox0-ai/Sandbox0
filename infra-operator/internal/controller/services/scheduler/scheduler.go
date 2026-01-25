@@ -184,6 +184,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		return err
 	}
 
+	if err := r.Resources.EnsureDeploymentReady(ctx, infra, deploymentName, replicas); err != nil {
+		return err
+	}
+
 	logger.Info("Scheduler reconciled successfully")
 	return nil
 }

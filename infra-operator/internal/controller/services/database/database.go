@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
+	"strconv"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -35,6 +37,7 @@ import (
 
 	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
+	"github.com/sandbox0-ai/infra/pkg/framework"
 )
 
 const (
@@ -429,7 +432,25 @@ func (r *Reconciler) ensureDatabaseReady(ctx context.Context, infra *infrav1alph
 		return fmt.Errorf("database statefulset %q not ready: %d/%d ready", stsName, sts.Status.ReadyReplicas, replicas)
 	}
 
-	serviceHost := fmt.Sprintf("%s-postgres.%s.svc", infra.Name, infra.Namespace)
+	serviceName := fmt.Sprintf("%s-postgres", infra.Name)
+	if r.Resources.LocalDev.EnablePortForward {
+		localURL, cleanup, err := framework.PortForwardService(ctx, r.Resources.LocalDev.KubeconfigPath, infra.Namespace, serviceName, int(databasePort))
+		if err != nil {
+			return fmt.Errorf("port-forward database service %q: %w", serviceName, err)
+		}
+		defer cleanup()
+
+		host, port, err := parsePortForwardURL(localURL)
+		if err != nil {
+			return err
+		}
+		if err := waitForTCP(ctx, host, port, 3*time.Second); err != nil {
+			return fmt.Errorf("database port-forward %q not reachable: %w", localURL, err)
+		}
+		return nil
+	}
+
+	serviceHost := fmt.Sprintf("%s.%s.svc", serviceName, infra.Namespace)
 	if err := waitForTCP(ctx, serviceHost, databasePort, 3*time.Second); err != nil {
 		return fmt.Errorf("database service %q not reachable: %w", serviceHost, err)
 	}
@@ -452,6 +473,26 @@ func waitForTCP(ctx context.Context, host string, port int32, timeout time.Durat
 	}
 	_ = conn.Close()
 	return nil
+}
+
+func parsePortForwardURL(raw string) (string, int32, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse port-forward url %q: %w", raw, err)
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", 0, fmt.Errorf("port-forward url %q missing host", raw)
+	}
+	portValue := parsed.Port()
+	if portValue == "" {
+		return "", 0, fmt.Errorf("port-forward url %q missing port", raw)
+	}
+	portInt, err := strconv.ParseInt(portValue, 10, 32)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse port-forward port %q: %w", portValue, err)
+	}
+	return host, int32(portInt), nil
 }
 
 // GetDatabaseDSN returns the database DSN for services to use.

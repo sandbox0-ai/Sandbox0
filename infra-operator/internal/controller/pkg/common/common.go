@@ -44,13 +44,21 @@ type ResourceManager struct {
 	Scheme *runtime.Scheme
 	// ImagePullPolicy overrides container pull policy when set.
 	ImagePullPolicy *corev1.PullPolicy
+	// LocalDev config for running operator outside the cluster.
+	LocalDev LocalDevConfig
 }
 
-func NewResourceManager(client client.Client, scheme *runtime.Scheme, imagePullPolicy *corev1.PullPolicy) *ResourceManager {
+type LocalDevConfig struct {
+	EnablePortForward bool
+	KubeconfigPath    string
+}
+
+func NewResourceManager(client client.Client, scheme *runtime.Scheme, imagePullPolicy *corev1.PullPolicy, localDev LocalDevConfig) *ResourceManager {
 	return &ResourceManager{
 		Client:          client,
 		Scheme:          scheme,
 		ImagePullPolicy: imagePullPolicy,
+		LocalDev:        localDev,
 	}
 }
 
@@ -142,6 +150,67 @@ func (r *ResourceManager) ReconcileDeployment(ctx context.Context, infra *infrav
 
 	deploy.Spec = desiredDeploy.Spec
 	return r.Client.Update(ctx, deploy)
+}
+
+// EnsureDeploymentReady validates deployment readiness before reporting success.
+func (r *ResourceManager) EnsureDeploymentReady(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, name string, replicas int32) error {
+	if replicas == 0 {
+		return nil
+	}
+
+	deploy := &appsv1.Deployment{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, deploy); err != nil {
+		return err
+	}
+
+	desired := replicas
+	if deploy.Spec.Replicas != nil {
+		desired = *deploy.Spec.Replicas
+	}
+	if desired == 0 {
+		return nil
+	}
+	if deploy.Status.ReadyReplicas < desired {
+		message := fmt.Sprintf("deployment %q not ready: %d/%d ready", name, deploy.Status.ReadyReplicas, desired)
+		if podMessage, err := r.getDeploymentPodIssue(ctx, infra.Namespace, deploy); err == nil && podMessage != "" {
+			message = fmt.Sprintf("%s (%s)", message, podMessage)
+		}
+		return fmt.Errorf("%s", message)
+	}
+
+	return nil
+}
+
+func (r *ResourceManager) getDeploymentPodIssue(ctx context.Context, namespace string, deploy *appsv1.Deployment) (string, error) {
+	if deploy == nil || deploy.Spec.Selector == nil {
+		return "", nil
+	}
+	if len(deploy.Spec.Selector.MatchLabels) == 0 {
+		return "", nil
+	}
+
+	pods := &corev1.PodList{}
+	if err := r.Client.List(ctx, pods, client.InNamespace(namespace), client.MatchingLabels(deploy.Spec.Selector.MatchLabels)); err != nil {
+		return "", err
+	}
+	for _, pod := range pods.Items {
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.State.Waiting == nil {
+				continue
+			}
+			reason := status.State.Waiting.Reason
+			message := status.State.Waiting.Message
+			if reason == "" {
+				continue
+			}
+			if message != "" {
+				return fmt.Sprintf("pod %s: %s: %s", pod.Name, reason, message), nil
+			}
+			return fmt.Sprintf("pod %s: %s", pod.Name, reason), nil
+		}
+	}
+
+	return "", nil
 }
 
 // ReconcileDaemonSet creates or updates a daemonset.

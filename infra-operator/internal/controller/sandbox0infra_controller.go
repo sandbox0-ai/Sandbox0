@@ -32,8 +32,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"k8s.io/client-go/util/workqueue"
 
 	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
@@ -52,6 +54,8 @@ import (
 const (
 	finalizerName   = "sandbox0infra.infra.sandbox0.ai/finalizer"
 	requeueInterval = 30 * time.Second
+	retryBaseDelay  = 2 * time.Second
+	retryMaxDelay   = 2 * time.Minute
 )
 
 // Sandbox0InfraReconciler reconciles a Sandbox0Infra object
@@ -245,7 +249,7 @@ func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, in
 		return ctrl.Result{}, err
 	}
 
-	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx))
+	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx), r.getLocalDevConfig(ctx))
 	imageRepo := r.getImageRepo(ctx)
 	authReconciler := internalauth.NewReconciler(resources)
 	dbReconciler := database.NewReconciler(resources)
@@ -636,5 +640,9 @@ func (r *Sandbox0InfraReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ConfigMap{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&networkingv1.Ingress{}).
+		WithOptions(controller.Options{
+			// Keep retries responsive without hammering the API.
+			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](retryBaseDelay, retryMaxDelay),
+		}).
 		Complete(r)
 }

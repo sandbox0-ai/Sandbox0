@@ -205,4 +205,4 @@ operator-install: operator-manifests
 
 .PHONY: operator-run
 operator-run: operator-install
-	go run ./infra-operator/cmd/infra-operator
+	S0_DEV=true go run ./infra-operator/cmd/infra-operator

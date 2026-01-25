@@ -67,7 +67,7 @@ func KubectlWaitForCondition(ctx context.Context, kubeconfig, namespace, resourc
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timeout waiting for condition %q on %s/%s in namespace %q", condition, resource, name, namespace)
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }
 

@@ -21,12 +21,14 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/juicedata/juicefs/pkg/object"
 	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
+	"github.com/sandbox0-ai/infra/pkg/framework"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -485,7 +487,26 @@ func (r *Reconciler) ensureStorageBucket(ctx context.Context, infra *infrav1alph
 			return err
 		}
 		builtin := resolveBuiltinStorageConfig(infra)
-		config.Endpoint = builtinEndpoint(infra, builtin)
+		if r.Resources.LocalDev.EnablePortForward {
+			serviceName := fmt.Sprintf("%s-rustfs", infra.Name)
+			localURL, cleanup, err := framework.PortForwardService(ctx, r.Resources.LocalDev.KubeconfigPath, infra.Namespace, serviceName, int(builtin.Port))
+			if err != nil {
+				return fmt.Errorf("port-forward rustfs service %q: %w", serviceName, err)
+			}
+			defer cleanup()
+
+			host, port, err := parsePortForwardURL(localURL)
+			if err != nil {
+				return err
+			}
+			if err := waitForTCP(ctx, host, port, 3*time.Second); err != nil {
+				return fmt.Errorf("rustfs port-forward %q not reachable: %w", localURL, err)
+			}
+
+			config.Endpoint = localURL
+		} else {
+			config.Endpoint = builtinEndpoint(infra, builtin)
+		}
 	}
 
 	store, err := r.createObjectStorage(config)
@@ -519,8 +540,27 @@ func (r *Reconciler) ensureBuiltinStorageReady(ctx context.Context, infra *infra
 		return fmt.Errorf("rustfs statefulset %q not ready: %d/%d ready", stsName, sts.Status.ReadyReplicas, replicas)
 	}
 
-	endpoint := builtinEndpoint(infra, resolveBuiltinStorageConfig(infra))
-	host, port, err := parseEndpointHostPort(endpoint, rustfsPort)
+	builtin := resolveBuiltinStorageConfig(infra)
+	if r.Resources.LocalDev.EnablePortForward {
+		serviceName := fmt.Sprintf("%s-rustfs", infra.Name)
+		localURL, cleanup, err := framework.PortForwardService(ctx, r.Resources.LocalDev.KubeconfigPath, infra.Namespace, serviceName, int(builtin.Port))
+		if err != nil {
+			return fmt.Errorf("port-forward rustfs service %q: %w", serviceName, err)
+		}
+		defer cleanup()
+
+		host, port, err := parsePortForwardURL(localURL)
+		if err != nil {
+			return err
+		}
+		if err := waitForTCP(ctx, host, port, 3*time.Second); err != nil {
+			return fmt.Errorf("rustfs port-forward %q not reachable: %w", localURL, err)
+		}
+		return nil
+	}
+
+	endpoint := builtinEndpoint(infra, builtin)
+	host, port, err := parseEndpointHostPort(endpoint, builtin.Port)
 	if err != nil {
 		return err
 	}
@@ -623,6 +663,26 @@ func parseEndpointHostPort(endpoint string, fallbackPort int32) (string, int32, 
 	portInt, err := net.LookupPort("tcp", portValue)
 	if err != nil {
 		return "", 0, fmt.Errorf("parse storage endpoint port %q: %w", portValue, err)
+	}
+	return host, int32(portInt), nil
+}
+
+func parsePortForwardURL(raw string) (string, int32, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse port-forward url %q: %w", raw, err)
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", 0, fmt.Errorf("port-forward url %q missing host", raw)
+	}
+	portValue := parsed.Port()
+	if portValue == "" {
+		return "", 0, fmt.Errorf("port-forward url %q missing port", raw)
+	}
+	portInt, err := strconv.ParseInt(portValue, 10, 32)
+	if err != nil {
+		return "", 0, fmt.Errorf("parse port-forward port %q: %w", portValue, err)
 	}
 	return host, int32(portInt), nil
 }

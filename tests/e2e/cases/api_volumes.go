@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sandbox0-ai/infra/tests/e2e/framework"
+	"github.com/sandbox0-ai/infra/pkg/framework"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"

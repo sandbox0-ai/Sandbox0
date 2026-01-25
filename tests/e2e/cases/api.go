@@ -3,10 +3,9 @@ package cases
 import (
 	"strings"
 
-	"github.com/sandbox0-ai/infra/tests/e2e/framework"
+	"github.com/sandbox0-ai/infra/pkg/framework"
 
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 )
 
 // RegisterApiSuite defines API coverage for a scenario.
@@ -14,7 +13,10 @@ func RegisterApiSuite(envProvider func() *framework.ScenarioEnv) {
 	Describe("API entrypoint", func() {
 
 		env := envProvider()
-		Expect(env).NotTo(BeNil())
+		if env == nil {
+			registerApiUnknownSuite("nil")
+			return
+		}
 
 		switch strings.ToLower(strings.TrimSpace(env.Infra.Name)) {
 		case "minimal":

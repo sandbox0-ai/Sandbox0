@@ -18,12 +18,15 @@ package controller
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	operatorconfig "github.com/sandbox0-ai/infra/infra-operator/api/config"
+	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
 )
 
 func (r *Sandbox0InfraReconciler) getImageRepo(ctx context.Context) string {
@@ -52,6 +55,28 @@ func (r *Sandbox0InfraReconciler) getImagePullPolicy(ctx context.Context) *corev
 		logger.Info("Ignoring invalid imagePullPolicy in operator config", "value", config.ImagePullPolicy)
 	}
 	return policy
+}
+
+func (r *Sandbox0InfraReconciler) getLocalDevConfig(ctx context.Context) common.LocalDevConfig {
+	logger := log.FromContext(ctx)
+
+	raw := strings.TrimSpace(os.Getenv("S0_DEV"))
+	if raw == "" {
+		return common.LocalDevConfig{}
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		logger.Info("Ignoring invalid S0_DEV value", "value", raw)
+		return common.LocalDevConfig{}
+	}
+	if !enabled {
+		return common.LocalDevConfig{}
+	}
+
+	return common.LocalDevConfig{
+		EnablePortForward: true,
+		KubeconfigPath:    strings.TrimSpace(os.Getenv("S0_DEV_KUBECONFIG")),
+	}
 }
 
 func parsePullPolicy(raw string) *corev1.PullPolicy {

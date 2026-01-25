@@ -11,8 +11,8 @@ import (
 	"time"
 
 	managerapi "github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
+	"github.com/sandbox0-ai/infra/pkg/framework"
 	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
-	"github.com/sandbox0-ai/infra/tests/e2e/framework"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

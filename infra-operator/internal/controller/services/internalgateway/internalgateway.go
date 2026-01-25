@@ -197,6 +197,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		return err
 	}
 
+	if err := r.Resources.EnsureDeploymentReady(ctx, infra, deploymentName, replicas); err != nil {
+		return err
+	}
+
 	// Update endpoints in status
 	if infra.Status.Endpoints == nil {
 		infra.Status.Endpoints = &infrav1alpha1.EndpointsStatus{}
