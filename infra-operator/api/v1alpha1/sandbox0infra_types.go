@@ -62,14 +62,16 @@ type Sandbox0InfraSpec struct {
 	Version string `json:"version,omitempty"`
 
 	// Database configures the main database for sandbox0
-	Database DatabaseConfig `json:"database,omitempty"`
+	// +optional
+	Database *DatabaseConfig `json:"database,omitempty"`
 
 	// JuicefsDatabase configures the JuiceFS metadata database
 	// +optional
 	JuicefsDatabase *JuicefsDatabaseConfig `json:"juicefsDatabase,omitempty"`
 
 	// Storage configures the storage backend (JuiceFS S3 backend)
-	Storage StorageConfig `json:"storage,omitempty"`
+	// +optional
+	Storage *StorageConfig `json:"storage,omitempty"`
 
 	// ControlPlane configures external control plane connection.
 	// +optional
@@ -81,8 +83,7 @@ type Sandbox0InfraSpec struct {
 
 	// Network configures cluster-wide network provider settings.
 	// +optional
-	// +kubebuilder:default={}
-	Network config.NetworkProviderConfig `json:"network,omitempty"`
+	Network *config.NetworkProviderConfig `json:"network,omitempty"`
 
 	// Services configures individual services
 	// +optional
@@ -448,7 +449,7 @@ type ServicesConfig struct {
 // BaseServiceConfig defines common service configuration
 type BaseServiceConfig struct {
 	// Enabled enables or disables the service
-	// +kubebuilder:default=true
+	// +kubebuilder:default=false
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Replicas specifies the number of replicas
@@ -558,6 +559,9 @@ func IsDatabaseEnabled(infra *Sandbox0Infra) bool {
 	if infra == nil {
 		return false
 	}
+	if infra.Spec.Database == nil {
+		return false
+	}
 	switch infra.Spec.Database.Type {
 	case DatabaseTypeBuiltin:
 		if infra.Spec.Database.Builtin != nil {
@@ -574,6 +578,9 @@ func IsDatabaseEnabled(infra *Sandbox0Infra) bool {
 // IsStorageEnabled returns true when storage should be reconciled.
 func IsStorageEnabled(infra *Sandbox0Infra) bool {
 	if infra == nil {
+		return false
+	}
+	if infra.Spec.Storage == nil {
 		return false
 	}
 	switch infra.Spec.Storage.Type {

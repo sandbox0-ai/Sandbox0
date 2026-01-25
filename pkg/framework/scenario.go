@@ -175,7 +175,7 @@ func buildScenarioRollouts(infra *infrav1alpha1.Sandbox0Infra, infraName, namesp
 	if infrav1alpha1.IsStorageProxyEnabled(infra) {
 		rollouts = append(rollouts, RolloutTarget{Kind: "deployment", Name: infraName + "-storage-proxy", Namespace: namespace, Timeout: "5m"})
 	}
-	if infra != nil && strings.EqualFold(strings.TrimSpace(infra.Spec.Network.Provider), "cilium") {
+	if infra != nil && infra.Spec.Network != nil && strings.EqualFold(strings.TrimSpace(infra.Spec.Network.Provider), "cilium") {
 		rollouts = append(rollouts, RolloutTarget{Kind: "daemonset", Name: "cilium", Namespace: "kube-system", Timeout: "10m"})
 	}
 	return rollouts
@@ -196,17 +196,19 @@ func buildScenarioSecrets(infra *infrav1alpha1.Sandbox0Infra, namespace string) 
 	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled {
 		addSecret(secretFromKeyRef(namespace, infra.Spec.InitUser.PasswordSecret, "password"))
 	}
-	if infra.Spec.Database.Type == infrav1alpha1.DatabaseTypeExternal && infra.Spec.Database.External != nil {
+	if infra.Spec.Database != nil && infra.Spec.Database.Type == infrav1alpha1.DatabaseTypeExternal && infra.Spec.Database.External != nil {
 		addSecret(secretFromKeyRef(namespace, infra.Spec.Database.External.PasswordSecret, "password"))
 	}
-	switch infra.Spec.Storage.Type {
-	case infrav1alpha1.StorageTypeS3:
-		if infra.Spec.Storage.S3 != nil {
-			addSecret(credentialsSecretFromS3(namespace, infra.Spec.Storage.S3.CredentialsSecret))
-		}
-	case infrav1alpha1.StorageTypeOSS:
-		if infra.Spec.Storage.OSS != nil {
-			addSecret(credentialsSecretFromOSS(namespace, infra.Spec.Storage.OSS.CredentialsSecret))
+	if infra.Spec.Storage != nil {
+		switch infra.Spec.Storage.Type {
+		case infrav1alpha1.StorageTypeS3:
+			if infra.Spec.Storage.S3 != nil {
+				addSecret(credentialsSecretFromS3(namespace, infra.Spec.Storage.S3.CredentialsSecret))
+			}
+		case infrav1alpha1.StorageTypeOSS:
+			if infra.Spec.Storage.OSS != nil {
+				addSecret(credentialsSecretFromOSS(namespace, infra.Spec.Storage.OSS.CredentialsSecret))
+			}
 		}
 	}
 	if infra.Spec.ControlPlane != nil {

@@ -30,12 +30,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	controller "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"k8s.io/client-go/util/workqueue"
 
 	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
@@ -134,10 +134,10 @@ func (r *Sandbox0InfraReconciler) setDefaults(infra *infrav1alpha1.Sandbox0Infra
 	if infra.Spec.Version == "" {
 		infra.Spec.Version = "latest"
 	}
-	if infra.Spec.Database.Type == "" {
+	if infra.Spec.Database != nil && infra.Spec.Database.Type == "" {
 		infra.Spec.Database.Type = infrav1alpha1.DatabaseTypeBuiltin
 	}
-	if infra.Spec.Storage.Type == "" {
+	if infra.Spec.Storage != nil && infra.Spec.Storage.Type == "" {
 		infra.Spec.Storage.Type = infrav1alpha1.StorageTypeBuiltin
 	}
 }
@@ -231,8 +231,8 @@ func (r *Sandbox0InfraReconciler) validateComponentPlan(infra *infrav1alpha1.San
 		infra.Spec.ControlPlane.InternalAuthPublicKeySecret.Name == "" {
 		return fmt.Errorf("controlPlane.internalAuthPublicKeySecret.name is required when controlPlane are enabled")
 	}
-	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled && !plan.HasControlPlane {
-		return fmt.Errorf("initUser can only be enabled when control-plane services are enabled")
+	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled && !plan.EnableDatabase {
+		return fmt.Errorf("initUser can only be enabled when database is enabled")
 	}
 	if infra.Spec.Cluster != nil && !plan.HasDataPlane {
 		return fmt.Errorf("cluster configuration requires at least one data-plane service")

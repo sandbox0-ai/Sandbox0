@@ -59,6 +59,10 @@ func NewReconciler(resources *common.ResourceManager) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	logger := log.FromContext(ctx)
 
+	if infra.Spec.Storage == nil {
+		return nil
+	}
+
 	switch infra.Spec.Storage.Type {
 	case infrav1alpha1.StorageTypeBuiltin:
 		logger.Info("Reconciling builtin storage (RustFS)")
@@ -487,7 +491,7 @@ func (r *Reconciler) ensureStorageBucket(ctx context.Context, infra *infrav1alph
 			return err
 		}
 		builtin := resolveBuiltinStorageConfig(infra)
-		if r.Resources.LocalDev.EnablePortForward {
+		if r.Resources.LocalDev.LocalDevMode {
 			serviceName := fmt.Sprintf("%s-rustfs", infra.Name)
 			localURL, cleanup, err := framework.PortForwardService(ctx, r.Resources.LocalDev.KubeconfigPath, infra.Namespace, serviceName, int(builtin.Port))
 			if err != nil {
@@ -541,7 +545,7 @@ func (r *Reconciler) ensureBuiltinStorageReady(ctx context.Context, infra *infra
 	}
 
 	builtin := resolveBuiltinStorageConfig(infra)
-	if r.Resources.LocalDev.EnablePortForward {
+	if r.Resources.LocalDev.LocalDevMode {
 		serviceName := fmt.Sprintf("%s-rustfs", infra.Name)
 		localURL, cleanup, err := framework.PortForwardService(ctx, r.Resources.LocalDev.KubeconfigPath, infra.Namespace, serviceName, int(builtin.Port))
 		if err != nil {

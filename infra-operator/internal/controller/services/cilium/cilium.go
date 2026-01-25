@@ -153,7 +153,7 @@ func getNetworkConfig(infra *infrav1alpha1.Sandbox0Infra) *apiconfig.NetworkProv
 	if infra == nil {
 		return nil
 	}
-	return &infra.Spec.Network
+	return infra.Spec.Network
 }
 
 func (r *Reconciler) detectVersion(ctx context.Context, namespace string) (*semver, bool, error) {

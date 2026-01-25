@@ -363,7 +363,6 @@ spec:
                     type: boolean
                 type: object
               network:
-                default: {}
                 description: Network configures cluster-wide network provider settings.
                 properties:
                   cilium:
@@ -622,7 +621,7 @@ spec:
                             type: string
                         type: object
                       enabled:
-                        default: true
+                        default: false
                         description: Enabled enables or disables the service
                         type: boolean
                       ingress:
@@ -905,7 +904,7 @@ spec:
                             type: string
                         type: object
                       enabled:
-                        default: true
+                        default: false
                         description: Enabled enables or disables the service
                         type: boolean
                       ingress:
@@ -1175,7 +1174,7 @@ spec:
                             type: integer
                         type: object
                       enabled:
-                        default: true
+                        default: false
                         description: Enabled enables or disables the service
                         type: boolean
                       ingress:
@@ -1331,7 +1330,7 @@ spec:
                             type: string
                         type: object
                       enabled:
-                        default: true
+                        default: false
                         description: Enabled enables or disables the service
                         type: boolean
                       ingress:
@@ -1547,7 +1546,7 @@ spec:
                             type: integer
                         type: object
                       enabled:
-                        default: true
+                        default: false
                         description: Enabled enables or disables the service
                         type: boolean
                       ingress:

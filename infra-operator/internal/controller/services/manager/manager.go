@@ -272,7 +272,10 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 		cfg.DefaultClusterId = infra.Spec.Cluster.ID
 	}
 
-	cfg.Network = infra.Spec.Network
+	cfg.Network = apiconfig.NetworkProviderConfig{}
+	if infra.Spec.Network != nil {
+		cfg.Network = *infra.Spec.Network
+	}
 
 	cfg.ManagerImage = fmt.Sprintf("%s:%s", imageRepo, infra.Spec.Version)
 

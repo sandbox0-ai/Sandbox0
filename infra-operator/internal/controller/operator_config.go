@@ -44,7 +44,7 @@ func (r *Sandbox0InfraReconciler) getImageRepo(ctx context.Context) string {
 func (r *Sandbox0InfraReconciler) getImagePullPolicy(ctx context.Context) *corev1.PullPolicy {
 	logger := log.FromContext(ctx)
 
-	if localDev := r.getLocalDevConfig(ctx); localDev.EnablePortForward {
+	if localDev := r.getLocalDevConfig(ctx); localDev.LocalDevMode {
 		// In local dev mode, use IfNotPresent because images with the 'latest' tag use 'Always' pull policy by default.
 		policy := corev1.PullIfNotPresent
 		return &policy
@@ -80,8 +80,8 @@ func (r *Sandbox0InfraReconciler) getLocalDevConfig(ctx context.Context) common.
 	}
 
 	return common.LocalDevConfig{
-		EnablePortForward: true,
-		KubeconfigPath:    strings.TrimSpace(os.Getenv("S0_DEV_KUBECONFIG")),
+		LocalDevMode:   true,
+		KubeconfigPath: strings.TrimSpace(os.Getenv("S0_DEV_KUBECONFIG")),
 	}
 }
 

@@ -58,6 +58,10 @@ func NewReconciler(resources *common.ResourceManager) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	logger := log.FromContext(ctx)
 
+	if infra.Spec.Database == nil {
+		return nil
+	}
+
 	switch infra.Spec.Database.Type {
 	case infrav1alpha1.DatabaseTypeBuiltin:
 		logger.Info("Reconciling builtin database")
@@ -433,7 +437,7 @@ func (r *Reconciler) ensureDatabaseReady(ctx context.Context, infra *infrav1alph
 	}
 
 	serviceName := fmt.Sprintf("%s-postgres", infra.Name)
-	if r.Resources.LocalDev.EnablePortForward {
+	if r.Resources.LocalDev.LocalDevMode {
 		localURL, cleanup, err := framework.PortForwardService(ctx, r.Resources.LocalDev.KubeconfigPath, infra.Namespace, serviceName, int(databasePort))
 		if err != nil {
 			return fmt.Errorf("port-forward database service %q: %w", serviceName, err)

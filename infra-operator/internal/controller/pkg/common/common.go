@@ -49,8 +49,8 @@ type ResourceManager struct {
 }
 
 type LocalDevConfig struct {
-	EnablePortForward bool
-	KubeconfigPath    string
+	LocalDevMode   bool
+	KubeconfigPath string
 }
 
 func NewResourceManager(client client.Client, scheme *runtime.Scheme, imagePullPolicy *corev1.PullPolicy, localDev LocalDevConfig) *ResourceManager {
