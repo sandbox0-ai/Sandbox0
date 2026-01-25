@@ -47,7 +47,7 @@ func (h *FileHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.handleDelete(w, r, path)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	}
 }
 

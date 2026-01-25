@@ -20,6 +20,7 @@ import (
 	gatewaydb "github.com/sandbox0-ai/infra/pkg/gateway/db"
 	gatewaymiddleware "github.com/sandbox0-ai/infra/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/infra/pkg/gateway/public"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 	"go.uber.org/zap"
@@ -388,7 +389,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Health check handlers
 func (s *Server) healthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status":    "healthy",
 		"timestamp": time.Now().Unix(),
 	})
@@ -397,15 +398,14 @@ func (s *Server) healthCheck(c *gin.Context) {
 func (s *Server) readinessCheck(c *gin.Context) {
 	if authModeEnabled(s.cfg.AuthMode, authModePublic) && s.publicRepo != nil {
 		if err := s.publicRepo.Pool().Ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
+			spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "database unavailable", gin.H{
 				"status": "not ready",
-				"error":  "database unavailable",
 			})
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
 	})
@@ -421,10 +421,7 @@ func (s *Server) managerUpstreamMiddleware() gin.HandlerFunc {
 		s.logger.Error("Manager upstream not configured",
 			zap.String("manager_url", s.cfg.ManagerURL),
 		)
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-			"error":   "manager upstream not configured",
-			"details": "manager_url is empty",
-		})
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "manager upstream not configured", "manager_url is empty")
 	}
 }
 
@@ -438,10 +435,7 @@ func (s *Server) storageProxyUpstreamMiddleware() gin.HandlerFunc {
 		s.logger.Error("Storage-proxy upstream not configured",
 			zap.String("storage_proxy_url", s.cfg.StorageProxyURL),
 		)
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-			"error":   "storage-proxy upstream not configured",
-			"details": "storage_proxy_url is empty",
-		})
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "storage-proxy upstream not configured", "storage_proxy_url is empty")
 	}
 }
 

@@ -3,7 +3,6 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"github.com/sandbox0-ai/infra/manager/procd/pkg/http/handlers"
 	"github.com/sandbox0-ai/infra/manager/procd/pkg/volume"
 	"github.com/sandbox0-ai/infra/manager/procd/pkg/webhook"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -182,13 +182,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
@@ -223,7 +221,7 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 					zap.Any("error", err),
 					zap.String("path", r.URL.Path),
 				)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -233,7 +231,7 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 func (s *Server) localhostOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !isLoopbackAddress(r.RemoteAddr) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			_ = spec.WriteError(w, http.StatusForbidden, spec.CodeForbidden, "forbidden")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -274,7 +272,7 @@ func (s *Server) internalTokenMiddleware(next http.Handler) http.Handler {
 			s.logger.Warn("Missing internal token",
 				zap.String("path", r.URL.Path),
 			)
-			http.Error(w, "missing internal token", http.StatusUnauthorized)
+			_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "missing internal token")
 			return
 		}
 
@@ -305,12 +303,9 @@ func (s *Server) storageProxyUpstreamMiddleware(next http.Handler) http.Handler 
 			zap.Int("proxy_port", port),
 			zap.Int("proxy_replicas", replicas),
 		)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(handlers.ErrorResponse{
-			Error:   "storage_proxy_unavailable",
-			Message: fmt.Sprintf("storage-proxy upstream not configured (base_url=%q port=%d replicas=%d)", baseURL, port, replicas),
-		})
+		_ = spec.WriteError(w, http.StatusServiceUnavailable, "storage_proxy_unavailable",
+			fmt.Sprintf("storage-proxy upstream not configured (base_url=%q port=%d replicas=%d)", baseURL, port, replicas),
+		)
 	})
 }
 
@@ -325,7 +320,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				zap.String("path", r.URL.Path),
 				zap.String("method", r.Method),
 			)
-			http.Error(w, "missing authentication token", http.StatusUnauthorized)
+			_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication token")
 			return
 		}
 
@@ -337,7 +332,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				zap.String("method", r.Method),
 				zap.Error(err),
 			)
-			http.Error(w, fmt.Sprintf("unauthorized: %v", err), http.StatusUnauthorized)
+			_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, fmt.Sprintf("unauthorized: %v", err))
 			return
 		}
 

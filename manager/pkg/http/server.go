@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/manager/pkg/service"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -136,13 +137,13 @@ func (s *Server) Start(ctx context.Context) error {
 // Handler functions
 
 func (s *Server) healthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status": "healthy",
 	})
 }
 
 func (s *Server) readinessCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status": "ready",
 	})
 }
@@ -187,9 +188,7 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 				zap.String("path", c.Request.URL.Path),
 				zap.String("method", c.Request.Method),
 			)
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "missing authentication token",
-			})
+			spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication token")
 			c.Abort()
 			return
 		}
@@ -202,9 +201,7 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 				zap.String("method", c.Request.Method),
 				zap.Error(err),
 			)
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": fmt.Sprintf("unauthorized: %v", err),
-			})
+			spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, fmt.Sprintf("unauthorized: %v", err))
 			c.Abort()
 			return
 		}

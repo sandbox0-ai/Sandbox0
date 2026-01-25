@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -85,16 +86,23 @@ func (c *InternalGatewayClient) GetClusterSummary(ctx context.Context, baseURL s
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		_, apiErr, err := spec.DecodeResponse[map[string]any](bytes.NewReader(body))
+		if err == nil && apiErr != nil {
+			return nil, fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+		}
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
-	var summary ClusterSummary
-	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+	summary, apiErr, err := spec.DecodeResponse[ClusterSummary](resp.Body)
+	if err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
+	if apiErr != nil {
+		return nil, fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+	}
 
-	return &summary, nil
+	return summary, nil
 }
 
 // GetTemplateStats gets template statistics from internal-gateway
@@ -130,16 +138,23 @@ func (c *InternalGatewayClient) GetTemplateStats(ctx context.Context, baseURL st
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		_, apiErr, err := spec.DecodeResponse[map[string]any](bytes.NewReader(body))
+		if err == nil && apiErr != nil {
+			return nil, fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+		}
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
-	var stats TemplateStats
-	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+	stats, apiErr, err := spec.DecodeResponse[TemplateStats](resp.Body)
+	if err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
+	if apiErr != nil {
+		return nil, fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+	}
 
-	return &stats, nil
+	return stats, nil
 }
 
 // CreateOrUpdateTemplate creates or updates a template in a cluster via internal-gateway.
@@ -208,6 +223,10 @@ func (c *InternalGatewayClient) CreateOrUpdateTemplate(ctx context.Context, base
 	// Check status code
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
+		_, apiErr, err := spec.DecodeResponse[map[string]any](bytes.NewReader(respBody))
+		if err == nil && apiErr != nil {
+			return fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+		}
 		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -253,6 +272,10 @@ func (c *InternalGatewayClient) DeleteTemplate(ctx context.Context, baseURL stri
 	// Check status code (404 is OK, means already deleted)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(resp.Body)
+		_, apiErr, err := spec.DecodeResponse[map[string]any](bytes.NewReader(body))
+		if err == nil && apiErr != nil {
+			return fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+		}
 		return fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 

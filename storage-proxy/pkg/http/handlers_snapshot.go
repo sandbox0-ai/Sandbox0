@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
 )
@@ -30,24 +31,24 @@ type snapshotResponse struct {
 func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	volumeID := r.PathValue("volume_id")
 	if volumeID == "" {
-		http.Error(w, "volume_id is required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "volume_id is required")
 		return
 	}
 
 	var req createSnapshotRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "name is required")
 		return
 	}
 
@@ -77,22 +78,20 @@ func (s *Server) createSnapshot(w http.ResponseWriter, r *http.Request) {
 		resp.ExpiresAt = &expires
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	_ = spec.WriteSuccess(w, http.StatusCreated, resp)
 }
 
 // listSnapshots handles GET /sandboxvolumes/{volume_id}/snapshots
 func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	volumeID := r.PathValue("volume_id")
 	if volumeID == "" {
-		http.Error(w, "volume_id is required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "volume_id is required")
 		return
 	}
 
@@ -120,21 +119,21 @@ func (s *Server) listSnapshots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(responses)
+	_ = spec.WriteSuccess(w, http.StatusOK, responses)
 }
 
 // getSnapshot handles GET /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}
 func (s *Server) getSnapshot(w http.ResponseWriter, r *http.Request) {
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	volumeID := r.PathValue("volume_id")
 	snapshotID := r.PathValue("snapshot_id")
 	if volumeID == "" || snapshotID == "" {
-		http.Error(w, "volume_id and snapshot_id are required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "volume_id and snapshot_id are required")
 		return
 	}
 
@@ -157,22 +156,21 @@ func (s *Server) getSnapshot(w http.ResponseWriter, r *http.Request) {
 		resp.ExpiresAt = &expires
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = spec.WriteSuccess(w, http.StatusOK, resp)
 }
 
 // restoreSnapshot handles POST /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}/restore
 func (s *Server) restoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	volumeID := r.PathValue("volume_id")
 	snapshotID := r.PathValue("snapshot_id")
 	if volumeID == "" || snapshotID == "" {
-		http.Error(w, "volume_id and snapshot_id are required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "volume_id and snapshot_id are required")
 		return
 	}
 
@@ -188,22 +186,21 @@ func (s *Server) restoreSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "restored"})
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]string{"status": "restored"})
 }
 
 // deleteSnapshot handles DELETE /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}
 func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	volumeID := r.PathValue("volume_id")
 	snapshotID := r.PathValue("snapshot_id")
 	if volumeID == "" || snapshotID == "" {
-		http.Error(w, "volume_id and snapshot_id are required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "volume_id and snapshot_id are required")
 		return
 	}
 
@@ -213,26 +210,26 @@ func (s *Server) deleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
 // handleSnapshotError maps snapshot errors to HTTP responses
 func (s *Server) handleSnapshotError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, snapshot.ErrVolumeNotFound):
-		http.Error(w, "volume not found", http.StatusNotFound)
+		_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "volume not found")
 	case errors.Is(err, snapshot.ErrSnapshotNotFound):
-		http.Error(w, "snapshot not found", http.StatusNotFound)
+		_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "snapshot not found")
 	case errors.Is(err, snapshot.ErrSnapshotNotBelongToVolume):
-		http.Error(w, "snapshot not found", http.StatusNotFound) // Don't reveal existence
+		_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "snapshot not found") // Don't reveal existence
 	case errors.Is(err, snapshot.ErrVolumeLocked):
-		http.Error(w, "volume is locked for another operation", http.StatusConflict)
+		_ = spec.WriteError(w, http.StatusConflict, spec.CodeConflict, "volume is locked for another operation")
 	case errors.Is(err, snapshot.ErrFlushFailed):
-		http.Error(w, "failed to flush data", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "failed to flush data")
 	case errors.Is(err, snapshot.ErrCloneFailed):
-		http.Error(w, "clone operation failed", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "clone operation failed")
 	default:
 		s.logger.WithError(err).Error("Snapshot operation failed")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 	}
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -22,7 +23,7 @@ func (s *Server) proxyToStorageProxy(c *gin.Context) {
 			zap.String("team_id", authCtx.TeamID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -50,7 +51,7 @@ func (s *Server) listSandboxVolumes(c *gin.Context) {
 func (s *Server) getSandboxVolume(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "id is required")
 		return
 	}
 
@@ -62,7 +63,7 @@ func (s *Server) getSandboxVolume(c *gin.Context) {
 func (s *Server) deleteSandboxVolume(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "id is required")
 		return
 	}
 
@@ -74,7 +75,7 @@ func (s *Server) deleteSandboxVolume(c *gin.Context) {
 func (s *Server) createSandboxVolumeSnapshot(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "volume id is required")
 		return
 	}
 	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots"
@@ -85,7 +86,7 @@ func (s *Server) createSandboxVolumeSnapshot(c *gin.Context) {
 func (s *Server) listSandboxVolumeSnapshots(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "volume id is required")
 		return
 	}
 	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots"
@@ -97,7 +98,7 @@ func (s *Server) getSandboxVolumeSnapshot(c *gin.Context) {
 	id := c.Param("id")
 	snapshotID := c.Param("snapshot_id")
 	if id == "" || snapshotID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id and snapshot id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "volume id and snapshot id are required")
 		return
 	}
 	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots/" + snapshotID
@@ -109,7 +110,7 @@ func (s *Server) restoreSandboxVolumeSnapshot(c *gin.Context) {
 	id := c.Param("id")
 	snapshotID := c.Param("snapshot_id")
 	if id == "" || snapshotID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id and snapshot id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "volume id and snapshot id are required")
 		return
 	}
 	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots/" + snapshotID + "/restore"
@@ -121,7 +122,7 @@ func (s *Server) deleteSandboxVolumeSnapshot(c *gin.Context) {
 	id := c.Param("id")
 	snapshotID := c.Param("snapshot_id")
 	if id == "" || snapshotID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "volume id and snapshot id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "volume id and snapshot id are required")
 		return
 	}
 	c.Request.URL.Path = "/sandboxvolumes/" + id + "/snapshots/" + snapshotID

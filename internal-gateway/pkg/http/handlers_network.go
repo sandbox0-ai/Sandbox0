@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"go.uber.org/zap"
 )
 
@@ -13,7 +14,7 @@ import (
 func (s *Server) getNetworkPolicy(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -31,7 +32,7 @@ func (s *Server) getNetworkPolicy(c *gin.Context) {
 func (s *Server) updateNetworkPolicy(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -51,7 +52,7 @@ func (s *Server) updateNetworkPolicy(c *gin.Context) {
 func (s *Server) getBandwidthPolicy(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -69,7 +70,7 @@ func (s *Server) getBandwidthPolicy(c *gin.Context) {
 func (s *Server) updateBandwidthPolicy(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 

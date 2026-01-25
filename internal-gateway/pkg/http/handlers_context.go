@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 	"go.uber.org/zap"
@@ -19,7 +20,7 @@ import (
 func (s *Server) createContext(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -38,7 +39,7 @@ func (s *Server) createContext(c *gin.Context) {
 func (s *Server) listContexts(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -56,7 +57,7 @@ func (s *Server) getContext(c *gin.Context) {
 	sandboxID := c.Param("id")
 	ctxID := c.Param("ctx_id")
 	if sandboxID == "" || ctxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id and ctx_id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id and ctx_id are required")
 		return
 	}
 
@@ -74,7 +75,7 @@ func (s *Server) deleteContext(c *gin.Context) {
 	sandboxID := c.Param("id")
 	ctxID := c.Param("ctx_id")
 	if sandboxID == "" || ctxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id and ctx_id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id and ctx_id are required")
 		return
 	}
 
@@ -92,7 +93,7 @@ func (s *Server) restartContext(c *gin.Context) {
 	sandboxID := c.Param("id")
 	ctxID := c.Param("ctx_id")
 	if sandboxID == "" || ctxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id and ctx_id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id and ctx_id are required")
 		return
 	}
 
@@ -110,7 +111,7 @@ func (s *Server) executeInContext(c *gin.Context) {
 	sandboxID := c.Param("id")
 	ctxID := c.Param("ctx_id")
 	if sandboxID == "" || ctxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id and ctx_id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id and ctx_id are required")
 		return
 	}
 
@@ -127,7 +128,7 @@ func (s *Server) executeInContext(c *gin.Context) {
 func (s *Server) exec(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -144,7 +145,7 @@ func (s *Server) exec(c *gin.Context) {
 func (s *Server) execStream(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -162,7 +163,7 @@ func (s *Server) contextWebSocket(c *gin.Context) {
 	sandboxID := c.Param("id")
 	ctxID := c.Param("ctx_id")
 	if sandboxID == "" || ctxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id and ctx_id are required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id and ctx_id are required")
 		return
 	}
 
@@ -188,12 +189,12 @@ func (s *Server) getProcdURL(c *gin.Context, sandboxID string) (*url.URL, error)
 			zap.String("sandbox_id", sandboxID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusNotFound, gin.H{"error": "sandbox not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "sandbox not found")
 		return nil, err
 	}
 
 	if sandbox.TeamID != authCtx.TeamID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "sandbox belongs to a different team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "sandbox belongs to a different team")
 		return nil, errors.New("sandbox belongs to a different team")
 	}
 
@@ -205,7 +206,7 @@ func (s *Server) getProcdURL(c *gin.Context, sandboxID string) (*url.URL, error)
 			zap.String("procd_address", sandbox.ProcdAddress),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid procd address"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "invalid procd address")
 		return nil, err
 	}
 
@@ -223,7 +224,7 @@ func (s *Server) proxyToProcd(c *gin.Context, procdURL *url.URL) {
 			zap.String("team_id", authCtx.TeamID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -241,7 +242,7 @@ func (s *Server) proxyToProcd(c *gin.Context, procdURL *url.URL) {
 			zap.String("team_id", authCtx.TeamID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -261,7 +262,7 @@ func (s *Server) proxyToProcd(c *gin.Context, procdURL *url.URL) {
 			zap.String("procd_url", procdURL.String()),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "proxy initialization failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "proxy initialization failed")
 		return
 	}
 

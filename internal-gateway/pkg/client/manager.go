@@ -1,14 +1,15 @@
 package client
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	mgr "github.com/sandbox0-ai/infra/manager/pkg/service"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -70,13 +71,20 @@ func (c *ManagerClient) GetSandbox(ctx context.Context, sandboxID, userID, teamI
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		_, apiErr, err := spec.DecodeResponse[map[string]any](bytes.NewReader(body))
+		if err == nil && apiErr != nil {
+			return nil, fmt.Errorf("manager error: %s", apiErr.Message)
+		}
 		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse response
-	var sandbox mgr.Sandbox
-	if err := json.NewDecoder(resp.Body).Decode(&sandbox); err != nil {
+	sandbox, apiErr, err := spec.DecodeResponse[mgr.Sandbox](resp.Body)
+	if err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	if apiErr != nil {
+		return nil, fmt.Errorf("manager error: %s", apiErr.Message)
 	}
 
 	c.logger.Debug("Retrieved sandbox from manager",
@@ -85,5 +93,5 @@ func (c *ManagerClient) GetSandbox(ctx context.Context, sandboxID, userID, teamI
 		zap.String("procd_address", sandbox.ProcdAddress),
 	)
 
-	return &sandbox, nil
+	return sandbox, nil
 }

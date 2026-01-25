@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/pkg/gateway/db"
 	"github.com/sandbox0-ai/infra/pkg/gateway/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"go.uber.org/zap"
 )
 
@@ -29,7 +30,7 @@ func NewAPIKeyHandler(repo *db.Repository, logger *zap.Logger) *APIKeyHandler {
 func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -45,11 +46,11 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 
 	if err != nil {
 		h.logger.Error("Failed to get API keys", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get API keys"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get API keys")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"api_keys": keys})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"api_keys": keys})
 }
 
 // CreateAPIKeyRequest is the request body for creating an API key
@@ -76,18 +77,18 @@ type CreateAPIKeyResponse struct {
 func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
 	if authCtx.TeamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no team selected"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "no team selected")
 		return
 	}
 
 	var req CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
@@ -124,7 +125,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	)
 	if err != nil {
 		h.logger.Error("Failed to create API key", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create API key"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to create API key")
 		return
 	}
 
@@ -140,14 +141,14 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 		CreatedAt: key.CreatedAt,
 	}
 
-	c.JSON(http.StatusCreated, response)
+	spec.JSONSuccess(c, http.StatusCreated, response)
 }
 
 // DeleteAPIKey deletes an API key
 func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -157,11 +158,11 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	key, err := h.repo.GetAPIKeyByID(c.Request.Context(), keyID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "API key not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "API key not found")
 			return
 		}
 		h.logger.Error("Failed to get API key", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get API key"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get API key")
 		return
 	}
 
@@ -170,25 +171,25 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 		// Check if user is member of the key's team
 		_, err := h.repo.GetTeamMember(c.Request.Context(), key.TeamID, authCtx.UserID)
 		if err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to delete this API key"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not authorized to delete this API key")
 			return
 		}
 	}
 
 	if err := h.repo.DeleteAPIKey(c.Request.Context(), keyID); err != nil {
 		h.logger.Error("Failed to delete API key", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete API key"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete API key")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "API key deleted"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "API key deleted"})
 }
 
 // DeactivateAPIKey deactivates an API key without deleting it
 func (h *APIKeyHandler) DeactivateAPIKey(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -198,11 +199,11 @@ func (h *APIKeyHandler) DeactivateAPIKey(c *gin.Context) {
 	key, err := h.repo.GetAPIKeyByID(c.Request.Context(), keyID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "API key not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "API key not found")
 			return
 		}
 		h.logger.Error("Failed to get API key", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get API key"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get API key")
 		return
 	}
 
@@ -210,16 +211,16 @@ func (h *APIKeyHandler) DeactivateAPIKey(c *gin.Context) {
 	if key.TeamID != authCtx.TeamID {
 		_, err := h.repo.GetTeamMember(c.Request.Context(), key.TeamID, authCtx.UserID)
 		if err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to deactivate this API key"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not authorized to deactivate this API key")
 			return
 		}
 	}
 
 	if err := h.repo.DeactivateAPIKey(c.Request.Context(), keyID); err != nil {
 		h.logger.Error("Failed to deactivate API key", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to deactivate API key"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to deactivate API key")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "API key deactivated"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "API key deactivated"})
 }

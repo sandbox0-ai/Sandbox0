@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 )
 
@@ -15,7 +16,7 @@ func (s *Server) handleFileOperation(c *gin.Context) {
 	sandboxID := c.Param("id")
 	filePath := c.Param("path")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -61,7 +62,7 @@ func (s *Server) handleFileOperation(c *gin.Context) {
 		c.Request.URL.Path = "/api/v1/files" + filePath
 
 	default:
-		c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method not allowed"})
+		spec.JSONError(c, http.StatusMethodNotAllowed, spec.CodeBadRequest, "method not allowed")
 		return
 	}
 
@@ -73,7 +74,7 @@ func (s *Server) handleFileOperation(c *gin.Context) {
 func (s *Server) handleFileWatch(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 )
 
 // === Template Management Handlers (→ Manager) ===
@@ -19,7 +20,7 @@ func (s *Server) listTemplates(c *gin.Context) {
 func (s *Server) getTemplate(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
@@ -37,7 +38,7 @@ func (s *Server) createTemplate(c *gin.Context) {
 func (s *Server) updateTemplate(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
@@ -49,7 +50,7 @@ func (s *Server) updateTemplate(c *gin.Context) {
 func (s *Server) deleteTemplate(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
@@ -61,7 +62,7 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 func (s *Server) warmPool(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 

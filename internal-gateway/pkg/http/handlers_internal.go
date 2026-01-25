@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -28,7 +29,7 @@ func (s *Server) getClusterSummary(c *gin.Context) {
 			zap.String("team_id", authCtx.TeamID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -60,7 +61,7 @@ func (s *Server) getTemplateStats(c *gin.Context) {
 			zap.String("team_id", authCtx.TeamID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 

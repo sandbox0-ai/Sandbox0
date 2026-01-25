@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/pkg/auth"
 	"github.com/sandbox0-ai/infra/pkg/gateway/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/naming"
 	"go.uber.org/zap"
@@ -19,19 +20,19 @@ func (s *Server) proxySandbox(c *gin.Context) {
 
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
 	parsed, err := naming.ParseSandboxName(sandboxID)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid sandbox_id"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid sandbox_id")
 		return
 	}
 
@@ -61,7 +62,7 @@ func (s *Server) proxySandbox(c *gin.Context) {
 	token, err := s.generateInternalToken(c, authCtx, "internal-gateway")
 	if err != nil {
 		s.logger.Error("Failed to generate internal token for internal-gateway", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -72,14 +73,14 @@ func (s *Server) proxySandbox(c *gin.Context) {
 
 func (s *Server) proxyToScheduler(c *gin.Context, authCtx *auth.AuthContext) {
 	if s.schedulerRouter == nil {
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "scheduler not available"})
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "scheduler not available")
 		return
 	}
 
 	token, err := s.generateInternalToken(c, authCtx, "scheduler")
 	if err != nil {
 		s.logger.Error("Failed to generate internal token for scheduler", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -90,14 +91,14 @@ func (s *Server) proxyToScheduler(c *gin.Context, authCtx *auth.AuthContext) {
 func (s *Server) proxyToDefaultInternalGateway(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
 	token, err := s.generateInternalToken(c, authCtx, "internal-gateway")
 	if err != nil {
 		s.logger.Error("Failed to generate internal token for internal-gateway", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 

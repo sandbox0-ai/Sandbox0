@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/pkg/auth"
 	"github.com/sandbox0-ai/infra/pkg/gateway/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 )
@@ -125,9 +125,12 @@ func (s *Server) refreshClusterCache(ctx context.Context, authCtx *auth.AuthCont
 		return fmt.Errorf("list clusters failed: %s", resp.Status)
 	}
 
-	var result schedulerClusterListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	result, apiErr, err := spec.DecodeResponse[schedulerClusterListResponse](resp.Body)
+	if err != nil {
 		return fmt.Errorf("decode clusters: %w", err)
+	}
+	if apiErr != nil {
+		return fmt.Errorf("list clusters failed: %s", apiErr.Message)
 	}
 
 	cache := make(map[string]string, len(result.Clusters))

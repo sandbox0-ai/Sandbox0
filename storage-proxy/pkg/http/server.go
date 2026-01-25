@@ -1,11 +1,11 @@
 package http
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/auth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
@@ -94,8 +94,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 
 // handleHealth handles health check requests
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]any{
 		"status":    "healthy",
 		"timestamp": time.Now().Unix(),
 	})
@@ -103,8 +102,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleReady handles readiness check requests
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]any{
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
 	})

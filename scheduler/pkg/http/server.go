@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 	"github.com/sandbox0-ai/infra/scheduler/pkg/db"
@@ -170,7 +171,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Health check handlers
 func (s *Server) healthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status":    "healthy",
 		"timestamp": time.Now().Unix(),
 	})
@@ -179,9 +180,8 @@ func (s *Server) healthCheck(c *gin.Context) {
 func (s *Server) readinessCheck(c *gin.Context) {
 	// Check database connectivity
 	if err := s.repo.Ping(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "database unavailable", gin.H{
 			"status": "not ready",
-			"error":  "database unavailable",
 		})
 		return
 	}
@@ -214,7 +214,7 @@ func (s *Server) readinessCheck(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, response)
+	spec.JSONSuccess(c, http.StatusOK, response)
 }
 
 // Middleware
@@ -258,9 +258,7 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 		}
 
 		if token == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "missing internal authentication token",
-			})
+			spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing internal authentication token")
 			return
 		}
 
@@ -271,9 +269,7 @@ func (s *Server) authMiddleware() gin.HandlerFunc {
 				zap.String("error", err.Error()),
 				zap.String("client_ip", c.ClientIP()),
 			)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "unauthorized: " + err.Error(),
-			})
+			spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized: "+err.Error())
 			return
 		}
 

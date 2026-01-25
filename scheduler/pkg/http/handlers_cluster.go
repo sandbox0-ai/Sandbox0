@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/scheduler/pkg/db"
 	"go.uber.org/zap"
@@ -32,13 +33,11 @@ func (s *Server) listClusters(c *gin.Context) {
 
 	if err != nil {
 		s.logger.Error("Failed to list clusters", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to list clusters",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to list clusters")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"clusters": clusters,
 		"count":    len(clusters),
 	})
@@ -48,42 +47,40 @@ func (s *Server) listClusters(c *gin.Context) {
 func (s *Server) getCluster(c *gin.Context) {
 	clusterID := c.Param("id")
 	if clusterID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cluster_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "cluster_id is required")
 		return
 	}
 
 	cluster, err := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if err != nil {
 		s.logger.Error("Failed to get cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to get cluster",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get cluster")
 		return
 	}
 
 	if cluster == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "cluster not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, cluster)
+	spec.JSONSuccess(c, http.StatusOK, cluster)
 }
 
 // createCluster creates a new cluster
 func (s *Server) createCluster(c *gin.Context) {
 	var req ClusterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
 	if err := naming.ValidateClusterName(req.ClusterName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
 	if req.InternalGatewayURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "internal_gateway_url is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "internal_gateway_url is required")
 		return
 	}
 
@@ -94,7 +91,7 @@ func (s *Server) createCluster(c *gin.Context) {
 
 	clusterID, err := naming.ClusterIDFromName(req.ClusterName)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
@@ -102,11 +99,11 @@ func (s *Server) createCluster(c *gin.Context) {
 	existing, err := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if err != nil {
 		s.logger.Error("Failed to check existing cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create cluster"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to create cluster")
 		return
 	}
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "cluster already exists"})
+		spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "cluster already exists")
 		return
 	}
 
@@ -120,9 +117,7 @@ func (s *Server) createCluster(c *gin.Context) {
 
 	if err := s.repo.CreateCluster(c.Request.Context(), cluster); err != nil {
 		s.logger.Error("Failed to create cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to create cluster",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to create cluster")
 		return
 	}
 
@@ -137,9 +132,9 @@ func (s *Server) createCluster(c *gin.Context) {
 	// Get the created cluster to return with timestamps
 	created, _ := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if created != nil {
-		c.JSON(http.StatusCreated, created)
+		spec.JSONSuccess(c, http.StatusCreated, created)
 	} else {
-		c.JSON(http.StatusCreated, cluster)
+		spec.JSONSuccess(c, http.StatusCreated, cluster)
 	}
 }
 
@@ -147,18 +142,18 @@ func (s *Server) createCluster(c *gin.Context) {
 func (s *Server) updateCluster(c *gin.Context) {
 	clusterID := c.Param("id")
 	if clusterID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cluster_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "cluster_id is required")
 		return
 	}
 
 	var req ClusterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
 	if req.InternalGatewayURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "internal_gateway_url is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "internal_gateway_url is required")
 		return
 	}
 
@@ -166,11 +161,11 @@ func (s *Server) updateCluster(c *gin.Context) {
 	existing, err := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if err != nil {
 		s.logger.Error("Failed to get cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update cluster"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to update cluster")
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "cluster not found")
 		return
 	}
 
@@ -182,7 +177,7 @@ func (s *Server) updateCluster(c *gin.Context) {
 		req.ClusterName = existing.ClusterName
 	}
 	if err := naming.ValidateClusterName(req.ClusterName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
@@ -196,9 +191,7 @@ func (s *Server) updateCluster(c *gin.Context) {
 
 	if err := s.repo.UpdateCluster(c.Request.Context(), cluster); err != nil {
 		s.logger.Error("Failed to update cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to update cluster",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to update cluster")
 		return
 	}
 
@@ -213,9 +206,9 @@ func (s *Server) updateCluster(c *gin.Context) {
 	// Get the updated cluster to return with timestamps
 	updated, _ := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if updated != nil {
-		c.JSON(http.StatusOK, updated)
+		spec.JSONSuccess(c, http.StatusOK, updated)
 	} else {
-		c.JSON(http.StatusOK, cluster)
+		spec.JSONSuccess(c, http.StatusOK, cluster)
 	}
 }
 
@@ -223,7 +216,7 @@ func (s *Server) updateCluster(c *gin.Context) {
 func (s *Server) deleteCluster(c *gin.Context) {
 	clusterID := c.Param("id")
 	if clusterID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cluster_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "cluster_id is required")
 		return
 	}
 
@@ -231,11 +224,11 @@ func (s *Server) deleteCluster(c *gin.Context) {
 	existing, err := s.repo.GetCluster(c.Request.Context(), clusterID)
 	if err != nil {
 		s.logger.Error("Failed to get cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete cluster"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete cluster")
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "cluster not found")
 		return
 	}
 
@@ -243,13 +236,11 @@ func (s *Server) deleteCluster(c *gin.Context) {
 
 	if err := s.repo.DeleteCluster(c.Request.Context(), clusterID); err != nil {
 		s.logger.Error("Failed to delete cluster", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to delete cluster",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete cluster")
 		return
 	}
 
 	s.logger.Info("Cluster deleted", zap.String("cluster_id", clusterID))
 
-	c.JSON(http.StatusOK, gin.H{"message": "cluster deleted"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "cluster deleted"})
 }

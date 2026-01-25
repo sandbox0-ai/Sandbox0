@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
 )
@@ -22,7 +23,7 @@ func (s *Server) proxyToManager(c *gin.Context) {
 			zap.String("team_id", authCtx.TeamID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -46,7 +47,7 @@ func (s *Server) createSandbox(c *gin.Context) {
 func (s *Server) getSandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -58,7 +59,7 @@ func (s *Server) getSandbox(c *gin.Context) {
 func (s *Server) getSandboxStatus(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -72,7 +73,7 @@ func (s *Server) getSandboxStatus(c *gin.Context) {
 func (s *Server) updateSandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -83,7 +84,7 @@ func (s *Server) updateSandbox(c *gin.Context) {
 func (s *Server) deleteSandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -94,7 +95,7 @@ func (s *Server) deleteSandbox(c *gin.Context) {
 func (s *Server) pauseSandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -105,7 +106,7 @@ func (s *Server) pauseSandbox(c *gin.Context) {
 func (s *Server) resumeSandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -116,7 +117,7 @@ func (s *Server) resumeSandbox(c *gin.Context) {
 func (s *Server) refreshSandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -129,7 +130,7 @@ func (s *Server) refreshSandbox(c *gin.Context) {
 func (s *Server) mountSandboxVolume(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -146,7 +147,7 @@ func (s *Server) mountSandboxVolume(c *gin.Context) {
 func (s *Server) unmountSandboxVolume(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
@@ -163,7 +164,7 @@ func (s *Server) unmountSandboxVolume(c *gin.Context) {
 func (s *Server) getSandboxVolumeStatus(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 

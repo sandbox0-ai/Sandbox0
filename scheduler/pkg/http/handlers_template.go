@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/scheduler/pkg/db"
@@ -24,7 +25,7 @@ type TemplateRequest struct {
 func (s *Server) listTemplates(c *gin.Context) {
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
@@ -35,13 +36,11 @@ func (s *Server) listTemplates(c *gin.Context) {
 
 	if err != nil {
 		s.logger.Error("Failed to list templates", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to list templates",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to list templates")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"templates": templates,
 		"count":     len(templates),
 	})
@@ -51,13 +50,13 @@ func (s *Server) listTemplates(c *gin.Context) {
 func (s *Server) getTemplate(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
@@ -65,21 +64,21 @@ func (s *Server) getTemplate(c *gin.Context) {
 	if v := c.Query("public"); v != "" {
 		public, err := strconv.ParseBool(v)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid public query param"})
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid public query param")
 			return
 		}
 		if public {
 			template, err := s.repo.GetTemplate(c.Request.Context(), "public", "", templateID)
 			if err != nil {
 				s.logger.Error("Failed to get template", zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get template"})
+				spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get template")
 				return
 			}
 			if template == nil {
-				c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+				spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "template not found")
 				return
 			}
-			c.JSON(http.StatusOK, template)
+			spec.JSONSuccess(c, http.StatusOK, template)
 			return
 		}
 	}
@@ -87,18 +86,16 @@ func (s *Server) getTemplate(c *gin.Context) {
 	template, err := s.repo.GetTemplateForTeam(c.Request.Context(), claims.TeamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to get template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to get template",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get template")
 		return
 	}
 
 	if template == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "template not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, template)
+	spec.JSONSuccess(c, http.StatusOK, template)
 }
 
 // createTemplate creates a new template
@@ -110,18 +107,18 @@ func (s *Server) createTemplate(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
 	if err := naming.ValidateTemplateName(req.TemplateName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
@@ -129,19 +126,19 @@ func (s *Server) createTemplate(c *gin.Context) {
 	teamID := claims.TeamID
 	if req.Public {
 		if !internalauth.HasPermission(c.Request.Context(), "*") {
-			c.JSON(http.StatusForbidden, gin.H{"error": "system-admin required for public templates"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "system-admin required for public templates")
 			return
 		}
 		scope = "public"
 		teamID = ""
 	} else if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team_id is required for private templates"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "team_id is required for private templates")
 		return
 	}
 
 	templateID, err := naming.TemplateIDFromName(req.TemplateName)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
@@ -149,11 +146,11 @@ func (s *Server) createTemplate(c *gin.Context) {
 	existing, err := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to check existing template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create template"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to create template")
 		return
 	}
 	if existing != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "template already exists"})
+		spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "template already exists")
 		return
 	}
 
@@ -168,9 +165,7 @@ func (s *Server) createTemplate(c *gin.Context) {
 
 	if err := s.repo.CreateTemplate(c.Request.Context(), template); err != nil {
 		s.logger.Error("Failed to create template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to create template",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to create template")
 		return
 	}
 
@@ -189,9 +184,9 @@ func (s *Server) createTemplate(c *gin.Context) {
 	// Get the created template to return with timestamps
 	created, _ := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if created != nil {
-		c.JSON(http.StatusCreated, created)
+		spec.JSONSuccess(c, http.StatusCreated, created)
 	} else {
-		c.JSON(http.StatusCreated, template)
+		spec.JSONSuccess(c, http.StatusCreated, template)
 	}
 }
 
@@ -199,19 +194,19 @@ func (s *Server) createTemplate(c *gin.Context) {
 func (s *Server) updateTemplate(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
 	var req TemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body: "+err.Error())
 		return
 	}
 
@@ -219,13 +214,13 @@ func (s *Server) updateTemplate(c *gin.Context) {
 	teamID := claims.TeamID
 	if req.Public != nil && *req.Public {
 		if !internalauth.HasPermission(c.Request.Context(), "*") {
-			c.JSON(http.StatusForbidden, gin.H{"error": "system-admin required for public templates"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "system-admin required for public templates")
 			return
 		}
 		scope = "public"
 		teamID = ""
 	} else if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team_id is required for private templates"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "team_id is required for private templates")
 		return
 	}
 
@@ -233,11 +228,11 @@ func (s *Server) updateTemplate(c *gin.Context) {
 	existing, err := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to get template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update template"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to update template")
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "template not found")
 		return
 	}
 
@@ -245,7 +240,7 @@ func (s *Server) updateTemplate(c *gin.Context) {
 		req.TemplateName = &existing.TemplateName
 	}
 	if err := naming.ValidateTemplateName(*req.TemplateName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
@@ -260,9 +255,7 @@ func (s *Server) updateTemplate(c *gin.Context) {
 
 	if err := s.repo.UpdateTemplate(c.Request.Context(), template); err != nil {
 		s.logger.Error("Failed to update template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to update template",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to update template")
 		return
 	}
 
@@ -281,9 +274,9 @@ func (s *Server) updateTemplate(c *gin.Context) {
 	// Get the updated template to return with timestamps
 	updated, _ := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if updated != nil {
-		c.JSON(http.StatusOK, updated)
+		spec.JSONSuccess(c, http.StatusOK, updated)
 	} else {
-		c.JSON(http.StatusOK, template)
+		spec.JSONSuccess(c, http.StatusOK, template)
 	}
 }
 
@@ -291,13 +284,13 @@ func (s *Server) updateTemplate(c *gin.Context) {
 func (s *Server) deleteTemplate(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
@@ -305,7 +298,7 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	if v := c.Query("public"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid public query param"})
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid public query param")
 			return
 		}
 		public = b
@@ -315,13 +308,13 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	teamID := claims.TeamID
 	if public {
 		if !internalauth.HasPermission(c.Request.Context(), "*") {
-			c.JSON(http.StatusForbidden, gin.H{"error": "system-admin required for public templates"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "system-admin required for public templates")
 			return
 		}
 		scope = "public"
 		teamID = ""
 	} else if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team_id is required for private templates"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "team_id is required for private templates")
 		return
 	}
 
@@ -329,11 +322,11 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	existing, err := s.repo.GetTemplate(c.Request.Context(), scope, teamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to get template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete template"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete template")
 		return
 	}
 	if existing == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "template not found")
 		return
 	}
 
@@ -341,7 +334,7 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	allocations, err := s.repo.ListAllocationsByTemplate(c.Request.Context(), scope, teamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to get template allocations", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete template"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete template")
 		return
 	}
 
@@ -376,16 +369,14 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	// Delete allocations from database
 	if err := s.repo.DeleteAllocationsByTemplate(c.Request.Context(), scope, teamID, templateID); err != nil {
 		s.logger.Error("Failed to delete template allocations", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete template"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete template")
 		return
 	}
 
 	// Delete template from database
 	if err := s.repo.DeleteTemplate(c.Request.Context(), scope, teamID, templateID); err != nil {
 		s.logger.Error("Failed to delete template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to delete template",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete template")
 		return
 	}
 
@@ -406,20 +397,20 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	if len(cleanupErrors) > 0 {
 		response["cleanup_warnings"] = cleanupErrors
 	}
-	c.JSON(http.StatusOK, response)
+	spec.JSONSuccess(c, http.StatusOK, response)
 }
 
 // getTemplateAllocations gets the allocations for a template
 func (s *Server) getTemplateAllocations(c *gin.Context) {
 	templateID := c.Param("id")
 	if templateID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template_id is required")
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
@@ -428,7 +419,7 @@ func (s *Server) getTemplateAllocations(c *gin.Context) {
 	if v := c.Query("public"); v != "" {
 		public, err := strconv.ParseBool(v)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid public query param"})
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid public query param")
 			return
 		}
 		if public {
@@ -439,20 +430,18 @@ func (s *Server) getTemplateAllocations(c *gin.Context) {
 
 	// Default behavior: private-only for allocations unless public=true is explicitly requested.
 	if scope == "team" && teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team_id is required for private templates"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "team_id is required for private templates")
 		return
 	}
 
 	allocations, err := s.repo.ListAllocationsByTemplate(c.Request.Context(), scope, teamID, templateID)
 	if err != nil {
 		s.logger.Error("Failed to get template allocations", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to get template allocations",
-		})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get template allocations")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"allocations": allocations,
 		"count":       len(allocations),
 	})

@@ -11,6 +11,7 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/gateway/auth/oidc"
 	"github.com/sandbox0-ai/infra/pkg/gateway/db"
 	"github.com/sandbox0-ai/infra/pkg/gateway/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +59,7 @@ type LoginResponse struct {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
@@ -74,7 +75,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			status = http.StatusForbidden
 		}
 
-		c.JSON(status, gin.H{"error": err.Error()})
+		code := spec.CodeUnauthorized
+		if status == http.StatusForbidden {
+			code = spec.CodeForbidden
+		}
+		spec.JSONError(c, status, code, err.Error())
 		return
 	}
 
@@ -86,7 +91,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	teamRole, err := h.resolveTeamRole(c.Request.Context(), teamID, user.ID)
 	if err != nil {
 		h.logger.Warn("Failed to resolve team role for login", zap.Error(err))
-		c.JSON(http.StatusForbidden, gin.H{"error": "user is not a member of the selected team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "user is not a member of the selected team")
 		return
 	}
 
@@ -101,11 +106,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	)
 	if err != nil {
 		h.logger.Error("Failed to issue tokens", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue tokens"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to issue tokens")
 		return
 	}
 
-	c.JSON(http.StatusOK, LoginResponse{
+	spec.JSONSuccess(c, http.StatusOK, LoginResponse{
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
 		ExpiresAt:    tokens.ExpiresAt.Unix(),
@@ -124,7 +129,7 @@ type RegisterRequest struct {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
@@ -138,7 +143,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			status = http.StatusConflict
 		}
 
-		c.JSON(status, gin.H{"error": err.Error()})
+		code := spec.CodeBadRequest
+		if status == http.StatusForbidden {
+			code = spec.CodeForbidden
+		} else if status == http.StatusConflict {
+			code = spec.CodeConflict
+		}
+		spec.JSONError(c, status, code, err.Error())
 		return
 	}
 
@@ -150,7 +161,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	teamRole, err := h.resolveTeamRole(c.Request.Context(), teamID, user.ID)
 	if err != nil {
 		h.logger.Warn("Failed to resolve team role for register", zap.Error(err))
-		c.JSON(http.StatusForbidden, gin.H{"error": "user is not a member of the selected team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "user is not a member of the selected team")
 		return
 	}
 
@@ -165,11 +176,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	)
 	if err != nil {
 		h.logger.Error("Failed to issue tokens", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue tokens"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to issue tokens")
 		return
 	}
 
-	c.JSON(http.StatusCreated, LoginResponse{
+	spec.JSONSuccess(c, http.StatusCreated, LoginResponse{
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
 		ExpiresAt:    tokens.ExpiresAt.Unix(),
@@ -186,21 +197,21 @@ type RefreshRequest struct {
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
 	// Validate refresh token
 	claims, err := h.jwtIssuer.ValidateRefreshToken(req.RefreshToken)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "invalid refresh token")
 		return
 	}
 
 	// Get user
 	user, err := h.repo.GetUserByID(c.Request.Context(), claims.UserID)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "user not found")
 		return
 	}
 
@@ -212,7 +223,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	teamRole, err := h.resolveTeamRole(c.Request.Context(), teamID, user.ID)
 	if err != nil {
 		h.logger.Warn("Failed to resolve team role for refresh", zap.Error(err))
-		c.JSON(http.StatusForbidden, gin.H{"error": "user is not a member of the selected team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "user is not a member of the selected team")
 		return
 	}
 
@@ -227,11 +238,11 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	)
 	if err != nil {
 		h.logger.Error("Failed to issue tokens", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue tokens"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to issue tokens")
 		return
 	}
 
-	c.JSON(http.StatusOK, LoginResponse{
+	spec.JSONSuccess(c, http.StatusOK, LoginResponse{
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
 		ExpiresAt:    tokens.ExpiresAt.Unix(),
@@ -249,13 +260,13 @@ type ChangePasswordRequest struct {
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
@@ -265,28 +276,32 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		if errors.Is(err, builtin.ErrInvalidCredentials) {
 			status = http.StatusUnauthorized
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		code := spec.CodeBadRequest
+		if status == http.StatusUnauthorized {
+			code = spec.CodeUnauthorized
+		}
+		spec.JSONError(c, status, code, err.Error())
 		return
 	}
 
 	// Optionally revoke all refresh tokens
 	_ = h.repo.RevokeAllUserRefreshTokens(c.Request.Context(), authCtx.UserID)
 
-	c.JSON(http.StatusOK, gin.H{"message": "password changed successfully"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "password changed successfully"})
 }
 
 // Logout handles user logout
 func (h *AuthHandler) Logout(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil {
-		c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+		spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "logged out"})
 		return
 	}
 
 	// Revoke all refresh tokens for the user
 	_ = h.repo.RevokeAllUserRefreshTokens(c.Request.Context(), authCtx.UserID)
 
-	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "logged out"})
 }
 
 func (h *AuthHandler) resolveTeamRole(ctx context.Context, teamID, userID string) (string, error) {
@@ -314,7 +329,11 @@ func (h *AuthHandler) OIDCLogin(c *gin.Context) {
 		if errors.Is(err, oidc.ErrProviderNotFound) {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		code := spec.CodeBadRequest
+		if status == http.StatusNotFound {
+			code = spec.CodeNotFound
+		}
+		spec.JSONError(c, status, code, err.Error())
 		return
 	}
 
@@ -332,7 +351,7 @@ func (h *AuthHandler) OIDCCallback(c *gin.Context) {
 		if errorMsg == "" {
 			errorMsg = "missing code or state"
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": errorMsg})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, errorMsg)
 		return
 	}
 
@@ -342,7 +361,7 @@ func (h *AuthHandler) OIDCCallback(c *gin.Context) {
 			zap.String("provider", providerID),
 			zap.Error(err),
 		)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, err.Error())
 		return
 	}
 
@@ -354,7 +373,7 @@ func (h *AuthHandler) OIDCCallback(c *gin.Context) {
 	teamRole, err := h.resolveTeamRole(c.Request.Context(), teamID, user.ID)
 	if err != nil {
 		h.logger.Warn("Failed to resolve team role for OIDC login", zap.Error(err))
-		c.JSON(http.StatusForbidden, gin.H{"error": "user is not a member of the selected team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "user is not a member of the selected team")
 		return
 	}
 
@@ -369,12 +388,12 @@ func (h *AuthHandler) OIDCCallback(c *gin.Context) {
 	)
 	if err != nil {
 		h.logger.Error("Failed to issue tokens", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue tokens"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to issue tokens")
 		return
 	}
 
 	// Return tokens as JSON (frontend should handle redirect)
-	c.JSON(http.StatusOK, LoginResponse{
+	spec.JSONSuccess(c, http.StatusOK, LoginResponse{
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
 		ExpiresAt:    tokens.ExpiresAt.Unix(),
@@ -404,5 +423,5 @@ func (h *AuthHandler) GetAuthProviders(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"providers": providers})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"providers": providers})
 }

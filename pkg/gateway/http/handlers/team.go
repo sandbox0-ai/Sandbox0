@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/pkg/gateway/db"
 	"github.com/sandbox0-ai/infra/pkg/gateway/middleware"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"go.uber.org/zap"
 )
 
@@ -28,18 +29,18 @@ func NewTeamHandler(repo *db.Repository, logger *zap.Logger) *TeamHandler {
 func (h *TeamHandler) ListTeams(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
 	teams, err := h.repo.GetTeamsByUserID(c.Request.Context(), authCtx.UserID)
 	if err != nil {
 		h.logger.Error("Failed to get teams", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get teams"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get teams")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"teams": teams})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"teams": teams})
 }
 
 // CreateTeamRequest is the request body for creating a team
@@ -52,13 +53,13 @@ type CreateTeamRequest struct {
 func (h *TeamHandler) CreateTeam(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
 	var req CreateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
@@ -70,11 +71,11 @@ func (h *TeamHandler) CreateTeam(c *gin.Context) {
 
 	if err := h.repo.CreateTeam(c.Request.Context(), team); err != nil {
 		if errors.Is(err, db.ErrTeamAlreadyExists) {
-			c.JSON(http.StatusConflict, gin.H{"error": "team with this slug already exists"})
+			spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "team with this slug already exists")
 			return
 		}
 		h.logger.Error("Failed to create team", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create team"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to create team")
 		return
 	}
 
@@ -88,14 +89,14 @@ func (h *TeamHandler) CreateTeam(c *gin.Context) {
 		h.logger.Warn("Failed to add creator as member", zap.Error(err))
 	}
 
-	c.JSON(http.StatusCreated, team)
+	spec.JSONSuccess(c, http.StatusCreated, team)
 }
 
 // GetTeam returns a specific team
 func (h *TeamHandler) GetTeam(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -105,26 +106,26 @@ func (h *TeamHandler) GetTeam(c *gin.Context) {
 	_, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not a member of this team"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
 		h.logger.Error("Failed to check membership", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check membership"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check membership")
 		return
 	}
 
 	team, err := h.repo.GetTeamByID(c.Request.Context(), teamID)
 	if err != nil {
 		if errors.Is(err, db.ErrTeamNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "team not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "team not found")
 			return
 		}
 		h.logger.Error("Failed to get team", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get team"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get team")
 		return
 	}
 
-	c.JSON(http.StatusOK, team)
+	spec.JSONSuccess(c, http.StatusOK, team)
 }
 
 // UpdateTeamRequest is the request body for updating a team
@@ -137,7 +138,7 @@ type UpdateTeamRequest struct {
 func (h *TeamHandler) UpdateTeam(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -147,33 +148,33 @@ func (h *TeamHandler) UpdateTeam(c *gin.Context) {
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not a member of this team"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
 		h.logger.Error("Failed to check membership", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check membership"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check membership")
 		return
 	}
 
 	if member.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only admins can update team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "only admins can update team")
 		return
 	}
 
 	var req UpdateTeamRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
 	team, err := h.repo.GetTeamByID(c.Request.Context(), teamID)
 	if err != nil {
 		if errors.Is(err, db.ErrTeamNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "team not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "team not found")
 			return
 		}
 		h.logger.Error("Failed to get team", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get team"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get team")
 		return
 	}
 
@@ -186,22 +187,22 @@ func (h *TeamHandler) UpdateTeam(c *gin.Context) {
 
 	if err := h.repo.UpdateTeam(c.Request.Context(), team); err != nil {
 		if errors.Is(err, db.ErrTeamAlreadyExists) {
-			c.JSON(http.StatusConflict, gin.H{"error": "team with this slug already exists"})
+			spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "team with this slug already exists")
 			return
 		}
 		h.logger.Error("Failed to update team", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update team"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to update team")
 		return
 	}
 
-	c.JSON(http.StatusOK, team)
+	spec.JSONSuccess(c, http.StatusOK, team)
 }
 
 // DeleteTeam deletes a team
 func (h *TeamHandler) DeleteTeam(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -211,33 +212,33 @@ func (h *TeamHandler) DeleteTeam(c *gin.Context) {
 	team, err := h.repo.GetTeamByID(c.Request.Context(), teamID)
 	if err != nil {
 		if errors.Is(err, db.ErrTeamNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "team not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "team not found")
 			return
 		}
 		h.logger.Error("Failed to get team", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get team"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get team")
 		return
 	}
 
 	if team.OwnerID == nil || *team.OwnerID != authCtx.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only team owner can delete team"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "only team owner can delete team")
 		return
 	}
 
 	if err := h.repo.DeleteTeam(c.Request.Context(), teamID); err != nil {
 		h.logger.Error("Failed to delete team", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete team"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete team")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "team deleted"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "team deleted"})
 }
 
 // ListTeamMembers returns all members of a team
 func (h *TeamHandler) ListTeamMembers(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -247,22 +248,22 @@ func (h *TeamHandler) ListTeamMembers(c *gin.Context) {
 	_, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not a member of this team"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
 		h.logger.Error("Failed to check membership", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check membership"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check membership")
 		return
 	}
 
 	members, err := h.repo.GetTeamMembers(c.Request.Context(), teamID)
 	if err != nil {
 		h.logger.Error("Failed to get members", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get members"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to get members")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"members": members})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"members": members})
 }
 
 // AddTeamMemberRequest is the request body for adding a team member
@@ -275,7 +276,7 @@ type AddTeamMemberRequest struct {
 func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -285,22 +286,22 @@ func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not a member of this team"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
 		h.logger.Error("Failed to check membership", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check membership"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check membership")
 		return
 	}
 
 	if member.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only admins can add members"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "only admins can add members")
 		return
 	}
 
 	var req AddTeamMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
@@ -308,11 +309,11 @@ func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 	user, err := h.repo.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		if errors.Is(err, db.ErrUserNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "user not found")
 			return
 		}
 		h.logger.Error("Failed to find user", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to find user"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to find user")
 		return
 	}
 
@@ -325,15 +326,15 @@ func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 
 	if err := h.repo.AddTeamMember(c.Request.Context(), newMember); err != nil {
 		if errors.Is(err, db.ErrAlreadyMember) {
-			c.JSON(http.StatusConflict, gin.H{"error": "user is already a member"})
+			spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "user is already a member")
 			return
 		}
 		h.logger.Error("Failed to add member", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add member"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to add member")
 		return
 	}
 
-	c.JSON(http.StatusCreated, newMember)
+	spec.JSONSuccess(c, http.StatusCreated, newMember)
 }
 
 // UpdateTeamMemberRequest is the request body for updating a team member
@@ -345,7 +346,7 @@ type UpdateTeamMemberRequest struct {
 func (h *TeamHandler) UpdateTeamMember(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -356,43 +357,43 @@ func (h *TeamHandler) UpdateTeamMember(c *gin.Context) {
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not a member of this team"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
 		h.logger.Error("Failed to check membership", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check membership"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check membership")
 		return
 	}
 
 	if member.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only admins can update members"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "only admins can update members")
 		return
 	}
 
 	var req UpdateTeamMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
 	}
 
 	if err := h.repo.UpdateTeamMemberRole(c.Request.Context(), teamID, userID, req.Role); err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "member not found")
 			return
 		}
 		h.logger.Error("Failed to update member", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update member"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to update member")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "member updated"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "member updated"})
 }
 
 // RemoveTeamMember removes a member from a team
 func (h *TeamHandler) RemoveTeamMember(c *gin.Context) {
 	authCtx := middleware.GetAuthContext(c)
 	if authCtx == nil || authCtx.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "not authenticated")
 		return
 	}
 
@@ -403,16 +404,16 @@ func (h *TeamHandler) RemoveTeamMember(c *gin.Context) {
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "not a member of this team"})
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
 		h.logger.Error("Failed to check membership", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check membership"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check membership")
 		return
 	}
 
 	if member.Role != "admin" && userID != authCtx.UserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only admins can remove other members"})
+		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "only admins can remove other members")
 		return
 	}
 
@@ -421,7 +422,7 @@ func (h *TeamHandler) RemoveTeamMember(c *gin.Context) {
 		members, err := h.repo.GetTeamMembers(c.Request.Context(), teamID)
 		if err != nil {
 			h.logger.Error("Failed to get members", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check team admins"})
+			spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to check team admins")
 			return
 		}
 
@@ -433,20 +434,20 @@ func (h *TeamHandler) RemoveTeamMember(c *gin.Context) {
 		}
 
 		if adminCount <= 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot remove the last admin"})
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "cannot remove the last admin")
 			return
 		}
 	}
 
 	if err := h.repo.RemoveTeamMember(c.Request.Context(), teamID, userID); err != nil {
 		if errors.Is(err, db.ErrMemberNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "member not found")
 			return
 		}
 		h.logger.Error("Failed to remove member", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove member"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to remove member")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "member removed"})
+	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "member removed"})
 }

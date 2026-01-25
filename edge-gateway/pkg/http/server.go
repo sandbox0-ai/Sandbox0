@@ -17,6 +17,7 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/gateway/db"
 	"github.com/sandbox0-ai/infra/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/infra/pkg/gateway/public"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 	"go.uber.org/zap"
@@ -239,9 +240,7 @@ func (s *Server) injectInternalTokenForTarget(target string) gin.HandlerFunc {
 				zap.String("target", target),
 				zap.Error(err),
 			)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": "internal server error",
-			})
+			spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 			return
 		}
 
@@ -295,7 +294,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Health check handlers
 func (s *Server) healthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status":    "healthy",
 		"timestamp": time.Now().Unix(),
 	})
@@ -304,14 +303,13 @@ func (s *Server) healthCheck(c *gin.Context) {
 func (s *Server) readinessCheck(c *gin.Context) {
 	// Check database connectivity
 	if err := s.pool.Ping(c.Request.Context()); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "database unavailable", gin.H{
 			"status": "not ready",
-			"error":  "database unavailable",
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
 	})

@@ -1,29 +1,17 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
-)
 
-// ErrorResponse represents an error response.
-type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
-}
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
+)
 
 // writeJSON writes a JSON response.
 func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	_ = spec.WriteSuccess(w, status, data)
 }
 
 // writeError writes an error response.
 func writeError(w http.ResponseWriter, status int, errCode string, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{
-		Error:   errCode,
-		Message: message,
-	})
+	_ = spec.WriteError(w, status, errCode, message)
 }

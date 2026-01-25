@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/scheduler/pkg/db"
@@ -23,41 +24,41 @@ type SandboxClaimRequest struct {
 func (s *Server) createSandbox(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "failed to read request body")
 		return
 	}
 
 	var req SandboxClaimRequest
 	if len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, &req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 			return
 		}
 	}
 	if req.Template == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "template is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "template is required")
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
 	selected, template, selectedBy, err := s.selectClusterForTemplate(c, req.Template, claims.TeamID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, err.Error())
 		return
 	}
 	if selected == nil || template == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no clusters available for template"})
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "no clusters available for template")
 		return
 	}
 
 	if s.internalAuthGen == nil {
 		s.logger.Error("Internal auth generator not configured")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication not configured"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication not configured")
 		return
 	}
 
@@ -71,7 +72,7 @@ func (s *Server) createSandbox(c *gin.Context) {
 	)
 	if err != nil {
 		s.logger.Error("Failed to generate internal token for internal-gateway", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -86,7 +87,7 @@ func (s *Server) createSandbox(c *gin.Context) {
 	router, err := s.getInternalGatewayProxy(selected.InternalGatewayURL)
 	if err != nil {
 		s.logger.Error("Failed to get internal gateway proxy", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to route sandbox"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to route sandbox")
 		return
 	}
 
@@ -102,35 +103,35 @@ func (s *Server) createSandbox(c *gin.Context) {
 func (s *Server) proxySandbox(c *gin.Context) {
 	sandboxID := c.Param("id")
 	if sandboxID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sandbox_id is required"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	if claims == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authentication"})
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
 		return
 	}
 
 	parsed, err := naming.ParseSandboxName(sandboxID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sandbox_id"})
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid sandbox_id")
 		return
 	}
 
 	cluster, err := s.getClusterByID(c.Request.Context(), parsed.ClusterID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, err.Error())
 		return
 	}
 	if cluster == nil || !cluster.Enabled {
-		c.JSON(http.StatusNotFound, gin.H{"error": "cluster not found"})
+		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "cluster not found")
 		return
 	}
 
 	if s.internalAuthGen == nil {
 		s.logger.Error("Internal auth generator not configured")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication not configured"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication not configured")
 		return
 	}
 
@@ -144,7 +145,7 @@ func (s *Server) proxySandbox(c *gin.Context) {
 	)
 	if err != nil {
 		s.logger.Error("Failed to generate internal token for internal-gateway", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal authentication failed"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "internal authentication failed")
 		return
 	}
 
@@ -157,7 +158,7 @@ func (s *Server) proxySandbox(c *gin.Context) {
 	router, err := s.getInternalGatewayProxy(cluster.InternalGatewayURL)
 	if err != nil {
 		s.logger.Error("Failed to get internal gateway proxy", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to route sandbox"})
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to route sandbox")
 		return
 	}
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 )
@@ -23,19 +24,19 @@ func (s *Server) createSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	// Get claims from context (populated by middleware)
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	var req createSandboxVolumeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
 		return
 	}
 
 	teamId, userId := claims.TeamID, claims.UserID
 	if teamId == "" || userId == "" {
-		http.Error(w, "team_id and user_id are required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "team_id and user_id are required")
 		return
 	}
 
@@ -62,88 +63,84 @@ func (s *Server) createSandboxVolume(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.repo.CreateSandboxVolume(r.Context(), vol); err != nil {
 		s.logger.WithError(err).Error("Failed to create sandbox volume")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(vol)
+	_ = spec.WriteSuccess(w, http.StatusCreated, vol)
 }
 
 func (s *Server) listSandboxVolumes(w http.ResponseWriter, r *http.Request) {
 	// Get claims from context
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	// Use team_id from trusted token
 	teamID := claims.TeamID
 	if teamID == "" {
-		http.Error(w, "team_id is required in token", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "team_id is required in token")
 		return
 	}
 
 	volumes, err := s.repo.ListSandboxVolumesByTeam(r.Context(), teamID)
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to list sandbox volumes")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(volumes)
+	_ = spec.WriteSuccess(w, http.StatusOK, volumes)
 }
 
 func (s *Server) getSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	// Get claims from context
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	id := r.PathValue("id")
 	if id == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "id is required")
 		return
 	}
 
 	vol, err := s.repo.GetSandboxVolume(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			http.Error(w, "not found", http.StatusNotFound)
+			_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "not found")
 			return
 		}
 		s.logger.WithError(err).Error("Failed to get sandbox volume")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 		return
 	}
 
 	// Check if the volume belongs to the requesting team
 	if vol.TeamID != claims.TeamID {
 		s.logger.WithField("vol_team", vol.TeamID).WithField("req_team", claims.TeamID).Warn("Unauthorized access attempt to sandbox volume")
-		http.Error(w, "not found", http.StatusNotFound) // Don't reveal existence
+		_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "not found") // Don't reveal existence
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(vol)
+	_ = spec.WriteSuccess(w, http.StatusOK, vol)
 }
 
 func (s *Server) deleteSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	// Get claims from context
 	claims := internalauth.ClaimsFromContext(r.Context())
 	if claims == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		_ = spec.WriteError(w, http.StatusUnauthorized, spec.CodeUnauthorized, "unauthorized")
 		return
 	}
 
 	id := r.PathValue("id")
 	if id == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "id is required")
 		return
 	}
 
@@ -151,18 +148,18 @@ func (s *Server) deleteSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	vol, err := s.repo.GetSandboxVolume(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			http.Error(w, "not found", http.StatusNotFound)
+			_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "not found")
 			return
 		}
 		s.logger.WithError(err).Error("Failed to get sandbox volume")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 		return
 	}
 
 	// Check if the volume belongs to the requesting team
 	if vol.TeamID != claims.TeamID {
 		s.logger.WithField("vol_team", vol.TeamID).WithField("req_team", claims.TeamID).Warn("Unauthorized delete attempt to sandbox volume")
-		http.Error(w, "not found", http.StatusNotFound) // Don't reveal existence
+		_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "not found") // Don't reveal existence
 		return
 	}
 
@@ -172,17 +169,14 @@ func (s *Server) deleteSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	mounts, err := s.repo.GetActiveMounts(r.Context(), id, heartbeatTimeout)
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to check active mounts")
-		http.Error(w, "failed to check active mounts", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "failed to check active mounts")
 		return
 	}
 
 	if len(mounts) > 0 {
 		// Volume has active mounts, cannot delete
 		s.logger.WithField("volume_id", id).WithField("active_mounts", len(mounts)).Warn("Attempted to delete volume with active mounts")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{
-			"error":         "volume has active mounts",
+		_ = spec.WriteError(w, http.StatusConflict, spec.CodeConflict, "volume has active mounts", map[string]any{
 			"active_mounts": len(mounts),
 			"mounts":        mounts,
 		})
@@ -192,14 +186,14 @@ func (s *Server) deleteSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	// No active mounts, proceed with deletion
 	if err := s.repo.DeleteSandboxVolume(r.Context(), id); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			http.Error(w, "not found", http.StatusNotFound)
+			_ = spec.WriteError(w, http.StatusNotFound, spec.CodeNotFound, "not found")
 			return
 		}
 		s.logger.WithError(err).Error("Failed to delete sandbox volume")
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 		return
 	}
 
 	s.logger.WithField("volume_id", id).WithField("team_id", vol.TeamID).Info("Sandbox volume deleted")
-	w.WriteHeader(http.StatusNoContent)
+	_ = spec.WriteSuccess(w, http.StatusOK, map[string]bool{"deleted": true})
 }
