@@ -44,6 +44,12 @@ func (r *Sandbox0InfraReconciler) getImageRepo(ctx context.Context) string {
 func (r *Sandbox0InfraReconciler) getImagePullPolicy(ctx context.Context) *corev1.PullPolicy {
 	logger := log.FromContext(ctx)
 
+	if localDev := r.getLocalDevConfig(ctx); localDev.EnablePortForward {
+		// In local dev mode, use IfNotPresent because images with the 'latest' tag use 'Always' pull policy by default.
+		policy := corev1.PullIfNotPresent
+		return &policy
+	}
+
 	config, err := operatorconfig.LoadOperatorConfig(operatorconfig.DefaultConfigPath)
 	if err != nil {
 		logger.Error(err, "Failed to load operator config")

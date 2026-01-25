@@ -171,46 +171,9 @@ func (r *ResourceManager) EnsureDeploymentReady(ctx context.Context, infra *infr
 		return nil
 	}
 	if deploy.Status.ReadyReplicas < desired {
-		message := fmt.Sprintf("deployment %q not ready: %d/%d ready", name, deploy.Status.ReadyReplicas, desired)
-		if podMessage, err := r.getDeploymentPodIssue(ctx, infra.Namespace, deploy); err == nil && podMessage != "" {
-			message = fmt.Sprintf("%s (%s)", message, podMessage)
-		}
-		return fmt.Errorf("%s", message)
+		return fmt.Errorf("deployment %q not ready: %d/%d ready", name, deploy.Status.ReadyReplicas, desired)
 	}
-
 	return nil
-}
-
-func (r *ResourceManager) getDeploymentPodIssue(ctx context.Context, namespace string, deploy *appsv1.Deployment) (string, error) {
-	if deploy == nil || deploy.Spec.Selector == nil {
-		return "", nil
-	}
-	if len(deploy.Spec.Selector.MatchLabels) == 0 {
-		return "", nil
-	}
-
-	pods := &corev1.PodList{}
-	if err := r.Client.List(ctx, pods, client.InNamespace(namespace), client.MatchingLabels(deploy.Spec.Selector.MatchLabels)); err != nil {
-		return "", err
-	}
-	for _, pod := range pods.Items {
-		for _, status := range pod.Status.ContainerStatuses {
-			if status.State.Waiting == nil {
-				continue
-			}
-			reason := status.State.Waiting.Reason
-			message := status.State.Waiting.Message
-			if reason == "" {
-				continue
-			}
-			if message != "" {
-				return fmt.Sprintf("pod %s: %s: %s", pod.Name, reason, message), nil
-			}
-			return fmt.Sprintf("pod %s: %s", pod.Name, reason), nil
-		}
-	}
-
-	return "", nil
 }
 
 // ReconcileDaemonSet creates or updates a daemonset.
