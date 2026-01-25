@@ -47,7 +47,6 @@ type Server struct {
 	builtinProvider *builtin.Provider
 	oidcManager     *oidc.Manager
 	jwtIssuer       *jwt.Issuer
-
 }
 
 // NewServer creates a new HTTP server

@@ -218,12 +218,11 @@ spec:
                     type: object
                   type:
                     default: builtin
-                    description: 'Type specifies the database type: builtin, postgres,
-                      or mysql'
+                    description: 'Type specifies the postgres database type: builtin,
+                      or external'
                     enum:
                     - builtin
-                    - postgres
-                    - mysql
+                    - external
                     type: string
                 type: object
               initUser:
@@ -233,7 +232,7 @@ spec:
                     description: Email is the admin user's email
                     type: string
                   enabled:
-                    default: true
+                    default: false
                     description: Enabled enables initial user creation
                     type: boolean
                   name:
@@ -434,7 +433,7 @@ spec:
                         type: string
                     type: object
                   provider:
-                    default: cilium
+                    default: noop
                     description: Provider is the network provider name (noop, cilium).
                     enum:
                     - noop
@@ -735,13 +734,59 @@ spec:
                             - edge-gateway
                             - scheduler
                             description: |-
-                              Internal authentication (for validating requests from edge-gateway and
-                              generating tokens for downstream services)
                               AllowedCallers is the list of services allowed to call internal-gateway
                               Default: ["edge-gateway"], can include "scheduler" for multi-cluster mode
                             items:
                               type: string
                             type: array
+                          authMode:
+                            default: internal
+                            description: |-
+                              Internal authentication (for validating requests from edge-gateway and
+                              generating tokens for downstream services)
+                              AuthMode controls which authentication modes are accepted on /api/v1.
+                              Allowed values: "internal", "public", "both".
+                            enum:
+                            - internal
+                            - public
+                            - both
+                            type: string
+                          baseUrl:
+                            default: http://localhost:8080
+                            description: Base URL for OIDC callbacks
+                            type: string
+                          builtInAuth:
+                            default: {}
+                            description: Built-in Authentication
+                            properties:
+                              adminOnly:
+                                description: AdminOnly restricts built-in auth to
+                                  admin accounts only
+                                type: boolean
+                              allowRegistration:
+                                description: AllowRegistration allows new users to
+                                  register
+                                type: boolean
+                              emailVerificationRequired:
+                                description: EmailVerificationRequired requires email
+                                  verification
+                                type: boolean
+                              enabled:
+                                default: true
+                                description: Enabled enables built-in email/password
+                                  authentication
+                                type: boolean
+                            type: object
+                          databaseMaxConns:
+                            default: 30
+                            type: integer
+                          databaseMinConns:
+                            default: 8
+                            type: integer
+                          defaultTeamName:
+                            default: Personal Team
+                            description: Identity and Teams
+                            type: string
                           healthCheckPeriod:
                             default: 10s
                             type: string
@@ -749,8 +794,82 @@ spec:
                             default: 8443
                             description: Server configuration
                             type: integer
+                          jwtAccessTokenTTL:
+                            default: 15m
+                            type: string
+                          jwtIssuer:
+                            default: internal-gateway
+                            type: string
+                          jwtRefreshTokenTTL:
+                            default: 168h
+                            type: string
+                          jwtSecret:
+                            description: JWT Configuration
+                            type: string
                           logLevel:
                             default: info
+                            type: string
+                          oidcProviders:
+                            description: OIDC Providers
+                            items:
+                              description: OIDCProviderConfig configures an OIDC provider.
+                              properties:
+                                autoProvision:
+                                  description: AutoProvision automatically creates
+                                    users on first login
+                                  type: boolean
+                                clientId:
+                                  description: ClientID is the OAuth client ID
+                                  type: string
+                                clientSecret:
+                                  description: ClientSecret is the OAuth client secret
+                                  type: string
+                                discoveryUrl:
+                                  description: DiscoveryURL is the OIDC discovery
+                                    URL (.well-known/openid-configuration)
+                                  type: string
+                                enabled:
+                                  description: Enabled toggles the provider
+                                  type: boolean
+                                id:
+                                  description: ID is the unique identifier for the
+                                    provider (e.g., "github", "google")
+                                  type: string
+                                name:
+                                  description: Name is the display name
+                                  type: string
+                                scopes:
+                                  default:
+                                  - openid
+                                  - email
+                                  - profile
+                                  description: Scopes are the OAuth scopes to request
+                                  items:
+                                    type: string
+                                  type: array
+                                teamMapping:
+                                  description: TeamMapping configures automatic team
+                                    assignment
+                                  properties:
+                                    defaultRole:
+                                      description: DefaultRole is the role assigned
+                                        to new users
+                                      type: string
+                                    defaultTeamId:
+                                      description: DefaultTeamID is the team to add
+                                        users to
+                                      type: string
+                                    domain:
+                                      description: Domain filters users by email domain
+                                      type: string
+                                  type: object
+                              type: object
+                            type: array
+                          oidcStateCleanupInterval:
+                            default: 5m
+                            type: string
+                          oidcStateTTL:
+                            default: 10m
                             type: string
                           procdStoragePermissions:
                             default:
@@ -763,6 +882,16 @@ spec:
                             default: 10s
                             description: Proxy configuration
                             type: string
+                          rateLimitBurst:
+                            default: 200
+                            type: integer
+                          rateLimitCleanupInterval:
+                            default: 10m
+                            type: string
+                          rateLimitRPS:
+                            default: 100
+                            description: Rate limiting
+                            type: integer
                           schedulerPermissions:
                             default:
                             - '*:*'

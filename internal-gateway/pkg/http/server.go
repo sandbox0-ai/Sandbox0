@@ -65,22 +65,30 @@ func NewServer(
 		proxyTimeout = 10 * time.Second
 	}
 
-	proxy2Mgr, err := proxy.NewRouter(
-		cfg.ManagerURL,
-		logger,
-		proxyTimeout,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create manager proxy router: %w", err)
+	var proxy2Mgr *proxy.Router
+	if strings.TrimSpace(cfg.ManagerURL) != "" {
+		var err error
+		proxy2Mgr, err = proxy.NewRouter(
+			cfg.ManagerURL,
+			logger,
+			proxyTimeout,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create manager proxy router: %w", err)
+		}
 	}
 
-	proxy2sp, err := proxy.NewRouter(
-		cfg.StorageProxyURL,
-		logger,
-		proxyTimeout,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("create storage-proxy proxy router: %w", err)
+	var proxy2sp *proxy.Router
+	if strings.TrimSpace(cfg.StorageProxyURL) != "" {
+		var err error
+		proxy2sp, err = proxy.NewRouter(
+			cfg.StorageProxyURL,
+			logger,
+			proxyTimeout,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create storage-proxy proxy router: %w", err)
+		}
 	}
 
 	// Initialize internal auth keys
@@ -123,7 +131,10 @@ func NewServer(
 	})
 
 	// Create manager client
-	managerClient := client.NewManagerClient(cfg.ManagerURL, internalAuthGen, logger, proxyTimeout)
+	var managerClient *client.ManagerClient
+	if strings.TrimSpace(cfg.ManagerURL) != "" {
+		managerClient = client.NewManagerClient(cfg.ManagerURL, internalAuthGen, logger, proxyTimeout)
+	}
 
 	var publicRepo *gatewaydb.Repository
 	var publicAuth *gatewaymiddleware.AuthMiddleware
@@ -241,6 +252,7 @@ func (s *Server) setupRoutes() {
 
 		// === Sandbox Management (→ Manager) ===
 		sandboxes := v1.Group("/sandboxes")
+		sandboxes.Use(s.managerUpstreamMiddleware())
 		{
 			sandboxes.POST("", s.authMiddleware.RequirePermission(auth.PermSandboxCreate), s.createSandbox)
 			sandboxes.GET("/:id", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.getSandbox)
@@ -292,6 +304,7 @@ func (s *Server) setupRoutes() {
 
 		// === Template Management (→ Manager) ===
 		templates := v1.Group("/templates")
+		templates.Use(s.managerUpstreamMiddleware())
 		{
 			templates.GET("", s.authMiddleware.RequirePermission(auth.PermTemplateRead), s.listTemplates)
 			templates.GET("/:id", s.authMiddleware.RequirePermission(auth.PermTemplateRead), s.getTemplate)
@@ -303,6 +316,7 @@ func (s *Server) setupRoutes() {
 
 		// === SandboxVolume Management (→ Storage Proxy) ===
 		sandboxvolumes := v1.Group("/sandboxvolumes")
+		sandboxvolumes.Use(s.storageProxyUpstreamMiddleware())
 		{
 			sandboxvolumes.POST("", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeCreate), s.createSandboxVolume)
 			sandboxvolumes.GET("", s.authMiddleware.RequirePermission(auth.PermSandboxVolumeRead), s.listSandboxVolumes)
@@ -324,8 +338,9 @@ func (s *Server) setupRoutes() {
 	// These routes are authenticated but don't require specific permissions
 	// (scheduler uses *:* permissions)
 	internal := s.router.Group("/internal/v1")
+	internal.Use(s.managerUpstreamMiddleware())
+	internal.Use(s.authMiddleware.Authenticate())
 	{
-		internal.Use(s.authMiddleware.Authenticate())
 
 		// Cluster information (→ Manager)
 		internal.GET("/cluster/summary", s.getClusterSummary)
@@ -394,6 +409,40 @@ func (s *Server) readinessCheck(c *gin.Context) {
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
 	})
+}
+
+func (s *Server) managerUpstreamMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if strings.TrimSpace(s.cfg.ManagerURL) != "" && s.proxy2Mgr != nil && s.managerClient != nil {
+			c.Next()
+			return
+		}
+
+		s.logger.Error("Manager upstream not configured",
+			zap.String("manager_url", s.cfg.ManagerURL),
+		)
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "manager upstream not configured",
+			"details": "manager_url is empty",
+		})
+	}
+}
+
+func (s *Server) storageProxyUpstreamMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if strings.TrimSpace(s.cfg.StorageProxyURL) != "" && s.proxy2sp != nil {
+			c.Next()
+			return
+		}
+
+		s.logger.Error("Storage-proxy upstream not configured",
+			zap.String("storage_proxy_url", s.cfg.StorageProxyURL),
+		)
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "storage-proxy upstream not configured",
+			"details": "storage_proxy_url is empty",
+		})
+	}
 }
 
 const (

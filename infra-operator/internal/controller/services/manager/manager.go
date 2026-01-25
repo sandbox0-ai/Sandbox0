@@ -281,8 +281,13 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 		storageProxyServiceConfig = infra.Spec.Services.StorageProxy.Service
 	}
 
-	cfg.ProcdConfig.StorageProxyBaseURL = fmt.Sprintf("%s-storage-proxy.%s.svc.cluster.local", infra.Name, infra.Namespace)
-	cfg.ProcdConfig.StorageProxyPort = int(common.ResolveServicePort(storageProxyServiceConfig, int32(storageProxyConfig.GRPCPort)))
+	if infrav1alpha1.IsStorageProxyEnabled(infra) {
+		cfg.ProcdConfig.StorageProxyBaseURL = fmt.Sprintf("%s-storage-proxy.%s.svc.cluster.local", infra.Name, infra.Namespace)
+		cfg.ProcdConfig.StorageProxyPort = int(common.ResolveServicePort(storageProxyServiceConfig, int32(storageProxyConfig.GRPCPort)))
+	} else {
+		cfg.ProcdConfig.StorageProxyBaseURL = ""
+		cfg.ProcdConfig.StorageProxyPort = 0
+	}
 
 	return cfg, nil
 }

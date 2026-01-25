@@ -143,9 +143,11 @@ func (s *Server) setupRoutes() {
 
 	// SandboxVolume handlers
 	volumeHandler := handlers.NewVolumeHandler(s.volumeManager, s.logger)
-	api.HandleFunc("/sandboxvolumes/mount", volumeHandler.Mount).Methods("POST")
-	api.HandleFunc("/sandboxvolumes/unmount", volumeHandler.Unmount).Methods("POST")
-	api.HandleFunc("/sandboxvolumes/status", volumeHandler.Status).Methods("GET")
+	volumeRouter := api.PathPrefix("/sandboxvolumes").Subrouter()
+	volumeRouter.Use(s.storageProxyUpstreamMiddleware)
+	volumeRouter.HandleFunc("/mount", volumeHandler.Mount).Methods("POST")
+	volumeRouter.HandleFunc("/unmount", volumeHandler.Unmount).Methods("POST")
+	volumeRouter.HandleFunc("/status", volumeHandler.Status).Methods("GET")
 
 	// File handlers
 	fileHandler := handlers.NewFileHandler(s.fileManager, s.logger)
@@ -285,6 +287,30 @@ func (s *Server) internalTokenMiddleware(next http.Handler) http.Handler {
 		)
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) storageProxyUpstreamMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		baseURL := strings.TrimSpace(s.cfg.StorageProxyBaseURL)
+		port := s.cfg.StorageProxyPort
+		replicas := s.cfg.StorageProxyReplicas
+		if baseURL != "" && port > 0 && replicas > 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		s.logger.Error("Storage-proxy upstream not configured",
+			zap.String("proxy_base_url", baseURL),
+			zap.Int("proxy_port", port),
+			zap.Int("proxy_replicas", replicas),
+		)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(handlers.ErrorResponse{
+			Error:   "storage_proxy_unavailable",
+			Message: fmt.Sprintf("storage-proxy upstream not configured (base_url=%q port=%d replicas=%d)", baseURL, port, replicas),
+		})
 	})
 }
 

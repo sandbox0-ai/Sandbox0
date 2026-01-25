@@ -225,18 +225,25 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 	if infra.Spec.Services != nil && infra.Spec.Services.Manager != nil {
 		managerServiceConfig = infra.Spec.Services.Manager.Service
 	}
-	managerServicePort := common.ResolveServicePort(managerServiceConfig, int32(managerConfig.HTTPPort))
-
-	managerURL := fmt.Sprintf("http://%s-manager:%d", infra.Name, managerServicePort)
-	cfg.ManagerURL = managerURL
+	if infrav1alpha1.IsManagerEnabled(infra) {
+		managerServicePort := common.ResolveServicePort(managerServiceConfig, int32(managerConfig.HTTPPort))
+		managerURL := fmt.Sprintf("http://%s-manager:%d", infra.Name, managerServicePort)
+		cfg.ManagerURL = managerURL
+	} else {
+		cfg.ManagerURL = ""
+	}
 
 	storageProxyConfig := &apiconfig.StorageProxyConfig{}
 	if infra.Spec.Services != nil && infra.Spec.Services.StorageProxy != nil && infra.Spec.Services.StorageProxy.Config != nil {
 		storageProxyConfig = infra.Spec.Services.StorageProxy.Config
 	}
-	storageProxyHTTPPort := int32(storageProxyConfig.HTTPPort)
-	storageProxyURL := fmt.Sprintf("http://%s-storage-proxy-http:%d", infra.Name, storageProxyHTTPPort)
-	cfg.StorageProxyURL = storageProxyURL
+	if infrav1alpha1.IsStorageProxyEnabled(infra) {
+		storageProxyHTTPPort := int32(storageProxyConfig.HTTPPort)
+		storageProxyURL := fmt.Sprintf("http://%s-storage-proxy-http:%d", infra.Name, storageProxyHTTPPort)
+		cfg.StorageProxyURL = storageProxyURL
+	} else {
+		cfg.StorageProxyURL = ""
+	}
 
 	if infra.Spec.InitUser != nil && infra.Spec.InitUser.Enabled {
 		password, err := common.GetSecretValue(ctx, r.Resources.Client, infra.Namespace, infra.Spec.InitUser.PasswordSecret)
