@@ -1,4 +1,4 @@
-.PHONY: all build test test-all test-integration test-integration-verbose test-e2e test-e2e-kind test-e2e-destroy test-e2e-specific lint tidy vendor clean helm-update helm-configs release docker-build docker-build-local build-local-all docker-push proto manifests
+.PHONY: all build test test-all test-integration test-integration-verbose test-e2e test-e2e-kind test-e2e-destroy test-e2e-specific lint tidy vendor clean helm-update helm-configs release docker-build docker-build-local build-local-all docker-push proto manifests apispec oapi-codegen
 
 # Tool Binaries
 LOCALBIN ?= $(shell pwd)/bin
@@ -7,6 +7,9 @@ $(LOCALBIN):
 
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
+
+OAPI_CODEGEN ?= $(LOCALBIN)/oapi-codegen
+OAPI_CODEGEN_VERSION ?= v2.4.1
 
 SERVICES := edge-gateway internal-gateway manager scheduler storage-proxy k8s-plugin procd infra-operator
 
@@ -20,13 +23,13 @@ GREEN  := \033[1;32m
 CYAN   := \033[1;36m
 RESET  := \033[0m
 
-all: manifests proto
+all: manifests proto apispec
 	@for service in $(SERVICES); do \
 		$(MAKE) build SERVICE=$$service; \
 	done
 
 # Build specific service: make build <service>
-build: manifests proto
+build: manifests proto apispec
 	@service="$(filter-out build test test-all lint tidy vendor clean helm-update docker-build docker-build-local build-local-all docker-push,$(MAKECMDGOALS))"; \
 	[ -z "$$service" ] && service="$(SERVICE)"; \
 	for s in $$service; do \
@@ -67,7 +70,7 @@ docker-push:
 	@printf "$(GREEN)Docker pushing unified infra image...$(RESET)\n"
 	docker push sandbox0ai/infra:$(TAG)
 
-build-local-all: manifests proto
+build-local-all: manifests proto apispec
 	@for service in $(SERVICES); do \
 		$(MAKE) build SERVICE=$$service BIN_DIR=$(shell pwd)/bin; \
 	done
@@ -189,6 +192,16 @@ proto:
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		storage-proxy/proto/filesystem.proto
 	@mv storage-proxy/proto/*.pb.go storage-proxy/proto/fs/
+
+.PHONY: apispec oapi-codegen
+apispec: oapi-codegen
+	@printf "$(CYAN)Generating API spec code...$(RESET)\n"
+	@PATH="$(LOCALBIN):$(PATH)" go generate ./pkg/apispec/...
+
+oapi-codegen: $(OAPI_CODEGEN)
+$(OAPI_CODEGEN): $(LOCALBIN)
+	@test -s $(LOCALBIN)/oapi-codegen && $(LOCALBIN)/oapi-codegen --version | grep -q $(OAPI_CODEGEN_VERSION) || \
+	GOBIN=$(LOCALBIN) go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION)
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN)

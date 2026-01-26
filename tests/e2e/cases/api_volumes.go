@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sandbox0-ai/infra/pkg/apispec"
 	"github.com/sandbox0-ai/infra/pkg/framework"
+	e2eutils "github.com/sandbox0-ai/infra/tests/e2e/utils"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -15,7 +17,7 @@ import (
 func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 	Describe("API volumes mode", Ordered, func() {
 		var (
-			session   *apiSession
+			session   *e2eutils.Session
 			cleanup   func()
 			sandboxID string
 		)
@@ -24,18 +26,18 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 			Expect(env).NotTo(BeNil())
 
 			var err error
-			session, cleanup, err = newAPISession(env, false)
+			session, cleanup, err = e2eutils.NewAPISession(env, false)
 			Expect(err).NotTo(HaveOccurred())
 
 			password, err := framework.GetSecretValue(env.TestCtx.Context, env.Config.Kubeconfig, env.Infra.Namespace, "admin-password", "password")
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() error {
-				return session.login(env.TestCtx.Context, "admin@localhost", password)
+				return session.Login(env.TestCtx.Context, GinkgoT(), "admin@localhost", password)
 			}).WithTimeout(2 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 
 			Eventually(func() error {
-				templates, err := session.listTemplates(env.TestCtx.Context)
+				templates, err := session.ListTemplates(env.TestCtx.Context, GinkgoT())
 				if err != nil {
 					return err
 				}
@@ -45,14 +47,14 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 				return nil
 			}).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 
-			resp, err := session.claimSandbox(env.TestCtx.Context, "default")
+			resp, err := session.ClaimSandbox(env.TestCtx.Context, GinkgoT(), "default")
 			Expect(err).NotTo(HaveOccurred())
-			sandboxID = resp.SandboxID
+			sandboxID = resp.SandboxId
 		})
 
 		AfterAll(func() {
 			if session != nil {
-				_ = session.deleteSandbox(env.TestCtx.Context, sandboxID)
+				_ = session.DeleteSandbox(env.TestCtx.Context, GinkgoT(), sandboxID)
 			}
 			if cleanup != nil {
 				cleanup()
@@ -61,32 +63,39 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 
 		Context("template lifecycle", func() {
 			It("creates, updates, and deletes templates", func() {
-				templates, err := session.listTemplates(env.TestCtx.Context)
+				templates, err := session.ListTemplates(env.TestCtx.Context, GinkgoT())
 				Expect(err).NotTo(HaveOccurred())
 				Expect(templates).NotTo(BeEmpty())
 
 				base := templates[0]
 				name := fmt.Sprintf("e2e-volumes-%d", time.Now().UnixNano())
-				newTemplate := cloneTemplateForCreate(base, name)
+				newTemplate := e2eutils.CloneTemplateForCreate(base, name)
 
-				created, err := session.createTemplate(env.TestCtx.Context, newTemplate)
+				created, err := session.CreateTemplate(env.TestCtx.Context, GinkgoT(), newTemplate)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(created).NotTo(BeNil())
-				Expect(created.Name).To(Equal(name))
+				Expect(created.Metadata).NotTo(BeNil())
+				Expect(created.Metadata.Name).NotTo(BeNil())
+				Expect(*created.Metadata.Name).To(Equal(name))
 
 				updated := *created
-				updated.Spec.Description = "e2e update"
+				Expect(updated.Spec).NotTo(BeNil())
+				Expect(updated.Spec.Pool).NotTo(BeNil())
+				desc := "e2e update"
+				updated.Spec.Description = &desc
 				updated.Spec.Pool.MaxIdle = updated.Spec.Pool.MaxIdle + 1
 				if updated.Spec.Pool.MaxIdle < updated.Spec.Pool.MinIdle {
 					updated.Spec.Pool.MaxIdle = updated.Spec.Pool.MinIdle + 1
 				}
 
-				updatedResp, err := session.updateTemplate(env.TestCtx.Context, name, updated)
+				updatedResp, err := session.UpdateTemplate(env.TestCtx.Context, GinkgoT(), name, updated)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updatedResp).NotTo(BeNil())
-				Expect(updatedResp.Spec.Description).To(Equal("e2e update"))
+				Expect(updatedResp.Spec).NotTo(BeNil())
+				Expect(updatedResp.Spec.Description).NotTo(BeNil())
+				Expect(*updatedResp.Spec.Description).To(Equal("e2e update"))
 
-				err = session.deleteTemplate(env.TestCtx.Context, name)
+				err = session.DeleteTemplate(env.TestCtx.Context, GinkgoT(), name)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -95,15 +104,15 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 			It("fetches status and refreshes sandboxes", func() {
 				Expect(sandboxID).NotTo(BeEmpty())
 
-				status, _, err := session.doAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxes/"+sandboxID, nil)
+				_, status, err := session.GetSandbox(env.TestCtx.Context, GinkgoT(), sandboxID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxes/"+sandboxID+"/status", nil)
+				_, status, err = session.GetSandboxStatus(env.TestCtx.Context, GinkgoT(), sandboxID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxes/"+sandboxID+"/refresh", nil)
+				_, status, err = session.RefreshSandbox(env.TestCtx.Context, GinkgoT(), sandboxID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 			})
@@ -111,49 +120,38 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 
 		Context("snapshot and restore", func() {
 			It("creates snapshots and restores volumes", func() {
-				createReq := map[string]any{
-					"cache_size": "512M",
+				cacheSize := "512M"
+				createReq := apispec.CreateSandboxVolumeRequest{
+					CacheSize: &cacheSize,
 				}
-				status, body, err := session.doAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxvolumes", createReq)
+				volume, status, err := session.CreateSandboxVolume(env.TestCtx.Context, GinkgoT(), createReq)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusCreated))
+				Expect(volume).NotTo(BeNil())
+				Expect(volume.Id).NotTo(BeEmpty())
 
-				volumeData, apiErr, err := decodeSpecResponse[map[string]any](body)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(apiErr).To(BeNil())
-				Expect(volumeData).NotTo(BeNil())
-
-				volumeID, _ := (*volumeData)["id"].(string)
-				Expect(volumeID).NotTo(BeEmpty())
-
-				snapReq := map[string]any{
-					"name": "e2e-snap",
+				snapReq := apispec.CreateSnapshotRequest{
+					Name: "e2e-snap",
 				}
-				status, body, err = session.doAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxvolumes/"+volumeID+"/snapshots", snapReq)
+				snapshot, status, err := session.CreateSnapshot(env.TestCtx.Context, GinkgoT(), volume.Id, snapReq)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusCreated))
+				Expect(snapshot).NotTo(BeNil())
+				Expect(snapshot.Id).NotTo(BeEmpty())
 
-				snapshotData, apiErr, err := decodeSpecResponse[map[string]any](body)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(apiErr).To(BeNil())
-				Expect(snapshotData).NotTo(BeNil())
-
-				snapshotID, _ := (*snapshotData)["id"].(string)
-				Expect(snapshotID).NotTo(BeEmpty())
-
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxvolumes/"+volumeID+"/snapshots", nil)
+				_, status, err = session.ListSnapshots(env.TestCtx.Context, GinkgoT(), volume.Id)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxvolumes/"+volumeID+"/snapshots/"+snapshotID+"/restore", nil)
+				status, err = session.RestoreSnapshot(env.TestCtx.Context, GinkgoT(), volume.Id, snapshot.Id)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodDelete, "/sandboxvolumes/"+volumeID+"/snapshots/"+snapshotID, nil)
+				status, err = session.DeleteSnapshot(env.TestCtx.Context, GinkgoT(), volume.Id, snapshot.Id)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodDelete, "/sandboxvolumes/"+volumeID, nil)
+				status, err = session.DeleteSandboxVolume(env.TestCtx.Context, GinkgoT(), volume.Id)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 			})
@@ -166,20 +164,20 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 				filePath := dirPath + "/hello.txt"
 				content := []byte("hello volumes")
 
-				status, _, err := session.doRawAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxes/"+sandboxID+"/files/"+dirPath+"?mkdir=true&recursive=true", nil, "")
+				status, err := session.CreateDirectory(env.TestCtx.Context, GinkgoT(), sandboxID, dirPath, true)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusCreated))
 
-				status, _, err = session.doRawAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxes/"+sandboxID+"/files/"+filePath, content, "text/plain")
+				status, err = session.WriteFile(env.TestCtx.Context, GinkgoT(), sandboxID, filePath, content, "")
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, body, err := session.doRawAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxes/"+sandboxID+"/files/"+filePath, nil, "")
+				body, status, err := session.ReadFile(env.TestCtx.Context, GinkgoT(), sandboxID, filePath)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 				Expect(string(body)).To(Equal(string(content)))
 
-				status, body, err = session.doRawAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxes/"+sandboxID+"/files/"+dirPath+"?list=true", nil, "")
+				body, status, err = session.ListFiles(env.TestCtx.Context, GinkgoT(), sandboxID, dirPath)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
@@ -189,25 +187,23 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 				Expect(json.Unmarshal(body, &listResp)).To(Succeed())
 				Expect(listResp.Entries).NotTo(BeEmpty())
 
-				ctxReq := map[string]any{
-					"type":    "cmd",
-					"command": []string{"/bin/sh", "-c", "sleep 30"},
+				processType := apispec.Cmd
+				command := []string{"/bin/sh", "-c", "sleep 30"}
+				ctxReq := apispec.CreateContextRequest{
+					Type:    &processType,
+					Command: &command,
 				}
-				status, body, err = session.doAPIRequest(env.TestCtx.Context, http.MethodPost, "/sandboxes/"+sandboxID+"/contexts", ctxReq)
+				ctxResp, status, err := session.CreateContext(env.TestCtx.Context, GinkgoT(), sandboxID, ctxReq)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusCreated))
+				Expect(ctxResp).NotTo(BeNil())
+				Expect(ctxResp.Id).NotTo(BeEmpty())
 
-				var ctxResp struct {
-					ID string `json:"id"`
-				}
-				Expect(json.Unmarshal(body, &ctxResp)).To(Succeed())
-				Expect(ctxResp.ID).NotTo(BeEmpty())
-
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxes/"+sandboxID+"/contexts", nil)
+				_, status, err = session.ListContexts(env.TestCtx.Context, GinkgoT(), sandboxID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 
-				status, _, err = session.doAPIRequest(env.TestCtx.Context, http.MethodDelete, "/sandboxes/"+sandboxID+"/contexts/"+ctxResp.ID, nil)
+				status, err = session.DeleteContext(env.TestCtx.Context, GinkgoT(), sandboxID, ctxResp.Id)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 			})
@@ -217,7 +213,7 @@ func registerApiVolumesSuite(env *framework.ScenarioEnv) {
 			It("returns errors for network APIs", func() {
 				Expect(sandboxID).NotTo(BeEmpty())
 
-				status, _, err := session.doAPIRequest(env.TestCtx.Context, http.MethodGet, "/sandboxes/"+sandboxID+"/network", nil)
+				_, status, _, err := session.GetNetworkPolicy(env.TestCtx.Context, GinkgoT(), sandboxID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(BeNumerically(">=", http.StatusBadRequest))
 			})
