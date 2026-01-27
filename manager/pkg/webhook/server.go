@@ -151,7 +151,8 @@ func (s *Server) validate(ar *admissionv1.AdmissionReview) *admissionv1.Admissio
 			}
 		}
 
-		if err := naming.CheckTemplate(&template); err != nil {
+		clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+		if err := naming.CheckTemplateName(clusterID, template.Name); err != nil {
 			s.logger.Warn("Template validation failed",
 				zap.String("namespace", req.Namespace),
 				zap.String("name", req.Name),

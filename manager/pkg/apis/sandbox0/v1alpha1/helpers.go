@@ -4,16 +4,26 @@ import (
 	"sort"
 
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
+	"github.com/sandbox0-ai/infra/pkg/naming"
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	procdBinVolumeName = "procd-bin"
+	procdConfigVolume  = "procd-config"
+)
+
 // buildPodSpec builds a pod spec from a template
-func BuildPodSpec(template *SandboxTemplate) corev1.PodSpec {
+func BuildPodSpec(template *SandboxTemplate, restart bool) corev1.PodSpec {
 	spec := corev1.PodSpec{
 		RestartPolicy: corev1.RestartPolicyNever,
 		Containers:    buildContainers(template),
 	}
+	if restart {
+		spec.RestartPolicy = corev1.RestartPolicyAlways
+	}
 
+	applyProcdSecretVolume(&spec, template)
 	applyProcdInit(&spec)
 
 	// Apply runtime class if specified
@@ -71,7 +81,7 @@ func buildContainer(spec *ContainerSpec, template *SandboxTemplate) corev1.Conta
 	container.Env = envVars
 	container.Command = []string{"/procd/bin/procd"}
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      "procd-bin",
+		Name:      procdBinVolumeName,
 		MountPath: "/procd/bin",
 	})
 
@@ -148,7 +158,7 @@ func applyProcdInit(spec *corev1.PodSpec) {
 	managerImage := cfg.ManagerImage
 
 	spec.Volumes = append(spec.Volumes, corev1.Volume{
-		Name: "procd-bin",
+		Name: procdBinVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
@@ -161,15 +171,100 @@ func applyProcdInit(spec *corev1.PodSpec) {
 		Command: []string{
 			"/bin/sh",
 			"-c",
-			"cp /app/procd /procd/bin/procd && chmod 0755 /procd/bin/procd",
+			"cp /usr/local/bin/procd /procd/bin/procd && chmod 0755 /procd/bin/procd",
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
-				Name:      "procd-bin",
+				Name:      procdBinVolumeName,
 				MountPath: "/procd/bin",
 			},
 		},
 	})
+}
+
+// applyProcdSecretVolume mounts the procd config Secret into the pod spec.
+// Returns true if the spec was mutated.
+func applyProcdSecretVolume(spec *corev1.PodSpec, template *SandboxTemplate) bool {
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	name, err := naming.ProcdConfigSecretName(clusterID, template.Name)
+	if err != nil {
+		return false
+	}
+
+	changed := false
+	volumeFound := false
+	for i := range spec.Volumes {
+		if spec.Volumes[i].Name != procdConfigVolume {
+			continue
+		}
+		volumeFound = true
+		if spec.Volumes[i].Secret == nil || spec.Volumes[i].Secret.SecretName != name {
+			spec.Volumes[i].Secret = &corev1.SecretVolumeSource{
+				SecretName: name,
+				Items: []corev1.KeyToPath{
+					{
+						Key:  "internal_jwt_public.key",
+						Path: "internal_jwt_public.key",
+					},
+				},
+			}
+			changed = true
+		}
+		break
+	}
+	if !volumeFound {
+		spec.Volumes = append(spec.Volumes, corev1.Volume{
+			Name: procdConfigVolume,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: name,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  "internal_jwt_public.key",
+							Path: "internal_jwt_public.key",
+						},
+					},
+				},
+			},
+		})
+		changed = true
+	}
+
+	found := false
+	for i := range spec.Containers {
+		if spec.Containers[i].Name != "procd" {
+			continue
+		}
+		found = true
+		mountFound := false
+		for j := range spec.Containers[i].VolumeMounts {
+			if spec.Containers[i].VolumeMounts[j].Name != procdConfigVolume {
+				continue
+			}
+			mountFound = true
+			mount := &spec.Containers[i].VolumeMounts[j]
+			if mount.MountPath != "/config/internal_jwt_public.key" || mount.SubPath != "internal_jwt_public.key" || !mount.ReadOnly {
+				mount.MountPath = "/config/internal_jwt_public.key"
+				mount.SubPath = "internal_jwt_public.key"
+				mount.ReadOnly = true
+				changed = true
+			}
+			break
+		}
+		if !mountFound {
+			spec.Containers[i].VolumeMounts = append(spec.Containers[i].VolumeMounts, corev1.VolumeMount{
+				Name:      procdConfigVolume,
+				MountPath: "/config/internal_jwt_public.key",
+				SubPath:   "internal_jwt_public.key",
+				ReadOnly:  true,
+			})
+			changed = true
+		}
+	}
+	if !found {
+		return changed
+	}
+	return changed
 }
 
 func convertCapabilities(caps []string) []corev1.Capability {

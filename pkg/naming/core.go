@@ -21,6 +21,16 @@ const (
 	sandboxNamePrefix = "rs"
 )
 
+const DefaultClusterID = defaultClusterID
+
+// ClusterIDOrDefault returns the cluster ID or a default value.
+func ClusterIDOrDefault(clusterID *string) string {
+	if clusterID != nil && *clusterID != "" {
+		return *clusterID
+	}
+	return defaultClusterID
+}
+
 var (
 	base32NoPadding = base32.StdEncoding.WithPadding(base32.NoPadding)
 )

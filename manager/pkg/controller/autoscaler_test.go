@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -30,6 +31,22 @@ func newTestPodLister(t *testing.T, pods ...*corev1.Pod) corelisters.PodLister {
 		}
 	}
 	return corelisters.NewPodLister(indexer)
+}
+
+func newTestReplicaSetLister(t *testing.T, sets ...*appsv1.ReplicaSet) appslisters.ReplicaSetLister {
+	t.Helper()
+	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
+		cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+	})
+	for _, rs := range sets {
+		if rs == nil {
+			continue
+		}
+		if err := indexer.Add(rs); err != nil {
+			t.Fatalf("add replicaset: %v", err)
+		}
+	}
+	return appslisters.NewReplicaSetLister(indexer)
 }
 
 func mustCreateRS(t *testing.T, client *fake.Clientset, rs *appsv1.ReplicaSet) {
@@ -73,11 +90,12 @@ func TestAutoScaler_SlowStartScaleUp(t *testing.T) {
 		},
 	}
 
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
-	k8s := fake.NewSimpleClientset()
+	k8s := fake.NewClientset()
 	mustCreateRS(t, k8s, &appsv1.ReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rsName,
@@ -108,7 +126,17 @@ func TestAutoScaler_SlowStartScaleUp(t *testing.T) {
 	}
 
 	podLister := newTestPodLister(t, activePod)
-	as := NewAutoScaler(k8s, podLister, zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        rsName,
+			Namespace:   template.Namespace,
+			Annotations: map[string]string{},
+		},
+		Spec: appsv1.ReplicaSetSpec{
+			Replicas: ptr32(1),
+		},
+	})
+	as := NewAutoScaler(k8s, podLister, rsLister, zap.NewNop())
 
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -131,7 +159,8 @@ func TestAutoScaler_ScaleUpClampedToMaxIdle(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 0, MaxIdle: 3, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -156,7 +185,11 @@ func TestAutoScaler_ScaleUpClampedToMaxIdle(t *testing.T) {
 			},
 		},
 	}
-	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: rsName, Namespace: template.Namespace, Annotations: map[string]string{}},
+		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(3)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), rsLister, zap.NewNop())
 
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -177,7 +210,8 @@ func TestAutoScaler_ScaleDownOnNoTraffic(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 2, MaxIdle: 50, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -197,7 +231,18 @@ func TestAutoScaler_ScaleDownOnNoTraffic(t *testing.T) {
 	})
 
 	// No active pods => treated as no traffic at least window size.
-	as := NewAutoScaler(k8s, newTestPodLister(t), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        rsName,
+			Namespace:   template.Namespace,
+			Annotations: map[string]string{
+				annotationAutoscaleLastScaleTime: now.Add(-10 * time.Minute).Format(time.RFC3339),
+				annotationAutoscaleLastClaimTime: now.Add(-20 * time.Minute).Format(time.RFC3339),
+			},
+		},
+		Spec: appsv1.ReplicaSetSpec{Replicas: ptr32(20)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -220,7 +265,8 @@ func TestAutoScaler_ScaleUpCooldownRespected(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 0, MaxIdle: 50, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -253,7 +299,17 @@ func TestAutoScaler_ScaleUpCooldownRespected(t *testing.T) {
 		},
 	}
 
-	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        rsName,
+			Namespace:   template.Namespace,
+			Annotations: map[string]string{
+				annotationAutoscaleLastScaleTime: now.Add(-5 * time.Second).Format(time.RFC3339),
+			},
+		},
+		Spec: appsv1.ReplicaSetSpec{Replicas: ptr32(5)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -273,7 +329,8 @@ func TestAutoScaler_ClampToMinIdle(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 7, MaxIdle: 50, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -284,7 +341,11 @@ func TestAutoScaler_ClampToMinIdle(t *testing.T) {
 		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(2)},
 	})
 
-	as := NewAutoScaler(k8s, newTestPodLister(t), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: rsName, Namespace: template.Namespace, Annotations: map[string]string{}},
+		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(2)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -304,7 +365,8 @@ func TestAutoScaler_MaxIdleLessThanMinIdle_ClampsToMinIdle(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 5, MaxIdle: 3, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -315,7 +377,11 @@ func TestAutoScaler_MaxIdleLessThanMinIdle_ClampsToMinIdle(t *testing.T) {
 		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(0)},
 	})
 
-	as := NewAutoScaler(k8s, newTestPodLister(t), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: rsName, Namespace: template.Namespace, Annotations: map[string]string{}},
+		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(0)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -337,7 +403,7 @@ func TestAutoScaler_ReplicaSetMissing_NoError(t *testing.T) {
 	}
 
 	k8s := fake.NewSimpleClientset()
-	as := NewAutoScaler(k8s, newTestPodLister(t), zap.NewNop())
+	as := NewAutoScaler(k8s, newTestPodLister(t), newTestReplicaSetLister(t), zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("expected no error when RS missing, got %v", err)
 	}
@@ -353,7 +419,8 @@ func TestAutoScaler_AutoScaleDisabled_NoChange(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 0, MaxIdle: 10, AutoScale: false},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -379,7 +446,11 @@ func TestAutoScaler_AutoScaleDisabled_NoChange(t *testing.T) {
 		},
 	}
 
-	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: rsName, Namespace: template.Namespace, Annotations: map[string]string{}},
+		Spec:       appsv1.ReplicaSetSpec{Replicas: ptr32(3)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -399,7 +470,8 @@ func TestAutoScaler_IgnoreBadOrOldClaimAnnotations(t *testing.T) {
 			Pool: v1alpha1.PoolStrategy{MinIdle: 0, MaxIdle: 50, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -448,7 +520,17 @@ func TestAutoScaler_IgnoreBadOrOldClaimAnnotations(t *testing.T) {
 		},
 	}
 
-	as := NewAutoScaler(k8s, newTestPodLister(t, badTimePod, oldPod), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rsName,
+			Namespace: template.Namespace,
+			Annotations: map[string]string{
+				annotationAutoscaleLastClaimTime: now.Add(-30 * time.Second).Format(time.RFC3339),
+			},
+		},
+		Spec: appsv1.ReplicaSetSpec{Replicas: ptr32(5)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t, badTimePod, oldPod), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -468,7 +550,8 @@ func TestAutoScaler_PersistsLastClaimTimeEvenWithoutReplicaChange(t *testing.T) 
 			Pool: v1alpha1.PoolStrategy{MinIdle: 0, MaxIdle: 10, AutoScale: true},
 		},
 	}
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		t.Fatalf("replicaset name: %v", err)
 	}
@@ -499,7 +582,15 @@ func TestAutoScaler_PersistsLastClaimTimeEvenWithoutReplicaChange(t *testing.T) 
 		},
 	}
 
-	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), zap.NewNop())
+	rsLister := newTestReplicaSetLister(t, &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        rsName,
+			Namespace:   template.Namespace,
+			Annotations: map[string]string{},
+		},
+		Spec: appsv1.ReplicaSetSpec{Replicas: ptr32(5)},
+	})
+	as := NewAutoScaler(k8s, newTestPodLister(t, activePod), rsLister, zap.NewNop())
 	if err := as.ReconcileAutoScale(ctx, template, now); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}

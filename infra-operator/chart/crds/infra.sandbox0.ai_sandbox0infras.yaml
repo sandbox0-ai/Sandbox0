@@ -1159,9 +1159,6 @@ spec:
                           shutdownTimeout:
                             default: 30s
                             type: string
-                          templateNamespace:
-                            default: sandbox0
-                            type: string
                           webhookCertPath:
                             default: /tmp/k8s-webhook-server/serving-certs/tls.crt
                             type: string

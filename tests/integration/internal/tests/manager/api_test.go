@@ -84,24 +84,28 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 	crdClient := clientsetfake.NewSimpleClientset()
 
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	err := os.WriteFile(configPath, []byte("template_namespace: sandbox0\n"), 0o600)
+	err := os.WriteFile(configPath, []byte(""), 0o600)
 	utils.RequireNoError(t, err, "write manager config")
 	t.Setenv("CONFIG_PATH", configPath)
 
 	podIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	nodeIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	configMapIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	namespaceIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	podLister := corelisters.NewPodLister(podIndexer)
 	nodeLister := corelisters.NewNodeLister(nodeIndexer)
+	configMapLister := corelisters.NewConfigMapLister(configMapIndexer)
+	namespaceLister := corelisters.NewNamespaceLister(namespaceIndexer)
 
 	templateLister := &testTemplateLister{
-		client:    crdClient,
-		namespace: "sandbox0",
+		client: crdClient,
 	}
 	logger := zap.NewNop()
 
 	sandboxService := service.NewSandboxService(
 		k8sClient,
 		podLister,
+		configMapLister,
 		templateLister,
 		nil,
 		nil,
@@ -115,7 +119,7 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 		sandboxService.SetProcdClient(opts.procdClient)
 	}
 
-	templateService := service.NewTemplateService(crdClient, templateLister, nil, logger, "sandbox0")
+	templateService := service.NewTemplateService(k8sClient, crdClient, templateLister, namespaceLister, nil, logger)
 	clusterService := service.NewClusterService(
 		k8sClient,
 		podLister,
@@ -172,12 +176,11 @@ func createInternalKeys() (internalauth.PrivateKeyType, internalauth.PublicKeyTy
 }
 
 type testTemplateLister struct {
-	client    clientset.Interface
-	namespace string
+	client clientset.Interface
 }
 
 func (t *testTemplateLister) List() ([]*v1alpha1.SandboxTemplate, error) {
-	list, err := t.client.Sandbox0V1alpha1().SandboxTemplates(t.namespace).List(context.Background(), metav1.ListOptions{})
+	list, err := t.client.Sandbox0V1alpha1().SandboxTemplates(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}

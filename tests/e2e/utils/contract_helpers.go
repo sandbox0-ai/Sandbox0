@@ -35,6 +35,9 @@ func ValidateRequestExample(t ContractT, method, path, contentType string, paylo
 		t.Fatalf("resolve operation: %v", err)
 	}
 	if operation.RequestBody == nil || operation.RequestBody.Value == nil {
+		if payload == nil {
+			return
+		}
 		t.Fatalf("request body not defined for %s %s", strings.ToUpper(method), path)
 	}
 
@@ -80,6 +83,13 @@ func ValidateResponseExample(t ContractT, method, path string, status int, conte
 	}
 
 	ct := normalizeContentType(contentType)
+	if responseRef.Value.Content == nil || len(responseRef.Value.Content) == 0 {
+		if isEmptyPayload(payload) {
+			return
+		}
+		t.Fatalf("response schema missing for %s %s (%s, %d)", strings.ToUpper(method), path, ct, status)
+	}
+
 	media := responseRef.Value.Content.Get(ct)
 	if media == nil || media.Schema == nil || media.Schema.Value == nil {
 		t.Fatalf("response schema missing for %s %s (%s, %d)", strings.ToUpper(method), path, ct, status)
@@ -205,6 +215,20 @@ func normalizePayload(contentType string, payload any) (any, error) {
 			return nil, err
 		}
 		return out, nil
+	}
+}
+
+func isEmptyPayload(payload any) bool {
+	if payload == nil {
+		return true
+	}
+	switch value := payload.(type) {
+	case []byte:
+		return len(value) == 0
+	case string:
+		return strings.TrimSpace(value) == ""
+	default:
+		return false
 	}
 }
 

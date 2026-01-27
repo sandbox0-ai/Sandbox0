@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -80,6 +81,8 @@ func (t *TemplateListerImpl) Get(namespace, name string) (*v1alpha1.SandboxTempl
 func NewOperator(
 	k8sClient kubernetes.Interface,
 	podInformer cache.SharedIndexInformer,
+	replicaSetInformer cache.SharedIndexInformer,
+	secretInformer cache.SharedIndexInformer,
 	templateInformer cache.SharedIndexInformer,
 	recorder record.EventRecorder,
 	clock TimeProvider,
@@ -91,8 +94,10 @@ func NewOperator(
 	}
 
 	podLister := corelisters.NewPodLister(podInformer.GetIndexer())
-	poolManager := NewPoolManager(k8sClient, podLister, recorder, logger)
-	autoScaler := NewAutoScaler(k8sClient, podLister, logger)
+	replicaSetLister := appslisters.NewReplicaSetLister(replicaSetInformer.GetIndexer())
+	secretLister := corelisters.NewSecretLister(secretInformer.GetIndexer())
+	poolManager := NewPoolManager(k8sClient, replicaSetLister, secretLister, recorder, logger)
+	autoScaler := NewAutoScaler(k8sClient, podLister, replicaSetLister, logger)
 
 	op := &Operator{
 		k8sClient:        k8sClient,

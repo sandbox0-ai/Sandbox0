@@ -23,9 +23,6 @@ type ManagerConfig struct {
 	// +optional
 	// +kubebuilder:default={}
 	DefaultTemplate *DefaultTemplateConfig `yaml:"default_template" json:"defaultTemplate"`
-	// +optional
-	// +kubebuilder:default="sandbox0"
-	TemplateNamespace string `yaml:"template_namespace" json:"templateNamespace"`
 	DefaultClusterId  string `yaml:"default_cluster_id" json:"-"`
 
 	// Kubernetes

@@ -110,17 +110,14 @@ func main() {
 	informerFactory := informers.NewSharedInformerFactory(k8sClient, cfg.ResyncPeriod.Duration)
 	podInformer := informerFactory.Core().V1().Pods().Informer()
 	nodeInformer := informerFactory.Core().V1().Nodes().Informer()
-
-	templateNamespace := cfg.TemplateNamespace
-	if templateNamespace == "" {
-		templateNamespace = "sandbox0"
-	}
+	secretInformer := informerFactory.Core().V1().Secrets().Informer()
+	_ = informerFactory.Core().V1().Namespaces().Informer()
+	replicaSetInformer := informerFactory.Apps().V1().ReplicaSets().Informer()
 
 	// Create CRD informer factory using generated clientset
-	crdInformerFactory := externalversions.NewSharedInformerFactoryWithOptions(
+	crdInformerFactory := externalversions.NewSharedInformerFactory(
 		crdClient,
 		cfg.ResyncPeriod.Duration,
-		externalversions.WithNamespace(templateNamespace),
 	)
 
 	// Get SandboxTemplate informer from the factory
@@ -138,6 +135,8 @@ func main() {
 	operator := controller.NewOperator(
 		k8sClient,
 		podInformer,
+		replicaSetInformer,
+		secretInformer,
 		templateInformer,
 		recorder,
 		clk,
@@ -150,6 +149,8 @@ func main() {
 	// Create listers
 	podLister := informerFactory.Core().V1().Pods().Lister()
 	nodeLister := informerFactory.Core().V1().Nodes().Lister()
+	secretLister := informerFactory.Core().V1().Secrets().Lister()
+	namespaceLister := informerFactory.Core().V1().Namespaces().Lister()
 
 	// Create network policy service for building policy annotations
 	networkPolicyService := service.NewNetworkPolicyService(service.NetworkPolicyServiceConfig{
@@ -224,12 +225,12 @@ func main() {
 		PauseMinCPU:                 cfg.PauseMinCPU,
 		ProcdPort:                   cfg.ProcdConfig.HTTPPort,
 		ProcdClientTimeout:          cfg.ProcdClientTimeout.Duration,
-		TemplateNamespace:           templateNamespace,
 	}
 
 	sandboxService := service.NewSandboxService(
 		k8sClient,
 		podLister,
+		secretLister,
 		operator.GetTemplateLister(),
 		networkPolicyService,
 		networkProvider,
@@ -241,11 +242,12 @@ func main() {
 	)
 
 	templateService := service.NewTemplateService(
+		k8sClient,
 		crdClient,
 		operator.GetTemplateLister(),
+		namespaceLister,
 		networkProvider,
 		logger,
-		templateNamespace,
 	)
 
 	// Create cluster service (for scheduler)
@@ -322,7 +324,7 @@ func main() {
 
 	// Wait for cache sync
 	logger.Info("Waiting for informer caches to sync")
-	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced, nodeInformer.HasSynced, templateInformer.HasSynced) {
+	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced, nodeInformer.HasSynced, secretInformer.HasSynced, replicaSetInformer.HasSynced, templateInformer.HasSynced) {
 		logger.Fatal("Failed to sync informer caches")
 	}
 

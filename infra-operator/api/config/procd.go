@@ -115,7 +115,11 @@ var (
 // LoadProcdConfig returns the procd configuration.
 func LoadProcdConfig() *ProcdConfig {
 	procdCfgOnce.Do(func() {
-		procdCfg = loadProcdConfig()
+		cfg := ProcdConfig{}
+		if err := applyProcdEnvOverrides(&cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to apply procd env overrides: %v\n", err)
+		}
+		procdCfg = &cfg
 	})
 	return procdCfg
 }
@@ -124,32 +128,6 @@ func LoadProcdConfig() *ProcdConfig {
 func (c *ProcdConfig) Validate() error {
 	// SandboxID and TemplateID can be empty during development
 	return nil
-}
-
-func loadProcdConfig() *ProcdConfig {
-	cfg := ProcdConfig{}
-	path := os.Getenv("CONFIG_PATH")
-	if path == "" {
-		path = "/config/config.yaml"
-	}
-
-	if path != "" {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to read procd config from %s: %v, using empty config\n", path, err)
-		} else {
-			data = []byte(os.ExpandEnv(string(data)))
-			if err := yaml.Unmarshal(data, &cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to unmarshal procd config from %s: %v, using empty config\n", path, err)
-			}
-		}
-	}
-
-	if err := applyProcdEnvOverrides(&cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to apply procd env overrides: %v\n", err)
-	}
-
-	return &cfg
 }
 
 func applyProcdEnvOverrides(cfg *ProcdConfig) error {
@@ -209,6 +187,13 @@ func setProcdFieldValue(field reflect.Value, value string, key string) error {
 			return fmt.Errorf("parse %s: %w", key, err)
 		}
 		field.SetInt(parsed)
+		return nil
+	case reflect.Bool:
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", key, err)
+		}
+		field.SetBool(parsed)
 		return nil
 	default:
 		return fmt.Errorf("unsupported field type for %s", key)

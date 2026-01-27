@@ -61,13 +61,13 @@ type SandboxServiceConfig struct {
 	PauseMinCPU                 string
 	ProcdPort                   int
 	ProcdClientTimeout          time.Duration
-	TemplateNamespace           string
 }
 
 // SandboxService handles sandbox operations
 type SandboxService struct {
 	k8sClient              kubernetes.Interface
 	podLister              corelisters.PodLister
+	secretLister           corelisters.SecretLister
 	templateLister         controller.TemplateLister
 	NetworkPolicyService   *NetworkPolicyService
 	networkProvider        network.Provider
@@ -77,7 +77,6 @@ type SandboxService struct {
 	clock                  TimeProvider
 	config                 SandboxServiceConfig
 	logger                 *zap.Logger
-	templateNamespace      string
 }
 
 // TimeProvider provides time functions, allowing for synchronized time across clusters
@@ -103,6 +102,7 @@ type TokenGenerator interface {
 func NewSandboxService(
 	k8sClient kubernetes.Interface,
 	podLister corelisters.PodLister,
+	secretLister corelisters.SecretLister,
 	templateLister controller.TemplateLister,
 	networkPolicyService *NetworkPolicyService,
 	networkProvider network.Provider,
@@ -119,14 +119,10 @@ func NewSandboxService(
 	if networkProvider == nil {
 		networkProvider = network.NewNoopProvider()
 	}
-	templateNamespace := strings.TrimSpace(config.TemplateNamespace)
-	if templateNamespace == "" {
-		templateNamespace = "sandbox0"
-	}
-
 	return &SandboxService{
 		k8sClient:              k8sClient,
 		podLister:              podLister,
+		secretLister:           secretLister,
 		templateLister:         templateLister,
 		NetworkPolicyService:   networkPolicyService,
 		networkProvider:        networkProvider,
@@ -136,7 +132,6 @@ func NewSandboxService(
 		clock:                  clock,
 		config:                 config,
 		logger:                 logger,
-		templateNamespace:      templateNamespace,
 	}
 }
 
@@ -184,7 +179,6 @@ type ClaimResponse struct {
 func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*ClaimResponse, error) {
 	start := time.Now()
 	s.logger.Info("Claiming sandbox",
-		zap.String("namespace", s.templateNamespace),
 		zap.String("template", req.Template),
 		zap.String("teamID", req.TeamID),
 	)
@@ -197,7 +191,11 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 
 	if req.TeamID != "" {
 		privateName := naming.TemplateNameForCluster(naming.ScopeTeam, req.TeamID, req.Template)
-		t, getErr := s.templateLister.Get(s.templateNamespace, privateName)
+		privateNamespace, nsErr := naming.TemplateNamespaceFromName(privateName)
+		if nsErr != nil {
+			return nil, fmt.Errorf("resolve template namespace for %s: %w", privateName, nsErr)
+		}
+		t, getErr := s.templateLister.Get(privateNamespace, privateName)
 		if getErr == nil {
 			template = t
 			resolvedName = privateName
@@ -205,10 +203,14 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 	}
 
 	if template == nil {
-		template, err = s.templateLister.Get(s.templateNamespace, req.Template)
+		publicNamespace, nsErr := naming.TemplateNamespaceFromName(req.Template)
+		if nsErr != nil {
+			return nil, fmt.Errorf("resolve template namespace for %s: %w", req.Template, nsErr)
+		}
+		template, err = s.templateLister.Get(publicNamespace, req.Template)
 		if err != nil {
 			if errors.IsNotFound(err) {
-				return nil, fmt.Errorf("template %s not found in namespace %s", req.Template, s.templateNamespace)
+				return nil, fmt.Errorf("template %s not found in namespace %s", req.Template, publicNamespace)
 			}
 			return nil, fmt.Errorf("get template: %w", err)
 		}
@@ -238,8 +240,8 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 		}
 		if errors.IsConflict(err) {
 			s.logger.Info("Idle pod is already claimed, trying again",
-				zap.String("namespace", s.templateNamespace),
-				zap.String("template", req.Template),
+				zap.String("namespace", template.Namespace),
+				zap.String("template", template.Name),
 				zap.String("teamID", req.TeamID),
 				zap.Error(err),
 			)
@@ -373,12 +375,17 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 // createNewPod creates a new pod for cold start
 func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.SandboxTemplate, req *ClaimRequest) (*corev1.Pod, error) {
 	// Simulate K8s pod name generation: rs-name + "-" + 5 random chars
-	podName, err := naming.SandboxNameForTemplate(template, utilrand.String(5))
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	podName, err := naming.SandboxName(clusterID, template.Name, utilrand.String(5))
 	if err != nil {
 		return nil, fmt.Errorf("generate sandbox name: %w", err)
 	}
+	if err := controller.EnsureProcdConfigSecret(ctx, s.k8sClient, s.secretLister, template); err != nil {
+		return nil, fmt.Errorf("ensure procd config secret: %w", err)
+	}
 
 	// Build pod spec from template
+	spec := v1alpha1.BuildPodSpec(template, false)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -396,7 +403,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 				controller.AnnotationClaimType: "cold",
 			},
 		},
-		Spec: v1alpha1.BuildPodSpec(template),
+		Spec: spec,
 	}
 
 	// Set expiration time

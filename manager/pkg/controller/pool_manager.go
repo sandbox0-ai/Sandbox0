@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 )
@@ -43,24 +44,27 @@ const (
 
 // PoolManager manages the idle pool (ReplicaSet)
 type PoolManager struct {
-	k8sClient kubernetes.Interface
-	podLister corelisters.PodLister
-	recorder  record.EventRecorder
-	logger    *zap.Logger
+	k8sClient        kubernetes.Interface
+	replicaSetLister appslisters.ReplicaSetLister
+	secretLister     corelisters.SecretLister
+	recorder         record.EventRecorder
+	logger           *zap.Logger
 }
 
 // NewPoolManager creates a new PoolManager
 func NewPoolManager(
 	k8sClient kubernetes.Interface,
-	podLister corelisters.PodLister,
+	replicaSetLister appslisters.ReplicaSetLister,
+	secretLister corelisters.SecretLister,
 	recorder record.EventRecorder,
 	logger *zap.Logger,
 ) *PoolManager {
 	return &PoolManager{
-		k8sClient: k8sClient,
-		podLister: podLister,
-		recorder:  recorder,
-		logger:    logger,
+		k8sClient:        k8sClient,
+		replicaSetLister: replicaSetLister,
+		secretLister:     secretLister,
+		recorder:         recorder,
+		logger:           logger,
 	}
 }
 
@@ -103,12 +107,16 @@ func (pm *PoolManager) ReconcilePool(ctx context.Context, template *v1alpha1.San
 
 // getOrCreateReplicaSet gets or creates the ReplicaSet for a template
 func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1alpha1.SandboxTemplate) (*appsv1.ReplicaSet, error) {
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		return nil, fmt.Errorf("generate replicaset name: %w", err)
 	}
+	if err := EnsureProcdConfigSecret(ctx, pm.k8sClient, pm.secretLister, template); err != nil {
+		return nil, fmt.Errorf("ensure procd config secret: %w", err)
+	}
 	// Try to get existing ReplicaSet
-	rs, err := pm.k8sClient.AppsV1().ReplicaSets(template.ObjectMeta.Namespace).Get(ctx, rsName, metav1.GetOptions{})
+	rs, err := pm.replicaSetLister.ReplicaSets(template.ObjectMeta.Namespace).Get(rsName)
 	if err == nil {
 		return rs, nil
 	}
@@ -119,6 +127,10 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 
 	// Create new ReplicaSet
 	pm.logger.Info("Creating new ReplicaSet", zap.String("name", rsName))
+	podTemplate, err := pm.buildPodTemplate(template, true)
+	if err != nil {
+		return nil, fmt.Errorf("build pod template: %w", err)
+	}
 
 	rs = &appsv1.ReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -139,7 +151,7 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 					LabelPoolType:   PoolTypeIdle,
 				},
 			},
-			Template: pm.buildPodTemplate(template),
+			Template: podTemplate,
 		},
 	}
 
@@ -157,7 +169,8 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 }
 
 // buildPodTemplate builds the pod template for a template
-func (pm *PoolManager) buildPodTemplate(template *v1alpha1.SandboxTemplate) corev1.PodTemplateSpec {
+func (pm *PoolManager) buildPodTemplate(template *v1alpha1.SandboxTemplate, restart bool) (corev1.PodTemplateSpec, error) {
+	spec := v1alpha1.BuildPodSpec(template, restart)
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
@@ -165,8 +178,8 @@ func (pm *PoolManager) buildPodTemplate(template *v1alpha1.SandboxTemplate) core
 				LabelPoolType:   PoolTypeIdle,
 			},
 		},
-		Spec: v1alpha1.BuildPodSpec(template),
-	}
+		Spec: spec,
+	}, nil
 }
 
 // Helper functions

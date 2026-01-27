@@ -25,7 +25,7 @@ RESET  := \033[0m
 
 all: manifests proto apispec
 	@for service in $(SERVICES); do \
-		$(MAKE) build SERVICE=$$service; \
+		$(MAKE) build SERVICE=$$service GOOS=$(GOOS); \
 	done
 
 # Build specific service: make build <service>
@@ -55,9 +55,9 @@ build: manifests proto apispec
 			out="$$dir/bin/$$bin"; \
 		fi; \
 		if [ "$$s" = "storage-proxy" ] || [ "$$s" = "infra-operator" ]; then \
-			CGO_ENABLED=1 go build -v -o $$out $$src; \
+			CGO_ENABLED=1 GOOS=$(GOOS) go build -v -o $$out $$src; \
 		else \
-			CGO_ENABLED=0 go build -v -o $$out $$src; \
+			CGO_ENABLED=0 GOOS=$(GOOS) go build -v -o $$out $$src; \
 		fi || exit 1; \
 	done
 
@@ -70,12 +70,12 @@ docker-push:
 	@printf "$(GREEN)Docker pushing unified infra image...$(RESET)\n"
 	docker push sandbox0ai/infra:$(TAG)
 
+# NOTE: storage-proxy and infra-operator cannot be cross-compiled, they only work on linux.
 build-local-all: manifests proto apispec
-	@for service in $(SERVICES); do \
-		$(MAKE) build SERVICE=$$service BIN_DIR=$(shell pwd)/bin; \
+	@for service in $(filter-out storage-proxy infra-operator,$(SERVICES)); do \
+		$(MAKE) build SERVICE=$$service BIN_DIR=$(shell pwd)/bin GOOS=linux; \
 	done
 
-# NOTE: This only works on Linux because storage-proxy and infra-operator cannot be cross-compiled.
 docker-build-local: build-local-all
 	@printf "$(GREEN)Docker building with local binaries...$(RESET)\n"
 	docker build -t sandbox0ai/infra:$(TAG) -f Dockerfile.local .

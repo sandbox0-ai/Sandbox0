@@ -69,3 +69,8 @@ func TemplateIDFromName(name string) (string, error) {
 	}
 	return slugWithHash(name, dnsLabelMaxLen)
 }
+
+// TemplateNamespaceFromName generates a DNS-safe namespace for a template name.
+func TemplateNamespaceFromName(name string) (string, error) {
+	return TemplateIDFromName(name)
+}

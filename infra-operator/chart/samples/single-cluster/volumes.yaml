@@ -59,7 +59,6 @@ spec:
       enabled: true
       replicas: 1
       config:
-        templateNamespace: sandbox0
         defaultTemplate:
           name: default
           image: sandbox0ai/otemplates:default-v0.1.0

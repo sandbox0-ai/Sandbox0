@@ -3,27 +3,17 @@ package naming
 import (
 	"fmt"
 	"strings"
-
-	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 )
 
-func clusterIDOrDefault(clusterID *string) string {
-	if clusterID != nil && *clusterID != "" {
-		return *clusterID
+// ProcdConfigSecretName generates a Kubernetes-safe Secret name for procd config.
+// Format: procd-secret-<clusterKey>-<templateKey>
+func ProcdConfigSecretName(clusterID, templateName string) (string, error) {
+	clusterKey, err := encodeClusterID(clusterID)
+	if err != nil {
+		return "", err
 	}
-	return defaultClusterID
-}
-
-// ReplicasetNameForTemplate generates a ReplicaSet name for a template.
-func ReplicasetNameForTemplate(template *v1alpha1.SandboxTemplate) (string, error) {
-	clusterID := clusterIDOrDefault(template.Spec.ClusterId)
-	return ReplicasetName(clusterID, template.Name)
-}
-
-// SandboxNameForTemplate generates a sandbox (pod) name for a template.
-func SandboxNameForTemplate(template *v1alpha1.SandboxTemplate, randSuffix string) (string, error) {
-	clusterID := clusterIDOrDefault(template.Spec.ClusterId)
-	return SandboxName(clusterID, template.Name, randSuffix)
+	base := fmt.Sprintf("procd-secret-%s-%s", clusterKey, templateName)
+	return slugWithHash(base, dnsLabelMaxLen)
 }
 
 // ReplicasetName generates a Kubernetes-safe ReplicaSet name.
@@ -71,11 +61,8 @@ func SandboxName(clusterID, templateName, randSuffix string) (string, error) {
 	return name, nil
 }
 
-// CheckTemplate validates template naming constraints for K8s resources.
-func CheckTemplate(template *v1alpha1.SandboxTemplate) error {
-	clusterID := clusterIDOrDefault(template.Spec.ClusterId)
-	if _, err := ReplicasetName(clusterID, template.Name); err != nil {
-		return err
-	}
-	return nil
+// CheckTemplateName validates template naming constraints for K8s resources.
+func CheckTemplateName(clusterID, templateName string) error {
+	_, err := ReplicasetName(clusterID, templateName)
+	return err
 }

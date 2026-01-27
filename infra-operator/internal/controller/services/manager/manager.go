@@ -36,6 +36,7 @@ import (
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/internalauth"
 	templatev1alpha1 "github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	pkginternalauth "github.com/sandbox0-ai/infra/pkg/internalauth"
+	"github.com/sandbox0-ai/infra/pkg/naming"
 )
 
 const (
@@ -44,7 +45,6 @@ const (
 	defaultTemplateCPU         = "500m"
 	defaultTemplateMemory      = "512Mi"
 	defaultTemplateDisplayName = "Default"
-	defaultTemplateNamespace   = "sandbox0"
 	defaultTemplateMinIdle     = int32(1)
 	defaultTemplateMaxIdle     = int32(5)
 )
@@ -82,12 +82,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		return err
 	}
 
-	// Try to create the default template namespace
-	templateNamespace := config.TemplateNamespace
-	if templateNamespace != "" {
-		if err := r.Resources.ReconcileNamespace(ctx, templateNamespace); err != nil {
-			return fmt.Errorf("reconcile namespace %s: %w", templateNamespace, err)
-		}
+	// Ensure namespace for the default template name.
+	defaultTemplateNamespace, err := naming.TemplateNamespaceFromName(config.DefaultTemplate.Name)
+	if err != nil {
+		return fmt.Errorf("resolve default template namespace: %w", err)
+	}
+	if err := r.Resources.ReconcileNamespace(ctx, defaultTemplateNamespace); err != nil {
+		return fmt.Errorf("reconcile namespace %s: %w", defaultTemplateNamespace, err)
 	}
 
 	if err := r.ensureDefaultTemplate(ctx, infra, config); err != nil {
@@ -267,9 +268,6 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 	if cfg.DefaultTemplate.Image == "" {
 		cfg.DefaultTemplate.Image = defaultTemplateImage
 	}
-	if cfg.TemplateNamespace == "" {
-		cfg.TemplateNamespace = defaultTemplateNamespace
-	}
 	cfg.DefaultTemplate.Pool = applyDefaultTemplatePool(cfg.DefaultTemplate.Pool)
 
 	if infra.Spec.Cluster != nil && infra.Spec.Cluster.ID != "" {
@@ -317,9 +315,9 @@ func (r *Reconciler) ensureDefaultTemplate(ctx context.Context, infra *infrav1al
 	if name == "" {
 		name = defaultTemplateName
 	}
-	namespace = config.TemplateNamespace
-	if namespace == "" {
-		namespace = defaultTemplateNamespace
+	namespace, err := naming.TemplateNamespaceFromName(name)
+	if err != nil {
+		return fmt.Errorf("resolve template namespace: %w", err)
 	}
 	if image == "" {
 		image = defaultTemplateImage
@@ -327,7 +325,7 @@ func (r *Reconciler) ensureDefaultTemplate(ctx context.Context, infra *infrav1al
 	pool = applyDefaultTemplatePool(pool)
 
 	existing := &templatev1alpha1.SandboxTemplate{}
-	err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, existing)
+	err = r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, existing)
 	if err == nil {
 		return nil
 	}

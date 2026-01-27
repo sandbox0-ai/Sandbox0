@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
+	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 )
@@ -23,17 +24,24 @@ const (
 )
 
 type AutoScaler struct {
-	k8sClient kubernetes.Interface
-	podLister corelisters.PodLister
-	logger    *zap.Logger
+	k8sClient         kubernetes.Interface
+	podLister         corelisters.PodLister
+	replicaSetLister  appslisters.ReplicaSetLister
+	logger            *zap.Logger
 }
 
 // NewAutoScaler creates a new AutoScaler.
-func NewAutoScaler(k8sClient kubernetes.Interface, podLister corelisters.PodLister, logger *zap.Logger) *AutoScaler {
+func NewAutoScaler(
+	k8sClient kubernetes.Interface,
+	podLister corelisters.PodLister,
+	replicaSetLister appslisters.ReplicaSetLister,
+	logger *zap.Logger,
+) *AutoScaler {
 	return &AutoScaler{
-		k8sClient: k8sClient,
-		podLister: podLister,
-		logger:    logger,
+		k8sClient:        k8sClient,
+		podLister:        podLister,
+		replicaSetLister: replicaSetLister,
+		logger:           logger,
 	}
 }
 
@@ -103,11 +111,12 @@ func (as *AutoScaler) ReconcileAutoScale(ctx context.Context, template *v1alpha1
 	cfg := defaultAutoScaleConfig()
 
 	// Load ReplicaSet and use it as the actuator + cooldown state holder.
-	rsName, err := naming.ReplicasetNameForTemplate(template)
+	clusterID := naming.ClusterIDOrDefault(template.Spec.ClusterId)
+	rsName, err := naming.ReplicasetName(clusterID, template.Name)
 	if err != nil {
 		return fmt.Errorf("generate replicaset name: %w", err)
 	}
-	rs, err := as.k8sClient.AppsV1().ReplicaSets(template.Namespace).Get(ctx, rsName, metav1.GetOptions{})
+	rs, err := as.replicaSetLister.ReplicaSets(template.Namespace).Get(rsName)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// PoolManager will create it; we'll reconcile next cycle.
@@ -269,7 +278,7 @@ func (as *AutoScaler) ReconcileAutoScale(ctx context.Context, template *v1alpha1
 
 	// Only write if replicas changed or we have annotation changes to persist.
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		current, err := as.k8sClient.AppsV1().ReplicaSets(template.Namespace).Get(ctx, rsName, metav1.GetOptions{})
+		current, err := as.replicaSetLister.ReplicaSets(template.Namespace).Get(rsName)
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return nil
