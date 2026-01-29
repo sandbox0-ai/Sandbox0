@@ -85,7 +85,6 @@ func (r *REPL) Start() error {
 
 	// Build environment variables
 	extraEnv := r.buildEnvVars(processConfig)
-
 	return startWithCandidates(r.BaseProcess, r.runner, processConfig, candidates, extraEnv)
 }
 

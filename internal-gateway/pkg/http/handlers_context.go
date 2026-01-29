@@ -204,38 +204,60 @@ func (s *Server) contextWebSocket(c *gin.Context) {
 }
 
 // getProcdURL resolves the procd URL for a sandbox
+// Uses in-memory cache to reduce manager API calls and improve performance
 func (s *Server) getProcdURL(c *gin.Context, sandboxID string) (*url.URL, error) {
 	authCtx := middleware.GetAuthContext(c)
 
-	// Look up sandbox from manager
-	sandbox, err := s.managerClient.GetSandbox(c.Request.Context(), sandboxID, authCtx.UserID, authCtx.TeamID)
-	if err != nil {
-		s.logger.Error("Failed to get sandbox from manager",
+	// Try to get from cache first
+	var addr *url.URL
+	if cached, ok := s.sandboxAddrCache.Get(sandboxID); ok {
+		addr = cached
+		s.logger.Debug("Sandbox cache hit",
 			zap.String("sandbox_id", sandboxID),
-			zap.Error(err),
 		)
-		spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "sandbox not found")
-		return nil, err
-	}
-
-	if sandbox.TeamID != authCtx.TeamID {
-		spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "sandbox belongs to a different team")
-		return nil, errors.New("sandbox belongs to a different team")
-	}
-
-	// Parse procd address
-	procdURL, err := url.Parse(sandbox.InternalAddr)
-	if err != nil {
-		s.logger.Error("Invalid procd address",
+	} else {
+		// Cache miss - fetch from manager
+		s.logger.Debug("Sandbox cache miss, fetching from manager",
 			zap.String("sandbox_id", sandboxID),
-			zap.String("procd_address", sandbox.InternalAddr),
-			zap.Error(err),
 		)
-		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "invalid procd address")
-		return nil, err
+
+		sandbox, err := s.managerClient.GetSandbox(c.Request.Context(), sandboxID, authCtx.UserID, authCtx.TeamID)
+		if err != nil {
+			s.logger.Error("Failed to get sandbox from manager",
+				zap.String("sandbox_id", sandboxID),
+				zap.Error(err),
+			)
+			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "sandbox not found")
+			return nil, err
+		}
+
+		// Verify team ownership
+		if sandbox.TeamID != authCtx.TeamID {
+			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "sandbox belongs to a different team")
+			return nil, errors.New("sandbox belongs to a different team")
+		}
+
+		// Parse procd address
+		addr, err = url.Parse(sandbox.InternalAddr)
+		if err != nil {
+			s.logger.Error("Invalid procd address",
+				zap.String("sandbox_id", sandboxID),
+				zap.String("procd_address", sandbox.InternalAddr),
+				zap.Error(err),
+			)
+			spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "invalid procd address")
+			return nil, err
+		}
+
+		// Store in cache for future requests
+		s.sandboxAddrCache.Set(sandboxID, addr)
+		s.logger.Debug("Sandbox cached",
+			zap.String("sandbox_id", sandboxID),
+			zap.String("internal_addr", addr.String()),
+		)
 	}
 
-	return procdURL, nil
+	return addr, nil
 }
 
 func (s *Server) buildProcdRequestModifier(c *gin.Context) (proxy.RequestModifier, error) {
