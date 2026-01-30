@@ -71,6 +71,11 @@ const (
 	SuccessClaimResponseSuccessTrue SuccessClaimResponseSuccess = true
 )
 
+// Defines values for SuccessContextExecResponseSuccess.
+const (
+	SuccessContextExecResponseSuccessTrue SuccessContextExecResponseSuccess = true
+)
+
 // Defines values for SuccessContextListResponseSuccess.
 const (
 	SuccessContextListResponseSuccessTrue SuccessContextListResponseSuccess = true
@@ -253,7 +258,7 @@ const (
 
 // Defines values for SuccessWrittenResponseSuccess.
 const (
-	True SuccessWrittenResponseSuccess = true
+	SuccessWrittenResponseSuccessTrue SuccessWrittenResponseSuccess = true
 )
 
 // Defines values for TplSandboxNetworkPolicyMode.
@@ -359,6 +364,11 @@ type ContainerSpec struct {
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
 }
 
+// ContextExecResponse defines model for ContextExecResponse.
+type ContextExecResponse struct {
+	Output string `json:"output"`
+}
+
 // ContextInputRequest defines model for ContextInputRequest.
 type ContextInputRequest struct {
 	Data string `json:"data"`
@@ -381,6 +391,7 @@ type ContextResponse struct {
 	EnvVars   *map[string]string `json:"env_vars,omitempty"`
 	Id        string             `json:"id"`
 	Language  *string            `json:"language,omitempty"`
+	Output    *string            `json:"output,omitempty"`
 	Paused    bool               `json:"paused"`
 	Running   bool               `json:"running"`
 	Type      ProcessType        `json:"type"`
@@ -908,6 +919,15 @@ type SuccessClaimResponse struct {
 
 // SuccessClaimResponseSuccess defines model for SuccessClaimResponse.Success.
 type SuccessClaimResponseSuccess bool
+
+// SuccessContextExecResponse defines model for SuccessContextExecResponse.
+type SuccessContextExecResponse struct {
+	Data    *ContextExecResponse              `json:"data,omitempty"`
+	Success SuccessContextExecResponseSuccess `json:"success"`
+}
+
+// SuccessContextExecResponseSuccess defines model for SuccessContextExecResponse.Success.
+type SuccessContextExecResponseSuccess bool
 
 // SuccessContextListResponse defines model for SuccessContextListResponse.
 type SuccessContextListResponse struct {
@@ -1474,6 +1494,9 @@ type PatchApiV1SandboxesIdBandwidthJSONRequestBody = BandwidthPolicySpec
 
 // PostApiV1SandboxesIdContextsJSONRequestBody defines body for PostApiV1SandboxesIdContexts for application/json ContentType.
 type PostApiV1SandboxesIdContextsJSONRequestBody = CreateContextRequest
+
+// PostApiV1SandboxesIdContextsCtxIdExecJSONRequestBody defines body for PostApiV1SandboxesIdContextsCtxIdExec for application/json ContentType.
+type PostApiV1SandboxesIdContextsCtxIdExecJSONRequestBody = ContextInputRequest
 
 // PostApiV1SandboxesIdContextsCtxIdInputJSONRequestBody defines body for PostApiV1SandboxesIdContextsCtxIdInput for application/json ContentType.
 type PostApiV1SandboxesIdContextsCtxIdInputJSONRequestBody = ContextInputRequest

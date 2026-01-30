@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -62,6 +63,7 @@ type ContextResponse struct {
 	Running   bool                `json:"running"`
 	Paused    bool                `json:"paused"`
 	CreatedAt string              `json:"created_at"`
+	Output    string              `json:"output,omitempty"`
 }
 
 // ContextStatsResponse is the response body for context resource stats.
@@ -102,6 +104,16 @@ type wsControlMessage struct {
 	Cols      uint16 `json:"cols"`
 	Signal    string `json:"signal"`
 	RequestID string `json:"request_id"`
+}
+
+type execError struct {
+	status  int
+	code    string
+	message string
+}
+
+func (e *execError) Error() string {
+	return e.message
 }
 
 const execTimeout = 30 * time.Second
@@ -151,14 +163,26 @@ func (h *ContextHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Input != "" {
-		if err := h.manager.WriteInput(ctx.ID, []byte(req.Input)); err != nil {
-			if errors.Is(err, process.ErrProcessNotRunning) {
-				writeError(w, http.StatusConflict, "process_not_running", err.Error())
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "write_failed", err.Error())
+		output, execErr, aborted := h.execInputSync(ctx, req.Input, r.Context())
+		if aborted {
 			return
 		}
+		if execErr != nil {
+			writeError(w, execErr.status, execErr.code, execErr.message)
+			return
+		}
+		writeJSON(w, http.StatusCreated, ContextResponse{
+			ID:        ctx.ID,
+			Type:      ctx.Type,
+			Language:  ctx.Language,
+			CWD:       ctx.CWD,
+			EnvVars:   ctx.EnvVars,
+			Running:   ctx.IsRunning(),
+			Paused:    ctx.IsPaused(),
+			CreatedAt: ctx.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Output:    output,
+		})
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, ContextResponse{
@@ -297,57 +321,17 @@ func (h *ContextHandler) Exec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "process_not_running", process.ErrProcessNotRunning.Error())
 		return
 	}
-	state := ctx.MainProcess.State()
-	if state == process.ProcessStateStopped || state == process.ProcessStateKilled || state == process.ProcessStateCrashed {
-		writeError(w, http.StatusConflict, "process_not_running", process.ErrProcessNotRunning.Error())
+
+	output, execErr, aborted := h.execInputSync(ctx, req.Data, r.Context())
+	if aborted {
+		return
+	}
+	if execErr != nil {
+		writeError(w, execErr.status, execErr.code, execErr.message)
 		return
 	}
 
-	outputCh := ctx.MainProcess.ReadOutput()
-	drainOutput(outputCh)
-
-	if err := h.manager.WriteInput(id, []byte(req.Data)); err != nil {
-		if err == ctxpkg.ErrContextNotFound {
-			writeError(w, http.StatusNotFound, "context_not_found", err.Error())
-			return
-		}
-		if errors.Is(err, process.ErrProcessNotRunning) {
-			writeError(w, http.StatusConflict, "process_not_running", err.Error())
-			return
-		}
-		if errors.Is(err, process.ErrInputBufferFull) {
-			writeError(w, http.StatusConflict, "input_buffer_full", err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "write_failed", err.Error())
-		return
-	}
-
-	timeout := time.NewTimer(execTimeout)
-	defer timeout.Stop()
-
-	var output bytes.Buffer
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-timeout.C:
-			writeError(w, http.StatusRequestTimeout, "exec_timeout", "execution timed out")
-			return
-		case msg, ok := <-outputCh:
-			if !ok {
-				writeJSON(w, http.StatusOK, ContextExecResponse{Output: output.String()})
-				return
-			}
-			if msg.Source == process.OutputSourcePrompt {
-				writeJSON(w, http.StatusOK, ContextExecResponse{Output: output.String()})
-				return
-			}
-			if len(msg.Data) > 0 {
-				_, _ = output.Write(msg.Data)
-			}
-		}
-	}
+	writeJSON(w, http.StatusOK, ContextExecResponse{Output: output})
 }
 
 // Stats returns resource usage statistics for a context.
@@ -384,6 +368,82 @@ func drainOutput(ch <-chan process.ProcessOutput) {
 			}
 		default:
 			return
+		}
+	}
+}
+
+func (h *ContextHandler) execInputSync(ctx *ctxpkg.Context, input string, requestCtx context.Context) (string, *execError, bool) {
+	if ctx == nil || ctx.MainProcess == nil {
+		return "", &execError{
+			status:  http.StatusConflict,
+			code:    "process_not_running",
+			message: process.ErrProcessNotRunning.Error(),
+		}, false
+	}
+	if ctx.MainProcess.IsFinished() {
+		return "", &execError{
+			status:  http.StatusGone,
+			code:    "process_finished",
+			message: process.ErrProcessFinished.Error(),
+		}, false
+	}
+
+	outputCh := ctx.MainProcess.ReadOutput()
+	drainOutput(outputCh)
+
+	if err := h.manager.WriteInput(ctx.ID, []byte(input)); err != nil {
+		if err == ctxpkg.ErrContextNotFound {
+			return "", &execError{
+				status:  http.StatusNotFound,
+				code:    "context_not_found",
+				message: err.Error(),
+			}, false
+		}
+		if errors.Is(err, process.ErrProcessNotRunning) {
+			return "", &execError{
+				status:  http.StatusConflict,
+				code:    "process_not_running",
+				message: err.Error(),
+			}, false
+		}
+		if errors.Is(err, process.ErrInputBufferFull) {
+			return "", &execError{
+				status:  http.StatusConflict,
+				code:    "input_buffer_full",
+				message: err.Error(),
+			}, false
+		}
+		return "", &execError{
+			status:  http.StatusInternalServerError,
+			code:    "write_failed",
+			message: err.Error(),
+		}, false
+	}
+
+	timeout := time.NewTimer(execTimeout)
+	defer timeout.Stop()
+
+	var output bytes.Buffer
+	for {
+		select {
+		case <-requestCtx.Done():
+			return "", nil, true
+		case <-timeout.C:
+			return "", &execError{
+				status:  http.StatusRequestTimeout,
+				code:    "exec_timeout",
+				message: "execution timed out",
+			}, false
+		case msg, ok := <-outputCh:
+			if !ok {
+				return output.String(), nil, false
+			}
+			if msg.Source == process.OutputSourcePrompt {
+				return output.String(), nil, false
+			}
+			if len(msg.Data) > 0 {
+				_, _ = output.Write(msg.Data)
+			}
 		}
 	}
 }
@@ -545,9 +605,8 @@ func (h *ContextHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := ctx.MainProcess.State()
-	if state == process.ProcessStateStopped || state == process.ProcessStateKilled || state == process.ProcessStateCrashed {
-		closeConn("context not running")
+	if ctx.MainProcess.IsFinished() {
+		closeConn("context finished")
 		return
 	}
 

@@ -9,6 +9,9 @@ var (
 	// ErrProcessNotRunning is returned when trying to interact with a stopped process.
 	ErrProcessNotRunning = errors.New("process not running")
 
+	// ErrProcessFinished is returned when trying to interact with a finished process.
+	ErrProcessFinished = errors.New("process finished")
+
 	// ErrProcessAlreadyRunning is returned when trying to start an already running process.
 	ErrProcessAlreadyRunning = errors.New("process already running")
 

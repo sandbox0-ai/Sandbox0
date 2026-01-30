@@ -2635,6 +2635,8 @@ components:
           type: boolean
         created_at:
           type: string
+        output:
+          type: string
       required: [id, type, running, paused, created_at]
     ContextStatsResponse:
       type: object

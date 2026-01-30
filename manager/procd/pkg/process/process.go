@@ -148,6 +148,7 @@ type Process interface {
 	Stop() error
 	Restart() error
 	IsRunning() bool
+	IsFinished() bool
 	State() ProcessState
 	AddStartHandler(StartHandler)
 	AddExitHandler(ExitHandler)
@@ -276,6 +277,12 @@ func (bp *BaseProcess) IsPaused() bool {
 	return bp.state == ProcessStatePaused
 }
 
+func (bp *BaseProcess) IsFinished() bool {
+	bp.mu.RLock()
+	defer bp.mu.RUnlock()
+	return bp.state == ProcessStateStopped || bp.state == ProcessStateKilled || bp.state == ProcessStateCrashed
+}
+
 // Pause sends SIGSTOP to the process group to pause the process and all its children.
 func (bp *BaseProcess) Pause() error {
 	bp.mu.Lock()
@@ -394,14 +401,13 @@ func (bp *BaseProcess) ReadOutput() <-chan ProcessOutput {
 func (bp *BaseProcess) WriteInput(data []byte) error {
 	bp.mu.RLock()
 	pty := bp.pty
-	state := bp.state
 	bp.mu.RUnlock()
 
 	if pty == nil {
 		return ErrProcessNotRunning
 	}
-	if state == ProcessStateStopped || state == ProcessStateKilled || state == ProcessStateCrashed {
-		return ErrProcessNotRunning
+	if bp.IsFinished() {
+		return ErrProcessFinished
 	}
 	if len(data) == 0 {
 		return nil
