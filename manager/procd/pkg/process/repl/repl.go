@@ -23,6 +23,8 @@ type REPL struct {
 	promptRegexps []*regexp.Regexp
 }
 
+var _ process.Process = (*REPL)(nil)
+
 // New creates a new REPL process with the given configuration.
 func New(id string, replConfig *REPLConfig, processConfig process.ProcessConfig) (*REPL, error) {
 	if replConfig == nil {

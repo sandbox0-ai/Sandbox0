@@ -665,3 +665,172 @@ func TestContext_TypesAndLanguage(t *testing.T) {
 		})
 	}
 }
+
+// TestContext_AddHandlers tests dynamic handler addition (middleware-like behavior).
+func TestContext_AddHandlers(t *testing.T) {
+	m := NewManager()
+
+	config := process.ProcessConfig{
+		Type:    process.ProcessTypeCMD,
+		Command: []string{"/bin/echo", "test"},
+	}
+
+	// Track handler invocations
+	var exitCalls []string
+	var startCalls []string
+	var mu sync.Mutex
+
+	// Set global handlers
+	m.SetExitHandler(func(event process.ExitEvent) {
+		mu.Lock()
+		exitCalls = append(exitCalls, "global")
+		mu.Unlock()
+	})
+
+	m.SetStartHandler(func(event process.StartEvent) {
+		mu.Lock()
+		startCalls = append(startCalls, "global")
+		mu.Unlock()
+	})
+
+	// Create context with global handlers
+	ctx, err := m.CreateContext(config)
+	if err != nil {
+		t.Fatalf("CreateContext() failed = %v", err)
+	}
+
+	// Add additional handlers dynamically (middleware-like)
+	ctx.AddExitHandler(func(event process.ExitEvent) {
+		mu.Lock()
+		exitCalls = append(exitCalls, "middleware1")
+		mu.Unlock()
+	})
+
+	ctx.AddExitHandler(func(event process.ExitEvent) {
+		mu.Lock()
+		exitCalls = append(exitCalls, "middleware2")
+		mu.Unlock()
+	})
+
+	ctx.AddStartHandler(func(event process.StartEvent) {
+		mu.Lock()
+		startCalls = append(startCalls, "middleware1")
+		mu.Unlock()
+	})
+
+	ctx.AddStartHandler(func(event process.StartEvent) {
+		mu.Lock()
+		startCalls = append(startCalls, "middleware2")
+		mu.Unlock()
+	})
+
+	// Clear the calls from initial creation
+	mu.Lock()
+	exitCalls = nil
+	startCalls = nil
+	mu.Unlock()
+
+	// Restart to trigger handlers
+	err = ctx.Restart()
+	if err != nil {
+		t.Fatalf("Restart() failed = %v", err)
+	}
+
+	// Wait for process to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify all handlers were called in order
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Exit handlers should include global + middleware handlers
+	if len(exitCalls) < 3 {
+		t.Errorf("Expected at least 3 exit handler calls, got %d: %v", len(exitCalls), exitCalls)
+	}
+
+	// Start handlers should include global + middleware handlers
+	if len(startCalls) < 3 {
+		t.Errorf("Expected at least 3 start handler calls, got %d: %v", len(startCalls), startCalls)
+	}
+
+	// Verify order: handlers should be called in the order they were added
+	if len(exitCalls) >= 3 {
+		if exitCalls[0] != "global" {
+			t.Errorf("First exit handler should be 'global', got '%s'", exitCalls[0])
+		}
+		if exitCalls[1] != "middleware1" {
+			t.Errorf("Second exit handler should be 'middleware1', got '%s'", exitCalls[1])
+		}
+		if exitCalls[2] != "middleware2" {
+			t.Errorf("Third exit handler should be 'middleware2', got '%s'", exitCalls[2])
+		}
+	}
+
+	if len(startCalls) >= 3 {
+		if startCalls[0] != "global" {
+			t.Errorf("First start handler should be 'global', got '%s'", startCalls[0])
+		}
+		if startCalls[1] != "middleware1" {
+			t.Errorf("Second start handler should be 'middleware1', got '%s'", startCalls[1])
+		}
+		if startCalls[2] != "middleware2" {
+			t.Errorf("Third start handler should be 'middleware2', got '%s'", startCalls[2])
+		}
+	}
+
+	m.Cleanup()
+}
+
+// TestContext_AddHandlers_AfterCreation tests adding handlers to an existing context.
+func TestContext_AddHandlers_AfterCreation(t *testing.T) {
+	config := process.ProcessConfig{
+		Type:    process.ProcessTypeCMD,
+		Command: []string{"/bin/echo", "test"},
+	}
+
+	// Create context without handlers
+	ctx, err := NewContext(config, nil, nil)
+	if err != nil {
+		t.Fatalf("NewContext() failed = %v", err)
+	}
+	defer ctx.Stop()
+
+	// Track handler invocations
+	var exitCalled bool
+	var startCalled bool
+	var mu sync.Mutex
+
+	// Add handlers after creation
+	ctx.AddExitHandler(func(event process.ExitEvent) {
+		mu.Lock()
+		exitCalled = true
+		mu.Unlock()
+	})
+
+	ctx.AddStartHandler(func(event process.StartEvent) {
+		mu.Lock()
+		startCalled = true
+		mu.Unlock()
+	})
+
+	// Restart to trigger handlers
+	err = ctx.Restart()
+	if err != nil {
+		t.Fatalf("Restart() failed = %v", err)
+	}
+
+	// Wait for process to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify handlers were called
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !exitCalled {
+		t.Error("Exit handler was not called")
+	}
+
+	if !startCalled {
+		t.Error("Start handler was not called")
+	}
+}

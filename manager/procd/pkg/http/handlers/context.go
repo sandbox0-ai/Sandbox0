@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -405,18 +406,49 @@ func (h *ContextHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
-	ctx, err := h.manager.GetContext(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "context_not_found", err.Error())
-		return
-	}
-
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("WebSocket upgrade failed", zap.Error(err))
 		return
 	}
 	defer conn.Close()
+
+	closeDone := make(chan struct{})
+	var closeOnce sync.Once
+	closeConn := func(reason string) {
+		closeOnce.Do(func() {
+			close(closeDone)
+			if reason != "" {
+				_ = conn.WriteControl(
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, reason),
+					time.Now().Add(time.Second),
+				)
+			}
+			_ = conn.Close()
+		})
+	}
+
+	ctx, err := h.manager.GetContext(id)
+	if err != nil {
+		closeConn("context not found")
+		return
+	}
+
+	if ctx.MainProcess == nil {
+		closeConn("context not running")
+		return
+	}
+
+	state := ctx.MainProcess.State()
+	if state == process.ProcessStateStopped || state == process.ProcessStateKilled || state == process.ProcessStateCrashed {
+		closeConn("context not running")
+		return
+	}
+
+	ctx.AddExitHandler(func(event process.ExitEvent) {
+		go closeConn("context exited")
+	})
 
 	var pendingMu sync.Mutex
 	pendingRequestID := ""
@@ -441,38 +473,55 @@ func (h *ContextHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Write output to WebSocket
 	go func() {
-		for output := range outputCh {
-			if output.Source == process.OutputSourcePrompt {
-				requestID := takePendingRequestID()
-				if requestID == "" {
-					continue
-				}
-				msg := map[string]any{
-					"type":       "done",
-					"request_id": requestID,
-				}
-				if err := conn.WriteJSON(msg); err != nil {
+		for {
+			select {
+			case <-closeDone:
+				return
+			case output, ok := <-outputCh:
+				if !ok {
+					closeConn("context output closed")
 					return
 				}
-				continue
-			}
+				if output.Source == process.OutputSourcePrompt {
+					requestID := takePendingRequestID()
+					if requestID == "" {
+						continue
+					}
+					msg := map[string]any{
+						"type":       "done",
+						"request_id": requestID,
+					}
+					if err := conn.WriteJSON(msg); err != nil {
+						closeConn("websocket write failed")
+						return
+					}
+					continue
+				}
 
-			msg := map[string]any{
-				"type":   "output",
-				"source": string(output.Source),
-				"data":   string(output.Data),
-			}
+				msg := map[string]any{
+					"type":   "output",
+					"source": string(output.Source),
+					"data":   string(output.Data),
+				}
 
-			if err := conn.WriteJSON(msg); err != nil {
-				return
+				if err := conn.WriteJSON(msg); err != nil {
+					closeConn("websocket write failed")
+					return
+				}
 			}
 		}
 	}()
 
 	// Read input from WebSocket
 	for {
+		select {
+		case <-closeDone:
+			return
+		default:
+		}
 		_, data, err := conn.ReadMessage()
 		if err != nil {
+			closeConn("")
 			break
 		}
 		if len(data) == 0 {

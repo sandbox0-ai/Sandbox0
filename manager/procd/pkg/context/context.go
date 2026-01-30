@@ -46,10 +46,10 @@ func NewContext(config process.ProcessConfig, exitHandler process.ExitHandler, s
 	}
 
 	if exitHandler != nil {
-		proc.SetExitHandler(exitHandler)
+		proc.AddExitHandler(exitHandler)
 	}
 	if startHandler != nil {
-		proc.SetStartHandler(startHandler)
+		proc.AddStartHandler(startHandler)
 	}
 
 	if err := proc.Start(); err != nil {
@@ -143,4 +143,22 @@ func (ctx *Context) SendSignal(sig syscall.Signal) error {
 		return ctx.MainProcess.SendSignal(sig)
 	}
 	return process.ErrProcessNotRunning
+}
+
+// AddExitHandler appends an exit handler to the handler chain.
+// Handlers are executed in the order they were added, enabling middleware-like behavior.
+func (ctx *Context) AddExitHandler(handler process.ExitHandler) {
+	if ctx.MainProcess != nil {
+		ctx.MainProcess.AddExitHandler(handler)
+		ctx.UpdatedAt = time.Now()
+	}
+}
+
+// AddStartHandler appends a start handler to the handler chain.
+// Handlers are executed in the order they were added, enabling middleware-like behavior.
+func (ctx *Context) AddStartHandler(handler process.StartHandler) {
+	if ctx.MainProcess != nil {
+		ctx.MainProcess.AddStartHandler(handler)
+		ctx.UpdatedAt = time.Now()
+	}
 }
