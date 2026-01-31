@@ -337,6 +337,8 @@ func (s *Server) setupRoutes() {
 			// === File System (→ Procd) ===
 			files := sandboxes.Group("/:id/files")
 			{
+				files.GET("/watch", s.handleFileWatch)
+				files.POST("/move", s.handleFileMove)
 				files.GET("/*path", s.handleFileOperation)
 				files.POST("/*path", s.handleFileOperation)
 				files.DELETE("/*path", s.handleFileOperation)

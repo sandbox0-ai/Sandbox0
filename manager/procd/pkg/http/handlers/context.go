@@ -46,13 +46,16 @@ func NewContextHandler(manager *ctxpkg.Manager, logger *zap.Logger) *ContextHand
 type CreateContextRequest struct {
 	Type     process.ProcessType `json:"type"`     // "repl" or "cmd"
 	Language string              `json:"language"` // For REPL: python, node, bash, zsh, etc.
+	Input    string              `json:"input"`    // For REPL: code to execute
 	Command  []string            `json:"command"`  // For CMD: command path and args, e.g., ["/bin/ls", "-la"]
-	CWD      string              `json:"cwd"`
-	EnvVars  map[string]string   `json:"env_vars"`
-	PTYSize  *process.PTYSize    `json:"pty_size"`
-	Input    string              `json:"input"`
-	IdleTimeoutSec int32         `json:"idle_timeout_sec,omitempty"`
-	TTLSec         int32         `json:"ttl_sec,omitempty"`
+
+	WaitUntilDone bool `json:"wait_until_done"`
+
+	CWD            string            `json:"cwd"`
+	EnvVars        map[string]string `json:"env_vars"`
+	PTYSize        *process.PTYSize  `json:"pty_size"`
+	IdleTimeoutSec int32             `json:"idle_timeout_sec,omitempty"`
+	TTLSec         int32             `json:"ttl_sec,omitempty"`
 }
 
 // ContextResponse is the response body for a context.
@@ -177,7 +180,7 @@ func (h *ContextHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Input != "" {
+	if req.WaitUntilDone {
 		output, execErr, aborted := h.execInputSync(ctx, req.Input, r.Context())
 		if aborted {
 			return
@@ -406,7 +409,8 @@ func (h *ContextHandler) execInputSync(ctx *ctxpkg.Context, input string, reques
 	outputCh := ctx.MainProcess.ReadOutput()
 	drainOutput(outputCh)
 
-	if err := h.manager.WriteInput(ctx.ID, []byte(input)); err != nil {
+	err := h.manager.WriteInput(ctx.ID, []byte(input))
+	if err != nil {
 		if err == ctxpkg.ErrContextNotFound {
 			return "", &execError{
 				status:  http.StatusNotFound,

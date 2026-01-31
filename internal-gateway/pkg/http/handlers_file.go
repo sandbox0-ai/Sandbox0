@@ -10,7 +10,7 @@ import (
 
 // === File System Handlers (→ Procd) ===
 
-// handleFileOperation handles all file operations (GET, POST, DELETE)
+// handleFileOperation handles file operations (GET, POST, DELETE).
 // Route: /api/v1/sandboxes/:id/files/*path
 func (s *Server) handleFileOperation(c *gin.Context) {
 	sandboxID := c.Param("id")
@@ -25,47 +25,26 @@ func (s *Server) handleFileOperation(c *gin.Context) {
 		return // Error response already sent
 	}
 
-	// Determine the operation based on query params and method
-	method := c.Request.Method
-	query := c.Request.URL.Query()
+	c.Request.URL.Path = "/api/v1/files" + filePath
 
-	switch method {
-	case http.MethodGet:
-		if query.Get("stat") == "true" {
-			// File stat operation
-			c.Request.URL.Path = "/api/v1/files" + filePath
-			c.Request.URL.RawQuery = "stat=true"
-		} else if query.Get("list") == "true" {
-			// List directory operation
-			c.Request.URL.Path = "/api/v1/files" + filePath
-			c.Request.URL.RawQuery = "list=true"
-		} else {
-			// Read file operation
-			c.Request.URL.Path = "/api/v1/files" + filePath
-		}
+	s.proxyToProcd(c, procdURL)
+}
 
-	case http.MethodPost:
-		if query.Get("mkdir") == "true" {
-			// Create directory operation
-			c.Request.URL.Path = "/api/v1/files" + filePath
-			c.Request.URL.RawQuery = "mkdir=true"
-		} else if filePath == "/move" || c.Request.URL.Path == "/api/v1/sandboxes/"+sandboxID+"/files/move" {
-			// Move file operation
-			c.Request.URL.Path = "/api/v1/files/move"
-		} else {
-			// Write file operation
-			c.Request.URL.Path = "/api/v1/files" + filePath
-		}
-
-	case http.MethodDelete:
-		// Delete file/directory operation
-		c.Request.URL.Path = "/api/v1/files" + filePath
-
-	default:
-		spec.JSONError(c, http.StatusMethodNotAllowed, spec.CodeBadRequest, "method not allowed")
+// handleFileMove handles file move operation.
+// Route: /api/v1/sandboxes/:id/files/move
+func (s *Server) handleFileMove(c *gin.Context) {
+	sandboxID := c.Param("id")
+	if sandboxID == "" {
+		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
 		return
 	}
 
+	procdURL, err := s.getProcdURL(c, sandboxID)
+	if err != nil {
+		return
+	}
+
+	c.Request.URL.Path = "/api/v1/files/move"
 	s.proxyToProcd(c, procdURL)
 }
 

@@ -433,13 +433,16 @@ type CreateAPIKeyResponse struct {
 
 // CreateContextRequest defines model for CreateContextRequest.
 type CreateContextRequest struct {
-	Command  *[]string          `json:"command,omitempty"`
-	Cwd      *string            `json:"cwd,omitempty"`
-	EnvVars  *map[string]string `json:"env_vars,omitempty"`
-	Input    *string            `json:"input,omitempty"`
-	Language *string            `json:"language,omitempty"`
-	PtySize  *PTYSize           `json:"pty_size,omitempty"`
-	Type     *ProcessType       `json:"type,omitempty"`
+	Command        *[]string          `json:"command,omitempty"`
+	Cwd            *string            `json:"cwd,omitempty"`
+	EnvVars        *map[string]string `json:"env_vars,omitempty"`
+	IdleTimeoutSec *int32             `json:"idle_timeout_sec,omitempty"`
+	Input          *string            `json:"input,omitempty"`
+	Language       *string            `json:"language,omitempty"`
+	PtySize        *PTYSize           `json:"pty_size,omitempty"`
+	TtlSec         *int32             `json:"ttl_sec,omitempty"`
+	Type           *ProcessType       `json:"type,omitempty"`
+	WaitUntilDone  *bool              `json:"wait_until_done,omitempty"`
 }
 
 // CreateSandboxVolumeRequest defines model for CreateSandboxVolumeRequest.

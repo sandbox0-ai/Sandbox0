@@ -47,10 +47,10 @@ type SandboxResourceUsage struct {
 
 // Manager manages contexts in the sandbox.
 type Manager struct {
-	mu       sync.RWMutex
-	contexts map[string]*Context
-	onExit   process.ExitHandler
-	onStart  process.StartHandler
+	mu                   sync.RWMutex
+	contexts             map[string]*Context
+	onExit               process.ExitHandler
+	onStart              process.StartHandler
 	defaultCleanupPolicy CleanupPolicy
 	cleanupOnce          sync.Once
 }
