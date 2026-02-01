@@ -758,7 +758,7 @@ func (h *ContextHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 						continue
 					}
 					msg := map[string]any{
-						"type":       "done",
+						"type":       "ready",
 						"request_id": requestID,
 					}
 					if err := conn.WriteJSON(msg); err != nil {
@@ -806,7 +806,13 @@ func (h *ContextHandler) WebSocket(w http.ResponseWriter, r *http.Request) {
 			case "input":
 				setPendingRequestID(msg.RequestID)
 				if msg.Data != "" {
-					_ = h.manager.WriteInput(id, []byte(msg.Data))
+					input := msg.Data
+					if ctx.Type == process.ProcessTypeREPL {
+						if !strings.HasSuffix(input, "\n") && !strings.HasSuffix(input, "\r") {
+							input += "\n"
+						}
+					}
+					_ = h.manager.WriteInput(id, []byte(input))
 				}
 			case "resize":
 				if msg.Rows == 0 || msg.Cols == 0 {

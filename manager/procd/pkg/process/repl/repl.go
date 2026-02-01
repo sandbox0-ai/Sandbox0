@@ -17,7 +17,6 @@ type REPL struct {
 
 	// Ready detection state
 	mu          sync.Mutex
-	readyOnce   sync.Once
 	readyToken  []byte
 	readyBuffer []byte
 }
@@ -159,11 +158,6 @@ func (r *REPL) filterOutput(data []byte) ([]byte, bool) {
 		return data, false
 	}
 	promptDetected := r.detectReadyToken(data)
-	if promptDetected {
-		// Mark input readiness once, but keep emitting prompt signals
-		// on every prompt token so sync exec can complete each run.
-		_ = r.markReady()
-	}
 	return data, promptDetected
 }
 
@@ -205,14 +199,6 @@ func tailForToken(data []byte, tokenLen int) []byte {
 	return data[len(data)-(tokenLen-1):]
 }
 
-func (r *REPL) markReady() bool {
-	fired := false
-	r.readyOnce.Do(func() {
-		fired = true
-	})
-	return fired
-}
-
 func (r *REPL) scheduleStartupReady() {
 	if r.config.Ready.Mode != ReadyModeStartupDelay {
 		return
@@ -226,11 +212,9 @@ func (r *REPL) scheduleStartupReady() {
 		if !r.IsRunning() {
 			return
 		}
-		if r.markReady() {
-			r.BaseProcess.SignalInputReady()
-			r.BaseProcess.PublishOutput(process.ProcessOutput{
-				Source: process.OutputSourcePrompt,
-			})
-		}
+		r.BaseProcess.SignalInputReady()
+		r.BaseProcess.PublishOutput(process.ProcessOutput{
+			Source: process.OutputSourcePrompt,
+		})
 	}()
 }
