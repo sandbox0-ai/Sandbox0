@@ -827,6 +827,7 @@ type Sandbox struct {
 // SandboxConfig defines model for SandboxConfig.
 type SandboxConfig struct {
 	EnvVars *map[string]string       `json:"env_vars,omitempty"`
+	HardTtl *int32                   `json:"hard_ttl,omitempty"`
 	Network *TplSandboxNetworkPolicy `json:"network,omitempty"`
 	Ttl     *int32                   `json:"ttl,omitempty"`
 	Webhook *WebhookConfig           `json:"webhook,omitempty"`

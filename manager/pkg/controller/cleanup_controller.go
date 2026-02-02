@@ -7,6 +7,7 @@ import (
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -18,16 +19,22 @@ type SandboxPauser interface {
 	PauseSandboxByID(ctx context.Context, sandboxID string) error
 }
 
+// SandboxTerminator defines the interface for terminating sandboxes.
+type SandboxTerminator interface {
+	TerminateSandboxByID(ctx context.Context, sandboxID string) error
+}
+
 // CleanupController handles cleanup of excess idle pods and expired active pods
 type CleanupController struct {
-	k8sClient      kubernetes.Interface
-	podLister      corelisters.PodLister
-	templateLister TemplateLister
-	recorder       record.EventRecorder
-	clock          TimeProvider
-	sandboxPauser  SandboxPauser
-	logger         *zap.Logger
-	interval       time.Duration
+	k8sClient         kubernetes.Interface
+	podLister         corelisters.PodLister
+	templateLister    TemplateLister
+	recorder          record.EventRecorder
+	clock             TimeProvider
+	sandboxPauser     SandboxPauser
+	sandboxTerminator SandboxTerminator
+	logger            *zap.Logger
+	interval          time.Duration
 }
 
 // TimeProvider provides time functions, allowing for synchronized time across clusters
@@ -58,6 +65,7 @@ func NewCleanupController(
 	recorder record.EventRecorder,
 	clock TimeProvider,
 	sandboxPauser SandboxPauser,
+	sandboxTerminator SandboxTerminator,
 	logger *zap.Logger,
 	interval time.Duration,
 ) *CleanupController {
@@ -67,14 +75,15 @@ func NewCleanupController(
 	}
 
 	return &CleanupController{
-		k8sClient:      k8sClient,
-		podLister:      podLister,
-		templateLister: templateLister,
-		recorder:       recorder,
-		clock:          clock,
-		sandboxPauser:  sandboxPauser,
-		logger:         logger,
-		interval:       interval,
+		k8sClient:         k8sClient,
+		podLister:         podLister,
+		templateLister:    templateLister,
+		recorder:          recorder,
+		clock:             clock,
+		sandboxPauser:     sandboxPauser,
+		sandboxTerminator: sandboxTerminator,
+		logger:            logger,
+		interval:          interval,
 	}
 }
 
@@ -134,7 +143,48 @@ func (cc *CleanupController) cleanupExpired(ctx context.Context, template *v1alp
 	expiredCount := 0
 
 	for _, pod := range pods {
-		// Skip paused pods
+		// Hard expiry: delete even if paused.
+		if hardExpiresAtStr := pod.Annotations[AnnotationHardExpiresAt]; hardExpiresAtStr != "" {
+			hardExpiresAt, err := time.Parse(time.RFC3339, hardExpiresAtStr)
+			if err != nil {
+				cc.logger.Warn("Invalid hard-expires-at annotation",
+					zap.String("pod", pod.Name),
+					zap.String("value", hardExpiresAtStr),
+				)
+			} else if now.After(hardExpiresAt) {
+				cc.logger.Info("Deleting hard-expired pod",
+					zap.String("pod", pod.Name),
+					zap.Time("hardExpiresAt", hardExpiresAt),
+				)
+				if cc.sandboxTerminator != nil {
+					if err := cc.sandboxTerminator.TerminateSandboxByID(ctx, pod.Name); err != nil {
+						cc.logger.Error("Failed to delete hard-expired pod",
+							zap.String("pod", pod.Name),
+							zap.Error(err),
+						)
+						continue
+					}
+				} else {
+					cc.logger.Warn("SandboxTerminator not configured, deleting pod directly",
+						zap.String("pod", pod.Name),
+					)
+					if err := cc.k8sClient.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+						cc.logger.Error("Failed to delete hard-expired pod",
+							zap.String("pod", pod.Name),
+							zap.Error(err),
+						)
+						continue
+					}
+				}
+
+				cc.recorder.Eventf(template, corev1.EventTypeNormal, "HardExpiredPodDeleted",
+					"Deleted hard-expired pod %s", pod.Name)
+				expiredCount++
+				continue
+			}
+		}
+
+		// Skip paused pods for soft expiry.
 		if pod.Annotations[AnnotationPaused] == "true" {
 			continue
 		}

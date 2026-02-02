@@ -290,6 +290,7 @@ func main() {
 		recorder,
 		clk,
 		sandboxService,
+		sandboxService,
 		logger,
 		cfg.CleanupInterval.Duration,
 	)

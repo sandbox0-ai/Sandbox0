@@ -158,7 +158,8 @@ type ClaimRequest struct {
 // SandboxConfig represents sandbox configuration
 type SandboxConfig struct {
 	EnvVars map[string]string                 `json:"env_vars,omitempty"`
-	TTL     int32                             `json:"ttl,omitempty"` // Time-to-live in seconds
+	TTL     int32                             `json:"ttl,omitempty"`      // Time-to-live in seconds
+	HardTTL int32                             `json:"hard_ttl,omitempty"` // Hard time-to-live in seconds (0 disables)
 	Network *v1alpha1.TplSandboxNetworkPolicy `json:"network,omitempty"`
 	Webhook *WebhookConfig                    `json:"webhook,omitempty"`
 }
@@ -351,6 +352,10 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	}
 	expiresAt := s.clock.Now().Add(time.Duration(ttl) * time.Second)
 	pod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
+	if req.Config != nil && req.Config.HardTTL > 0 {
+		hardExpiresAt := s.clock.Now().Add(time.Duration(req.Config.HardTTL) * time.Second)
+		pod.Annotations[controller.AnnotationHardExpiresAt] = hardExpiresAt.Format(time.RFC3339)
+	}
 
 	// Serialize config
 	if req.Config != nil {
@@ -420,6 +425,10 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 	}
 	expiresAt := s.clock.Now().Add(time.Duration(ttl) * time.Second)
 	pod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
+	if req.Config != nil && req.Config.HardTTL > 0 {
+		hardExpiresAt := s.clock.Now().Add(time.Duration(req.Config.HardTTL) * time.Second)
+		pod.Annotations[controller.AnnotationHardExpiresAt] = hardExpiresAt.Format(time.RFC3339)
+	}
 
 	// Serialize config
 	if req.Config != nil {
@@ -1158,6 +1167,12 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 func (s *SandboxService) PauseSandboxByID(ctx context.Context, sandboxID string) error {
 	_, err := s.PauseSandbox(ctx, sandboxID)
 	return err
+}
+
+// TerminateSandboxByID implements the SandboxTerminator interface from controller package.
+// It wraps TerminateSandbox and returns only the error.
+func (s *SandboxService) TerminateSandboxByID(ctx context.Context, sandboxID string) error {
+	return s.TerminateSandbox(ctx, sandboxID)
 }
 
 // GetSandboxResourceUsage gets the resource usage of a sandbox.

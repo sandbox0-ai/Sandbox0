@@ -33,6 +33,7 @@ const (
 	AnnotationClaimedAt       = "sandbox0.ai/claimed-at"
 	AnnotationClaimType       = "sandbox0.ai/claim-type" // "hot" or "cold"
 	AnnotationExpiresAt       = "sandbox0.ai/expires-at"
+	AnnotationHardExpiresAt   = "sandbox0.ai/hard-expires-at"
 	AnnotationConfig          = "sandbox0.ai/config"
 	AnnotationPaused          = "sandbox0.ai/paused"
 	AnnotationPausedAt        = "sandbox0.ai/paused-at"

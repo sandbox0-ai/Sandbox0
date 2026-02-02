@@ -2411,6 +2411,9 @@ components:
         ttl:
           type: integer
           format: int32
+        hard_ttl:
+          type: integer
+          format: int32
         network:
           $ref: "#/components/schemas/TplSandboxNetworkPolicy"
         webhook:
