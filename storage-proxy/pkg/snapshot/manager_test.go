@@ -126,6 +126,13 @@ func (f *fakeVolumeProvider) GetVolume(volumeID string) (*volume.VolumeContext, 
 	return f.ctx, nil
 }
 
+func (f *fakeVolumeProvider) UpdateVolumeRoot(volumeID string, rootInode meta.Ino) error {
+	if f.err != nil {
+		return f.err
+	}
+	return nil
+}
+
 type fakeMeta struct {
 	mu           sync.Mutex
 	pathToIno    map[string]meta.Ino

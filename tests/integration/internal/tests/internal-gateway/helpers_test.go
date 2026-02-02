@@ -22,6 +22,7 @@ import (
 	gatewaymigrations "github.com/sandbox0-ai/infra/pkg/gateway/migrations"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/migrate"
+	"github.com/sandbox0-ai/infra/pkg/observability"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -61,7 +62,8 @@ func newGatewayTestEnv(t *testing.T, managerURL, storageProxyURL string, schedul
 		ProcdStoragePermissions: []string{"sandboxvolume:read"},
 	}
 
-	server, err := gatewayhttp.NewServer(cfg, nil, zap.NewNop())
+	obsProvider := newTestObservability(t, "internal-gateway-test")
+	server, err := gatewayhttp.NewServer(cfg, nil, zap.NewNop(), obsProvider)
 	if err != nil {
 		t.Fatalf("create internal-gateway server: %v", err)
 	}
@@ -105,7 +107,8 @@ func newGatewayPublicTestEnv(t *testing.T, managerURL, storageProxyURL string, p
 		ProcdStoragePermissions: []string{"sandboxvolume:read"},
 	}
 
-	server, err := gatewayhttp.NewServer(cfg, pool, zap.NewNop())
+	obsProvider := newTestObservability(t, "internal-gateway-test")
+	server, err := gatewayhttp.NewServer(cfg, pool, zap.NewNop(), obsProvider)
 	if err != nil {
 		t.Fatalf("create internal-gateway server: %v", err)
 	}
@@ -158,6 +161,24 @@ func newGatewayTestDB(t *testing.T) (*pgxpool.Pool, *gatewaydb.Repository, strin
 	})
 
 	return pool, gatewaydb.NewRepository(pool), schema
+}
+
+func newTestObservability(t *testing.T, serviceName string) *observability.Provider {
+	t.Helper()
+	provider, err := observability.New(observability.Config{
+		ServiceName:    serviceName,
+		Logger:         zap.NewNop(),
+		DisableTracing: true,
+		DisableMetrics: true,
+		DisableLogging: true,
+	})
+	if err != nil {
+		t.Fatalf("create observability provider: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+	})
+	return provider
 }
 
 func writeInternalGatewayKeys(t *testing.T) (internalauth.PrivateKeyType, internalauth.PublicKeyType) {

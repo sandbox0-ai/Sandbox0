@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sandbox_volumes (
     prefetch INTEGER NOT NULL DEFAULT 0,
     buffer_size TEXT NOT NULL DEFAULT '32M',
     writeback BOOLEAN NOT NULL DEFAULT false,
-    read_only BOOLEAN NOT NULL DEFAULT false,
+    access_mode TEXT NOT NULL DEFAULT 'RWO',
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

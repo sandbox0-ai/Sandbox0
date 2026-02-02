@@ -61,9 +61,6 @@ func TestMergeVolumeConfig(t *testing.T) {
 	if cfg.Writeback != false {
 		t.Fatalf("expected writeback override")
 	}
-	if cfg.ReadOnly {
-		t.Fatalf("expected read-only default false")
-	}
 }
 
 func TestMergeVolumeConfigNilDefaults(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sirupsen/logrus"
 )
 
@@ -200,7 +201,7 @@ func TestRegisterMount_Success(t *testing.T) {
 		return nil
 	}
 
-	err := coord.RegisterMount(ctx, volumeID)
+	err := coord.RegisterMount(ctx, volumeID, volume.MountOptions{})
 	if err != nil {
 		t.Fatalf("RegisterMount failed: %v", err)
 	}
@@ -241,7 +242,7 @@ func TestRegisterMount_DatabaseError(t *testing.T) {
 		return dbError
 	}
 
-	err := coord.RegisterMount(ctx, volumeID)
+	err := coord.RegisterMount(ctx, volumeID, volume.MountOptions{})
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -268,8 +269,8 @@ func TestRegisterMount_AlreadyRegistered(t *testing.T) {
 	}
 
 	// Register twice
-	_ = coord.RegisterMount(ctx, volumeID)
-	_ = coord.RegisterMount(ctx, volumeID)
+	_ = coord.RegisterMount(ctx, volumeID, volume.MountOptions{})
+	_ = coord.RegisterMount(ctx, volumeID, volume.MountOptions{})
 
 	// Should only call CreateMount once
 	if atomic.LoadInt32(&callCount) != 1 {
@@ -461,7 +462,7 @@ func TestConcurrentRegisterUnregister(t *testing.T) {
 		volumeID := uuid.New().String()
 		go func(vid string) {
 			defer wg.Done()
-			_ = coord.RegisterMount(ctx, vid)
+			_ = coord.RegisterMount(ctx, vid, volume.MountOptions{})
 		}(volumeID)
 	}
 
@@ -551,7 +552,7 @@ func BenchmarkRegisterMount(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		volumeID := "vol-" + uuid.New().String()
-		_ = coord.RegisterMount(ctx, volumeID)
+		_ = coord.RegisterMount(ctx, volumeID, volume.MountOptions{})
 	}
 }
 

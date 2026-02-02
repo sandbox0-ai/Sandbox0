@@ -472,11 +472,11 @@ type CreateREPLContextRequest struct {
 
 // CreateSandboxVolumeRequest defines model for CreateSandboxVolumeRequest.
 type CreateSandboxVolumeRequest struct {
-	BufferSize *string `json:"buffer_size,omitempty"`
-	CacheSize  *string `json:"cache_size,omitempty"`
-	Prefetch   *int    `json:"prefetch,omitempty"`
-	ReadOnly   *bool   `json:"read_only,omitempty"`
-	Writeback  *bool   `json:"writeback,omitempty"`
+	AccessMode *VolumeAccessMode `json:"access_mode,omitempty"`
+	BufferSize *string           `json:"buffer_size,omitempty"`
+	CacheSize  *string           `json:"cache_size,omitempty"`
+	Prefetch   *int              `json:"prefetch,omitempty"`
+	Writeback  *bool             `json:"writeback,omitempty"`
 }
 
 // CreateSnapshotRequest defines model for CreateSnapshotRequest.
@@ -914,16 +914,16 @@ type SandboxUpdateRequest struct {
 
 // SandboxVolume defines model for SandboxVolume.
 type SandboxVolume struct {
-	BufferSize string    `json:"buffer_size"`
-	CacheSize  string    `json:"cache_size"`
-	CreatedAt  time.Time `json:"created_at"`
-	Id         string    `json:"id"`
-	Prefetch   *int      `json:"prefetch,omitempty"`
-	ReadOnly   *bool     `json:"read_only,omitempty"`
-	TeamId     string    `json:"team_id"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	UserId     string    `json:"user_id"`
-	Writeback  *bool     `json:"writeback,omitempty"`
+	AccessMode *VolumeAccessMode `json:"access_mode,omitempty"`
+	BufferSize string            `json:"buffer_size"`
+	CacheSize  string            `json:"cache_size"`
+	CreatedAt  time.Time         `json:"created_at"`
+	Id         string            `json:"id"`
+	Prefetch   *int              `json:"prefetch,omitempty"`
+	TeamId     string            `json:"team_id"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+	UserId     string            `json:"user_id"`
+	Writeback  *bool             `json:"writeback,omitempty"`
 }
 
 // SecurityContext defines model for SecurityContext.
@@ -1466,9 +1466,11 @@ type VolumeConfig struct {
 	BufferSize *string `json:"buffer_size,omitempty"`
 	CacheSize  *string `json:"cache_size,omitempty"`
 	Prefetch   *int32  `json:"prefetch,omitempty"`
-	ReadOnly   *bool   `json:"read_only,omitempty"`
 	Writeback  *bool   `json:"writeback,omitempty"`
 }
+
+// VolumeAccessMode defines model for VolumeAccessMode.
+type VolumeAccessMode string
 
 // WarmPoolRequest defines model for WarmPoolRequest.
 type WarmPoolRequest struct {

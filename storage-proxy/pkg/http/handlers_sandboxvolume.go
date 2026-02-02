@@ -10,6 +10,7 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 )
 
 type createSandboxVolumeRequest struct {
@@ -17,7 +18,7 @@ type createSandboxVolumeRequest struct {
 	Prefetch   int    `json:"prefetch"`
 	BufferSize string `json:"buffer_size"`
 	Writeback  bool   `json:"writeback"`
-	ReadOnly   bool   `json:"read_only"`
+	AccessMode string `json:"access_mode"`
 }
 
 func (s *Server) createSandboxVolume(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +49,16 @@ func (s *Server) createSandboxVolume(w http.ResponseWriter, r *http.Request) {
 		req.BufferSize = "32M"
 	}
 
+	accessMode, ok := volume.ParseAccessMode(req.AccessMode)
+	if req.AccessMode == "" {
+		accessMode = volume.AccessModeRWO
+		ok = true
+	}
+	if !ok {
+		_ = spec.WriteError(w, http.StatusBadRequest, spec.CodeBadRequest, "invalid access_mode")
+		return
+	}
+
 	vol := &db.SandboxVolume{
 		ID:         uuid.New().String(),
 		TeamID:     teamId,
@@ -56,7 +67,7 @@ func (s *Server) createSandboxVolume(w http.ResponseWriter, r *http.Request) {
 		Prefetch:   req.Prefetch,
 		BufferSize: req.BufferSize,
 		Writeback:  req.Writeback,
-		ReadOnly:   req.ReadOnly,
+		AccessMode: string(accessMode),
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}

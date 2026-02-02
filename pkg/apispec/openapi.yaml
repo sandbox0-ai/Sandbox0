@@ -3114,8 +3114,14 @@ components:
           type: string
         writeback:
           type: boolean
-        read_only:
-          type: boolean
+    VolumeAccessMode:
+      type: string
+      enum: [RWO, ROX, RWX]
+      description: >-
+        Access mode for sandbox volumes. Enforcement is scoped to storage-proxy
+        instances. RWO allows read-write mounts on a single instance; ROX allows
+        read-only mounts across instances; RWX allows read-write mounts across
+        instances.
     MountResponse:
       type: object
       properties:
@@ -3174,8 +3180,9 @@ components:
           type: string
         writeback:
           type: boolean
-        read_only:
-          type: boolean
+        access_mode:
+          $ref: "#/components/schemas/VolumeAccessMode"
+          description: Access mode for the volume. Defaults to RWO when omitted.
     SandboxVolume:
       type: object
       properties:
@@ -3193,8 +3200,9 @@ components:
           type: string
         writeback:
           type: boolean
-        read_only:
-          type: boolean
+        access_mode:
+          $ref: "#/components/schemas/VolumeAccessMode"
+          description: Configured access mode for the volume.
         created_at:
           type: string
           format: date-time

@@ -274,7 +274,6 @@ message VolumeConfig {
   int32 prefetch = 2;
   string buffer_size = 3;
   bool writeback = 4;
-  bool read_only = 5;
 }
 
 message MountVolumeResponse {

@@ -10,6 +10,7 @@ import (
 	"github.com/juicedata/juicefs/pkg/vfs"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/naming"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/notify"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
@@ -23,18 +24,25 @@ type FileSystemServer struct {
 	pb.UnimplementedFileSystemServer
 
 	volMgr           *volume.Manager
+	volumeRepo       VolumeRepository
 	eventHub         *notify.Hub
 	eventBroadcaster notify.Broadcaster
 	logger           *logrus.Logger
 }
 
+// VolumeRepository provides volume metadata lookup for access mode enforcement.
+type VolumeRepository interface {
+	GetSandboxVolume(ctx context.Context, id string) (*db.SandboxVolume, error)
+}
+
 // NewFileSystemServer creates a new file system server
-func NewFileSystemServer(volMgr *volume.Manager, eventHub *notify.Hub, eventBroadcaster notify.Broadcaster, logger *logrus.Logger) *FileSystemServer {
+func NewFileSystemServer(volMgr *volume.Manager, volumeRepo VolumeRepository, eventHub *notify.Hub, eventBroadcaster notify.Broadcaster, logger *logrus.Logger) *FileSystemServer {
 	if eventBroadcaster == nil && eventHub != nil {
 		eventBroadcaster = notify.NewLocalBroadcaster(eventHub)
 	}
 	return &FileSystemServer{
 		volMgr:           volMgr,
+		volumeRepo:       volumeRepo,
 		eventHub:         eventHub,
 		eventBroadcaster: eventBroadcaster,
 		logger:           logger,
@@ -50,12 +58,28 @@ func (s *FileSystemServer) MountVolume(ctx context.Context, req *pb.MountVolumeR
 		return nil, status.Error(codes.Unauthenticated, "team id not found in context")
 	}
 
+	if req.Config == nil {
+		req.Config = &pb.VolumeConfig{}
+	}
+
+	accessMode := volume.AccessModeRWO
+	if s.volumeRepo != nil {
+		vol, err := s.volumeRepo.GetSandboxVolume(ctx, req.VolumeId)
+		if err != nil {
+			if err == db.ErrNotFound {
+				return nil, status.Error(codes.NotFound, "sandbox volume not found")
+			}
+			s.logger.WithError(err).WithField("volume_id", req.VolumeId).Error("Failed to load sandbox volume")
+			return nil, status.Error(codes.Internal, "failed to load sandbox volume")
+		}
+		accessMode = volume.NormalizeAccessMode(vol.AccessMode)
+	}
+
 	config := &volume.VolumeConfig{
 		CacheSize:  req.Config.CacheSize,
 		Prefetch:   int(req.Config.Prefetch),
 		BufferSize: req.Config.BufferSize,
 		Writeback:  req.Config.Writeback,
-		ReadOnly:   req.Config.ReadOnly,
 	}
 
 	// Build S3 prefix with team ID for multi-tenant isolation (object-store namespace).
@@ -64,7 +88,7 @@ func (s *FileSystemServer) MountVolume(ctx context.Context, req *pb.MountVolumeR
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	err = s.volMgr.MountVolume(ctx, prefix, req.VolumeId, config)
+	err = s.volMgr.MountVolume(ctx, prefix, req.VolumeId, config, accessMode)
 	if err != nil {
 		s.logger.WithError(err).WithField("volume_id", req.VolumeId).Error("Failed to mount volume")
 		return nil, status.Error(codes.Internal, err.Error())

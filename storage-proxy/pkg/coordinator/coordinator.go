@@ -20,6 +20,7 @@ import (
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/metrics"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sirupsen/logrus"
 
 	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
@@ -229,7 +230,7 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 }
 
 // RegisterMount registers a volume mount for this instance
-func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string) error {
+func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string, options volume.MountOptions) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -245,6 +246,14 @@ func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string) error 
 	c.mountedVolumes[volumeID] = struct{}{}
 	metrics.CoordinatorMountsActive.Inc()
 
+	normalizedOptions := options
+	normalizedOptions.AccessMode = volume.NormalizeAccessMode(string(options.AccessMode))
+	rawOptions, err := json.Marshal(normalizedOptions)
+	if err != nil {
+		return fmt.Errorf("marshal mount options: %w", err)
+	}
+	rawMsg := json.RawMessage(rawOptions)
+
 	mount := &db.VolumeMount{
 		ID:            uuid.New().String(),
 		VolumeID:      volumeID,
@@ -252,6 +261,7 @@ func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string) error 
 		PodID:         c.podID,
 		LastHeartbeat: time.Now(),
 		MountedAt:     time.Now(),
+		MountOptions:  &rawMsg,
 	}
 
 	if err := c.repo.CreateMount(ctx, mount); err != nil {
@@ -275,6 +285,54 @@ func (c *Coordinator) RegisterMount(ctx context.Context, volumeID string) error 
 	}).Debug("Registered mount")
 
 	return nil
+}
+
+// ValidateMount enforces access mode constraints across storage-proxy instances.
+func (c *Coordinator) ValidateMount(ctx context.Context, volumeID string, accessMode volume.AccessMode) error {
+	accessMode = volume.NormalizeAccessMode(string(accessMode))
+
+	heartbeatTimeout := c.config.HeartbeatTimeout
+	if heartbeatTimeout == 0 {
+		heartbeatTimeout = HeartbeatTimeout
+	}
+
+	mounts, err := c.repo.GetActiveMounts(ctx, volumeID, heartbeatTimeout)
+	if err != nil {
+		return fmt.Errorf("get active mounts: %w", err)
+	}
+
+	switch accessMode {
+	case volume.AccessModeRWO:
+		for _, mount := range mounts {
+			if mount.ClusterID != c.clusterID || mount.PodID != c.podID {
+				return fmt.Errorf("volume %s already mounted on another instance", volumeID)
+			}
+		}
+		return nil
+	case volume.AccessModeROX:
+		for _, mount := range mounts {
+			if !isMountROX(mount) {
+				return fmt.Errorf("volume %s already mounted read-write", volumeID)
+			}
+		}
+		return nil
+	case volume.AccessModeRWX:
+		return nil
+	default:
+		return fmt.Errorf("invalid access_mode %q", accessMode)
+	}
+}
+
+func isMountROX(mount *db.VolumeMount) bool {
+	if mount == nil || mount.MountOptions == nil {
+		return false
+	}
+
+	var options volume.MountOptions
+	if err := json.Unmarshal(*mount.MountOptions, &options); err != nil {
+		return false
+	}
+	return volume.NormalizeAccessMode(string(options.AccessMode)) == volume.AccessModeROX
 }
 
 // UnregisterMount unregisters a volume mount for this instance
@@ -659,7 +717,7 @@ func (c *Coordinator) updateHeartbeats(ctx context.Context) {
 				c.mu.Unlock()
 
 				// Try to re-register
-				if err := c.RegisterMount(ctx, volumeID); err != nil {
+				if err := c.RegisterMount(ctx, volumeID, volume.MountOptions{}); err != nil {
 					c.logger.WithError(err).WithField("volume_id", volumeID).Warn("Failed to re-register mount")
 				}
 			} else {

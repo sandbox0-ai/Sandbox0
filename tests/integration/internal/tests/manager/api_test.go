@@ -20,6 +20,7 @@ import (
 	managerhttp "github.com/sandbox0-ai/infra/manager/pkg/http"
 	"github.com/sandbox0-ai/infra/manager/pkg/service"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
+	"github.com/sandbox0-ai/infra/pkg/observability"
 	"github.com/sandbox0-ai/infra/tests/integration/internal/utils"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -141,6 +142,18 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 	cfg.AllowedCallers = []string{"internal-gateway"}
 	validator := internalauth.NewValidator(cfg)
 
+	obsProvider, err := observability.New(observability.Config{
+		ServiceName:    "manager-test",
+		Logger:         logger,
+		DisableTracing: true,
+		DisableMetrics: true,
+		DisableLogging: true,
+	})
+	utils.RequireNoError(t, err, "create observability provider")
+	t.Cleanup(func() {
+		_ = obsProvider.Shutdown(context.Background())
+	})
+
 	server := managerhttp.NewServer(
 		sandboxService,
 		templateService,
@@ -148,6 +161,7 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 		validator,
 		logger,
 		0,
+		obsProvider,
 	)
 
 	httpServer := httptest.NewServer(server.Handler())

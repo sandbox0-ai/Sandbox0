@@ -21,8 +21,9 @@ import (
 
 // MountRegistrar handles registration of volume mounts for distributed coordination
 type MountRegistrar interface {
-	RegisterMount(ctx context.Context, volumeID string) error
+	RegisterMount(ctx context.Context, volumeID string, options MountOptions) error
 	UnregisterMount(ctx context.Context, volumeID string) error
+	ValidateMount(ctx context.Context, volumeID string, accessMode AccessMode) error
 }
 
 // VolumeConfig holds the configuration for a volume
@@ -31,7 +32,6 @@ type VolumeConfig struct {
 	Prefetch   int
 	BufferSize string
 	Writeback  bool
-	ReadOnly   bool
 }
 
 // VolumeContext holds JuiceFS VFS instance for a volume
@@ -41,6 +41,7 @@ type VolumeContext struct {
 	Store     chunk.ChunkStore
 	VFS       *vfs.VFS
 	Config    *VolumeConfig
+	Access    AccessMode
 	MountedAt time.Time
 	RootInode meta.Ino
 	RootPath  string
@@ -74,14 +75,28 @@ func (m *Manager) SetMountRegistrar(registrar MountRegistrar) {
 	m.registrar = registrar
 }
 
-// MountVolume mounts a JuiceFS volume using SDK mode (in-memory, no FUSE)
-func (m *Manager) MountVolume(ctx context.Context, s3Prefix, volumeID string, config *VolumeConfig) error {
+// MountVolume mounts a JuiceFS volume using SDK mode (in-memory, no FUSE).
+// AccessMode is enforced per storage-proxy instance (not per sandbox).
+func (m *Manager) MountVolume(ctx context.Context, s3Prefix, volumeID string, config *VolumeConfig, accessMode AccessMode) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	accessMode = NormalizeAccessMode(string(accessMode))
+	readOnly := accessMode == AccessModeROX
+
+	// Validate mount with coordinator if available.
+	if m.registrar != nil {
+		if err := m.registrar.ValidateMount(ctx, volumeID, accessMode); err != nil {
+			return err
+		}
+	}
+
 	// Check if already mounted
-	if _, exists := m.volumes[volumeID]; exists {
-		return fmt.Errorf("volume %s already mounted", volumeID)
+	if existing, exists := m.volumes[volumeID]; exists {
+		if existing.Access != accessMode {
+			return fmt.Errorf("volume %s already mounted with access_mode=%s", volumeID, existing.Access)
+		}
+		return nil
 	}
 
 	m.logger.WithField("volume_id", volumeID).Info("Mounting volume")
@@ -92,7 +107,7 @@ func (m *Manager) MountVolume(ctx context.Context, s3Prefix, volumeID string, co
 	if metaConf.Retries == 0 {
 		metaConf.Retries = 10
 	}
-	metaConf.ReadOnly = config.ReadOnly
+	metaConf.ReadOnly = readOnly
 
 	metaClient := meta.NewClient(m.config.MetaURL, metaConf)
 
@@ -179,6 +194,7 @@ func (m *Manager) MountVolume(ctx context.Context, s3Prefix, volumeID string, co
 		Store:     store,
 		VFS:       vfsInst,
 		Config:    config,
+		Access:    accessMode,
 		MountedAt: time.Now(),
 		RootInode: rootInode,
 		RootPath:  rootPath,
@@ -186,16 +202,18 @@ func (m *Manager) MountVolume(ctx context.Context, s3Prefix, volumeID string, co
 
 	// 7. Register mount for distributed coordination (if registrar is set)
 	if m.registrar != nil {
-		if err := m.registrar.RegisterMount(ctx, volumeID); err != nil {
+		if err := m.registrar.RegisterMount(ctx, volumeID, MountOptions{
+			AccessMode: accessMode,
+		}); err != nil {
 			m.logger.WithError(err).Warn("Failed to register mount for coordination")
 			// Don't fail the mount operation, coordination is optional
 		}
 	}
 
 	m.logger.WithFields(logrus.Fields{
-		"volume_id": volumeID,
-		"cache_dir": cacheDir,
-		"read_only": config.ReadOnly,
+		"volume_id":   volumeID,
+		"cache_dir":   cacheDir,
+		"access_mode": accessMode,
 	}).Info("Volume mounted successfully")
 
 	return nil

@@ -224,7 +224,7 @@ func main() {
 	)
 
 	// Register FileSystem service
-	fsServer := grpcserver.NewFileSystemServer(volMgr, eventHub, eventBroadcaster, logrusLogger)
+	fsServer := grpcserver.NewFileSystemServer(volMgr, repo, eventHub, eventBroadcaster, logrusLogger)
 	pb.RegisterFileSystemServer(grpcServer, fsServer)
 
 	// Register health service

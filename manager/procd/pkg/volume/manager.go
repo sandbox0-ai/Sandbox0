@@ -304,7 +304,6 @@ func (m *Manager) mergeVolumeConfig(override *VolumeConfig) *pb.VolumeConfig {
 	prefetch := int32(0)
 	bufferSize := ""
 	writeback := false
-	readOnly := false
 
 	if m.cfg != nil {
 		cacheSize = m.cfg.JuiceFSCacheSize
@@ -326,9 +325,6 @@ func (m *Manager) mergeVolumeConfig(override *VolumeConfig) *pb.VolumeConfig {
 		if override.Writeback != nil {
 			writeback = *override.Writeback
 		}
-		if override.ReadOnly != nil {
-			readOnly = *override.ReadOnly
-		}
 	}
 
 	return &pb.VolumeConfig{
@@ -336,7 +332,6 @@ func (m *Manager) mergeVolumeConfig(override *VolumeConfig) *pb.VolumeConfig {
 		Prefetch:   prefetch,
 		BufferSize: bufferSize,
 		Writeback:  writeback,
-		ReadOnly:   readOnly,
 	}
 }
 

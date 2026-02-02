@@ -16,7 +16,7 @@ type SandboxVolume struct {
 	Prefetch   int    `json:"prefetch"`
 	BufferSize string `json:"buffer_size"`
 	Writeback  bool   `json:"writeback"`
-	ReadOnly   bool   `json:"read_only"`
+	AccessMode string `json:"access_mode"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

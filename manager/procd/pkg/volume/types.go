@@ -27,7 +27,6 @@ type VolumeConfig struct {
 	Prefetch   *int32 `json:"prefetch,omitempty"`
 	BufferSize string `json:"buffer_size,omitempty"`
 	Writeback  *bool  `json:"writeback,omitempty"`
-	ReadOnly   *bool  `json:"read_only,omitempty"`
 }
 
 // MountRequest represents a request to mount a sandbox volume.
