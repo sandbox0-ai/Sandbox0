@@ -23,7 +23,7 @@ type grpcFS struct {
 }
 
 func newGrpcFS(volumeID string, client pb.FileSystemClient, tokenProvider TokenProvider, cacheTTL time.Duration, logger *zap.Logger) *grpcFS {
-	if cacheTTL <= 0 {
+	if cacheTTL < 0 {
 		cacheTTL = time.Second
 	}
 	return &grpcFS{

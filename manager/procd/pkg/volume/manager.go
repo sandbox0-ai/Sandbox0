@@ -25,6 +25,7 @@ type mountInfo struct {
 	fs          *grpcFS
 	cancelWatch context.CancelFunc
 	watchDone   chan struct{}
+	remounting  bool
 }
 
 // Manager manages sandbox volume mounts in a sandbox.
@@ -439,6 +440,11 @@ func (m *Manager) emitWatchEvent(info *mountInfo, event *pb.WatchEvent) {
 		return
 	}
 
+	if event.EventType == pb.WatchEventType_WATCH_EVENT_TYPE_INVALIDATE && (event.Path == "" || event.Path == "/") {
+		go m.remountVolume(info.volumeID)
+		return
+	}
+
 	m.mu.RLock()
 	sink := m.eventSink
 	m.mu.RUnlock()
@@ -462,4 +468,56 @@ func joinMountPath(mountPoint, path string) string {
 	}
 	trimmed := strings.TrimPrefix(path, "/")
 	return filepath.Join(mountPoint, trimmed)
+}
+
+func (m *Manager) remountVolume(volumeID string) {
+	m.mu.Lock()
+	info, ok := m.mounts[volumeID]
+	if !ok || info == nil || info.remounting {
+		m.mu.Unlock()
+		return
+	}
+	info.remounting = true
+	mountPoint := info.mountPoint
+	m.mu.Unlock()
+
+	defer func() {
+		m.mu.Lock()
+		if info, ok := m.mounts[volumeID]; ok && info != nil {
+			info.remounting = false
+		}
+		m.mu.Unlock()
+	}()
+
+	m.logger.Info("Remounting volume to invalidate cache",
+		zap.String("volume_id", volumeID),
+		zap.String("mount_point", mountPoint),
+	)
+
+	if info.fuseServer != nil {
+		if err := info.fuseServer.Unmount(); err != nil {
+			m.logger.Warn("Failed to unmount fuse server during remount", zap.Error(err))
+		}
+	}
+
+	client, err := m.getClient(context.Background())
+	if err != nil {
+		m.logger.Warn("Failed to get storage-proxy client during remount", zap.Error(err))
+		return
+	}
+
+	fs := newGrpcFS(volumeID, client, m.tokenProvider, m.cfg.CacheTTL, m.logger)
+	server, err := m.mountFuse(fs, mountPoint)
+	if err != nil {
+		m.logger.Warn("Failed to remount fuse server", zap.Error(err))
+		return
+	}
+
+	m.mu.Lock()
+	if info, ok := m.mounts[volumeID]; ok && info != nil {
+		info.fuseServer = server
+		info.fs = fs
+		info.mountedAt = time.Now()
+	}
+	m.mu.Unlock()
 }

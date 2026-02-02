@@ -19,12 +19,14 @@ import (
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/metrics"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
+	pb "github.com/sandbox0-ai/infra/storage-proxy/proto/fs"
 	"github.com/sirupsen/logrus"
 )
 
 // volumeProvider abstracts the subset of volume.Manager needed by snapshot.Manager.
 type volumeProvider interface {
 	GetVolume(string) (*volume.VolumeContext, error)
+	UpdateVolumeRoot(volumeID string, rootInode meta.Ino) error
 }
 
 type repository interface {
@@ -62,16 +64,17 @@ var (
 
 // Manager handles snapshot operations for SandboxVolumes
 type Manager struct {
-	mu          sync.RWMutex
-	locks       map[string]time.Time // volumeID -> lock acquired time
-	repo        repository
-	volMgr      volumeProvider
-	coordinator FlushCoordinator // Optional: for distributed coordination
-	config      *config.StorageProxyConfig
-	logger      *logrus.Logger
-	clusterID   string
-	podID       string
-	metaClient  metaClient // Independent meta client for snapshot operations (no mount required)
+	mu             sync.RWMutex
+	locks          map[string]time.Time // volumeID -> lock acquired time
+	repo           repository
+	volMgr         volumeProvider
+	coordinator    FlushCoordinator // Optional: for distributed coordination
+	config         *config.StorageProxyConfig
+	logger         *logrus.Logger
+	clusterID      string
+	podID          string
+	metaClient     metaClient // Independent meta client for snapshot operations (no mount required)
+	eventPublisher eventPublisher
 }
 
 // NewManager creates a new snapshot manager
@@ -108,6 +111,13 @@ func NewManager(
 		podID:      uuid.New().String(), // Unique pod identifier
 		metaClient: metaClient,          // Independent meta client
 	}, nil
+}
+
+// SetEventPublisher wires a watcher event publisher (optional).
+func (m *Manager) SetEventPublisher(publisher eventPublisher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.eventPublisher = publisher
 }
 
 // SetFlushCoordinator sets the flush coordinator for distributed coordination.
@@ -429,7 +439,18 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 		return fmt.Errorf("%w: %s", ErrCloneFailed, errno.Error())
 	}
 
-	// 7. Delete the backup
+	// 7. Refresh volume root inode for mounted volumes
+	if m.volMgr != nil {
+		if _, newRootIno, lookupErr := m.lookupPath(volumePath); lookupErr == nil {
+			if err := m.volMgr.UpdateVolumeRoot(req.VolumeID, newRootIno); err != nil {
+				m.logger.WithError(err).Warn("Failed to update volume root inode after restore")
+			}
+		} else {
+			m.logger.WithError(lookupErr).Warn("Failed to lookup volume path after restore")
+		}
+	}
+
+	// 8. Delete the backup
 	var removeCount uint64
 	tempPath, _ := naming.JuiceFSVolumePath(tempName)
 	tempIno, _, _ := m.lookupPath(tempPath)
@@ -446,6 +467,7 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 		"clone_count": cloneCount,
 	}).Info("Snapshot restored successfully")
 
+	m.publishInvalidateEvent(req.VolumeID)
 	return nil
 }
 
@@ -541,6 +563,10 @@ type metaClient interface {
 	Remove(meta.Context, meta.Ino, string, bool, int, *uint64) syscall.Errno
 }
 
+type eventPublisher interface {
+	Publish(ctx context.Context, event *pb.WatchEvent)
+}
+
 // lookupPath resolves a path to parent inode and target inode
 func (m *Manager) lookupPath(path string) (parentIno, targetIno meta.Ino, err error) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
@@ -631,6 +657,24 @@ func (m *Manager) deleteSnapshotDir(ctx context.Context, snapshotPath string) {
 	if errno != 0 && errno != syscall.ENOENT {
 		m.logger.WithError(errno).Warn("Failed to delete snapshot directory")
 	}
+}
+
+func (m *Manager) publishInvalidateEvent(volumeID string) {
+	m.mu.RLock()
+	publisher := m.eventPublisher
+	podID := m.podID
+	m.mu.RUnlock()
+	if publisher == nil {
+		return
+	}
+
+	publisher.Publish(context.Background(), &pb.WatchEvent{
+		VolumeId:       volumeID,
+		EventType:      pb.WatchEventType_WATCH_EVENT_TYPE_INVALIDATE,
+		Path:           "/",
+		TimestampUnix:  time.Now().Unix(),
+		OriginInstance: podID,
+	})
 }
 
 // acquireVolumeLock tries to acquire a lock for restore operations

@@ -254,6 +254,9 @@ func main() {
 	if err != nil {
 		zapLogger.Fatal("Failed to initialize snapshot manager", zap.Error(err))
 	}
+	if eventBroadcaster != nil {
+		snapshotMgr.SetEventPublisher(eventBroadcaster)
+	}
 
 	// Set coordinator for snapshot manager (for distributed flush)
 	if coord != nil {

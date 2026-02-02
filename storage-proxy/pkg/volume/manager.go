@@ -316,6 +316,19 @@ func (m *Manager) GetVolume(volumeID string) (*VolumeContext, error) {
 	return volCtx, nil
 }
 
+// UpdateVolumeRoot updates the root inode for a mounted volume.
+func (m *Manager) UpdateVolumeRoot(volumeID string, rootInode meta.Ino) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	volCtx, ok := m.volumes[volumeID]
+	if !ok {
+		return fmt.Errorf("volume %s not mounted", volumeID)
+	}
+	volCtx.RootInode = rootInode
+	return nil
+}
+
 // ListVolumes returns all mounted volumes
 func (m *Manager) ListVolumes() []string {
 	m.mu.RLock()
