@@ -46,7 +46,6 @@ type Watcher struct {
 	k8sClient       kubernetes.Interface
 	informerFactory informers.SharedInformerFactory
 	nodeName        string
-	namespace       string
 	logger          *zap.Logger
 
 	// Pod mapping: podIP -> SandboxInfo
@@ -68,27 +67,16 @@ type Watcher struct {
 func NewWatcher(
 	k8sClient kubernetes.Interface,
 	nodeName string,
-	namespace string,
 	resyncPeriod time.Duration,
 	logger *zap.Logger,
 ) *Watcher {
 	// Create informer factory for the specific namespace or all namespaces
-	var informerFactory informers.SharedInformerFactory
-	if namespace != "" {
-		informerFactory = informers.NewSharedInformerFactoryWithOptions(
-			k8sClient,
-			resyncPeriod,
-			informers.WithNamespace(namespace),
-		)
-	} else {
-		informerFactory = informers.NewSharedInformerFactory(k8sClient, resyncPeriod)
-	}
+	informerFactory := informers.NewSharedInformerFactory(k8sClient, resyncPeriod)
 
 	return &Watcher{
 		k8sClient:       k8sClient,
 		informerFactory: informerFactory,
 		nodeName:        nodeName,
-		namespace:       namespace,
 		logger:          logger,
 		podMapping:      make(map[string]*SandboxInfo),
 		policyCache: &PolicyCache{
@@ -424,6 +412,12 @@ func (w *Watcher) ListActiveSandboxes() []*SandboxInfo {
 
 // ListSandboxPods lists all sandbox pods matching the given selector
 func (w *Watcher) ListSandboxPods(selector labels.Selector) ([]*corev1.Pod, error) {
+	podLister := w.informerFactory.Core().V1().Pods().Lister()
+	return podLister.List(selector)
+}
+
+// ListPods lists all pods matching the given selector.
+func (w *Watcher) ListPods(selector labels.Selector) ([]*corev1.Pod, error) {
 	podLister := w.informerFactory.Core().V1().Pods().Lister()
 	return podLister.List(selector)
 }

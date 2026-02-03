@@ -5,6 +5,8 @@ package dataplane
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os/exec"
@@ -21,18 +23,18 @@ import (
 
 // DataPlane manages network rules for sandboxes
 type DataPlane struct {
-	logger              *zap.Logger
-	proxyHTTPPort       int
-	proxyHTTPSPort      int
-	procdPort           int
-	dnsPort             int
-	failClosed          bool
-	storageProxyCIDR    string
-	clusterDNSCIDR      string
-	internalGatewayCIDR string
-	vethPrefix          string
-	burstRatio          float64
-	iptablesBinary      string
+	logger                  *zap.Logger
+	proxyHTTPPort           int
+	proxyHTTPSPort          int
+	procdPort               int
+	dnsPort                 int
+	failClosed              bool
+	clusterDNSCIDR          string
+	vethPrefix              string
+	burstRatio              float64
+	iptablesBinary          string
+	systemIngressIPProvider func() []string
+	systemEgressIPProvider func() []string
 
 	// eBPF manager for bandwidth control
 	ebpfMgr    *ebpf.Manager
@@ -60,22 +62,20 @@ type SandboxRules struct {
 
 // Config contains configuration for the DataPlane
 type Config struct {
-	ProxyHTTPPort       int
-	ProxyHTTPSPort      int
-	ProcdPort           int
-	DNSPort             int
-	FailClosed          bool
-	StorageProxyCIDR    string
-	ClusterDNSCIDR      string
-	InternalGatewayCIDR string
-	UseEBPF             bool
-	BPFFSPath           string
-	BPFPinPath          string
-	UseEDT              bool // Use Earliest Departure Time for eBPF pacing
-	EDTHorizon          time.Duration
-	VethPrefix          string
-	BurstRatio          float64
-	PreferNFT           bool
+	ProxyHTTPPort  int
+	ProxyHTTPSPort int
+	ProcdPort      int
+	DNSPort        int
+	FailClosed     bool
+	ClusterDNSCIDR string
+	UseEBPF        bool
+	BPFFSPath      string
+	BPFPinPath     string
+	UseEDT         bool // Use Earliest Departure Time for eBPF pacing
+	EDTHorizon     time.Duration
+	VethPrefix     string
+	BurstRatio     float64
+	PreferNFT      bool
 }
 
 // NewDataPlane creates a new DataPlane
@@ -86,49 +86,43 @@ func NewDataPlane(
 	procdPort int,
 	dnsPort int,
 	failClosed bool,
-	storageProxyCIDR string,
 	clusterDNSCIDR string,
-	internalGatewayCIDR string,
 	vethPrefix string,
 	burstRatio float64,
 ) *DataPlane {
 	return &DataPlane{
-		logger:              logger,
-		proxyHTTPPort:       proxyHTTPPort,
-		proxyHTTPSPort:      proxyHTTPSPort,
-		procdPort:           procdPort,
-		dnsPort:             dnsPort,
-		failClosed:          failClosed,
-		storageProxyCIDR:    storageProxyCIDR,
-		clusterDNSCIDR:      clusterDNSCIDR,
-		internalGatewayCIDR: internalGatewayCIDR,
-		vethPrefix:          vethPrefix,
-		burstRatio:          burstRatio,
-		useEBPF:             false,
-		sandboxRules:        make(map[string]*SandboxRules),
+		logger:         logger,
+		proxyHTTPPort:  proxyHTTPPort,
+		proxyHTTPSPort: proxyHTTPSPort,
+		procdPort:      procdPort,
+		dnsPort:        dnsPort,
+		failClosed:     failClosed,
+		clusterDNSCIDR: clusterDNSCIDR,
+		vethPrefix:     vethPrefix,
+		burstRatio:     burstRatio,
+		useEBPF:        false,
+		sandboxRules:   make(map[string]*SandboxRules),
 	}
 }
 
 // NewDataPlaneWithEBPF creates a new DataPlane with eBPF support
 func NewDataPlaneWithEBPF(logger *zap.Logger, cfg *Config) (*DataPlane, error) {
 	dp := &DataPlane{
-		logger:              logger,
-		proxyHTTPPort:       cfg.ProxyHTTPPort,
-		proxyHTTPSPort:      cfg.ProxyHTTPSPort,
-		procdPort:           cfg.ProcdPort,
-		dnsPort:             cfg.DNSPort,
-		failClosed:          cfg.FailClosed,
-		storageProxyCIDR:    cfg.StorageProxyCIDR,
-		clusterDNSCIDR:      cfg.ClusterDNSCIDR,
-		internalGatewayCIDR: cfg.InternalGatewayCIDR,
-		vethPrefix:          cfg.VethPrefix,
-		burstRatio:          cfg.BurstRatio,
-		iptablesBinary:      resolveIptablesBinary(cfg.PreferNFT, logger),
-		useEBPF:             cfg.UseEBPF,
-		bpfFSPath:           cfg.BPFFSPath,
-		bpfPinPath:          cfg.BPFPinPath,
-		edtHorizon:          cfg.EDTHorizon,
-		sandboxRules:        make(map[string]*SandboxRules),
+		logger:         logger,
+		proxyHTTPPort:  cfg.ProxyHTTPPort,
+		proxyHTTPSPort: cfg.ProxyHTTPSPort,
+		procdPort:      cfg.ProcdPort,
+		dnsPort:        cfg.DNSPort,
+		failClosed:     cfg.FailClosed,
+		clusterDNSCIDR: cfg.ClusterDNSCIDR,
+		vethPrefix:     cfg.VethPrefix,
+		burstRatio:     cfg.BurstRatio,
+		iptablesBinary: resolveIptablesBinary(cfg.PreferNFT, logger),
+		useEBPF:        cfg.UseEBPF,
+		bpfFSPath:      cfg.BPFFSPath,
+		bpfPinPath:     cfg.BPFPinPath,
+		edtHorizon:     cfg.EDTHorizon,
+		sandboxRules:   make(map[string]*SandboxRules),
 	}
 
 	if cfg.UseEBPF {
@@ -304,19 +298,35 @@ func (dp *DataPlane) applyEgressRules(
 	}
 
 	// 2. Always allow storage-proxy
-	if dp.storageProxyCIDR != "" {
-		if err := dp.runIPTables(
-			"-t", "filter", "-A", "NETD-EGRESS",
-			"-s", podIP, "-d", dp.storageProxyCIDR,
-			"-m", "comment", "--comment", comment+":storage-proxy",
-			"-j", "ACCEPT",
-		); err != nil {
-			return err
+	storageProxyCIDRs := dp.resolveProviderCIDRs(podIP, dp.systemEgressIPProvider)
+	if len(storageProxyCIDRs) > 0 {
+		setName := dp.ipsetName("eg-storage-allow", sandboxID)
+		if dp.applyIPSet(ctx, setName, storageProxyCIDRs, rules) {
+			if err := dp.runIPTables(
+				"-t", "filter", "-A", "NETD-EGRESS",
+				"-s", podIP,
+				"-m", "set", "--match-set", setName, "dst",
+				"-m", "comment", "--comment", comment+":storage-proxy",
+				"-j", "ACCEPT",
+			); err != nil {
+				return err
+			}
+		} else {
+			for _, cidr := range storageProxyCIDRs {
+				if err := dp.runIPTables(
+					"-t", "filter", "-A", "NETD-EGRESS",
+					"-s", podIP, "-d", cidr,
+					"-m", "comment", "--comment", comment+":storage-proxy",
+					"-j", "ACCEPT",
+				); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
 	// 3. Allow DNS to cluster DNS
-	if dp.clusterDNSCIDR != "" {
+	if dp.clusterDNSCIDR != "" && dp.cidrMatchesPodIPFamily(podIP, dp.clusterDNSCIDR) {
 		if err := dp.runIPTables(
 			"-t", "filter", "-A", "NETD-EGRESS",
 			"-s", podIP, "-d", dp.clusterDNSCIDR,
@@ -353,7 +363,7 @@ func (dp *DataPlane) applyEgressRules(
 	}
 
 	// 5. Block platform-denied CIDRs (RFC1918, metadata, etc.)
-	deniedCIDRs := v1alpha1.PlatformDeniedCIDRs
+	deniedCIDRs := dp.filterCIDRsForPodIP(podIP, v1alpha1.PlatformDeniedCIDRs)
 
 	if len(deniedCIDRs) > 0 {
 		setName := dp.ipsetName("eg-platform-deny", sandboxID)
@@ -383,9 +393,14 @@ func (dp *DataPlane) applyEgressRules(
 
 	// 6. Apply policy rules (deny before allow)
 	if policy != nil && policy.Egress != nil {
-		if len(policy.Egress.DeniedCIDRs) > 0 {
+		deniedCIDRs := dp.filterCIDRsForPodIP(podIP, policy.Egress.DeniedCIDRs)
+		allowedCIDRs := dp.filterCIDRsForPodIP(podIP, policy.Egress.AllowedCIDRs)
+		allowedPorts := policy.Egress.AllowedPorts
+		allowedCIDRsPresent := len(policy.Egress.AllowedCIDRs) > 0
+
+		if len(deniedCIDRs) > 0 {
 			setName := dp.ipsetName("eg-deny", sandboxID)
-			if dp.applyIPSet(ctx, setName, policy.Egress.DeniedCIDRs, rules) {
+			if dp.applyIPSet(ctx, setName, deniedCIDRs, rules) {
 				if err := dp.runIPTables(
 					"-t", "filter", "-A", "NETD-EGRESS",
 					"-s", podIP,
@@ -396,7 +411,7 @@ func (dp *DataPlane) applyEgressRules(
 					return err
 				}
 			} else {
-				for _, cidr := range policy.Egress.DeniedCIDRs {
+				for _, cidr := range deniedCIDRs {
 					if err := dp.runIPTables(
 						"-t", "filter", "-A", "NETD-EGRESS",
 						"-s", podIP, "-d", cidr,
@@ -415,8 +430,6 @@ func (dp *DataPlane) applyEgressRules(
 			}
 		}
 
-		allowedCIDRs := policy.Egress.AllowedCIDRs
-		allowedPorts := policy.Egress.AllowedPorts
 		if len(allowedCIDRs) > 0 && len(allowedPorts) > 0 {
 			setName := dp.ipsetName("eg-allow", sandboxID)
 			if dp.applyIPSet(ctx, setName, allowedCIDRs, rules) {
@@ -458,7 +471,7 @@ func (dp *DataPlane) applyEgressRules(
 					}
 				}
 			}
-		} else if len(allowedPorts) > 0 {
+		} else if len(allowedPorts) > 0 && !allowedCIDRsPresent {
 			for _, portSpec := range allowedPorts {
 				if err := dp.applyEgressPortRule(podIP, portSpec, "ACCEPT", comment+":allow-port"); err != nil {
 					return err
@@ -519,24 +532,42 @@ func (dp *DataPlane) applyIngressRules(
 		return err
 	}
 
-	// 2. Allow internal-gateway to procd port
-	if dp.internalGatewayCIDR != "" {
-		if err := dp.runIPTables(
-			"-t", "filter", "-A", "NETD-INGRESS",
-			"-s", dp.internalGatewayCIDR, "-d", podIP,
-			"-p", "tcp", "--dport", fmt.Sprintf("%d", dp.procdPort),
-			"-m", "comment", "--comment", comment+":internal-gateway",
-			"-j", "ACCEPT",
-		); err != nil {
-			return err
+	// 2. Allow system services to reach sandbox (procd + control APIs)
+	systemServiceCIDRs := dp.resolveProviderCIDRs(podIP, dp.systemIngressIPProvider)
+	if len(systemServiceCIDRs) > 0 {
+		setName := dp.ipsetName("in-system-allow", sandboxID)
+		if dp.applyIPSet(ctx, setName, systemServiceCIDRs, rules) {
+			if err := dp.runIPTables(
+				"-t", "filter", "-A", "NETD-INGRESS",
+				"-m", "set", "--match-set", setName, "src",
+				"-d", podIP,
+				"-m", "comment", "--comment", comment+":system-allow",
+				"-j", "ACCEPT",
+			); err != nil {
+				return err
+			}
+		} else {
+			for _, cidr := range systemServiceCIDRs {
+				if err := dp.runIPTables(
+					"-t", "filter", "-A", "NETD-INGRESS",
+					"-s", cidr, "-d", podIP,
+					"-m", "comment", "--comment", comment+":system-allow",
+					"-j", "ACCEPT",
+				); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
 	// 3. Apply allowed source CIDRs from policy
 	if policy != nil && policy.Ingress != nil {
-		if len(policy.Ingress.DeniedCIDRs) > 0 {
+		deniedCIDRs := dp.filterCIDRsForPodIP(podIP, policy.Ingress.DeniedCIDRs)
+		allowedCIDRs := dp.filterCIDRsForPodIP(podIP, policy.Ingress.AllowedCIDRs)
+
+		if len(deniedCIDRs) > 0 {
 			setName := dp.ipsetName("in-deny", sandboxID)
-			if dp.applyIPSet(ctx, setName, policy.Ingress.DeniedCIDRs, rules) {
+			if dp.applyIPSet(ctx, setName, deniedCIDRs, rules) {
 				if err := dp.runIPTables(
 					"-t", "filter", "-A", "NETD-INGRESS",
 					"-m", "set", "--match-set", setName, "src",
@@ -547,7 +578,7 @@ func (dp *DataPlane) applyIngressRules(
 					return err
 				}
 			} else {
-				for _, cidr := range policy.Ingress.DeniedCIDRs {
+				for _, cidr := range deniedCIDRs {
 					if err := dp.runIPTables(
 						"-t", "filter", "-A", "NETD-INGRESS",
 						"-s", cidr, "-d", podIP,
@@ -560,9 +591,9 @@ func (dp *DataPlane) applyIngressRules(
 			}
 		}
 
-		if len(policy.Ingress.AllowedCIDRs) > 0 {
+		if len(allowedCIDRs) > 0 {
 			setName := dp.ipsetName("in-allow", sandboxID)
-			if dp.applyIPSet(ctx, setName, policy.Ingress.AllowedCIDRs, rules) {
+			if dp.applyIPSet(ctx, setName, allowedCIDRs, rules) {
 				if err := dp.runIPTables(
 					"-t", "filter", "-A", "NETD-INGRESS",
 					"-m", "set", "--match-set", setName, "src",
@@ -573,7 +604,7 @@ func (dp *DataPlane) applyIngressRules(
 					return err
 				}
 			} else {
-				for _, cidr := range policy.Ingress.AllowedCIDRs {
+				for _, cidr := range allowedCIDRs {
 					if err := dp.runIPTables(
 						"-t", "filter", "-A", "NETD-INGRESS",
 						"-s", cidr, "-d", podIP,
@@ -697,14 +728,16 @@ func (dp *DataPlane) applyTCBandwidthRules(
 	dp.runTC("qdisc", "add", "dev", vethName, "root", "handle", "1:", "htb", "default", "10")
 
 	// Create class for this sandbox
-	classID := fmt.Sprintf("1:%s", info.SandboxID[:4])
+	classID := dp.tcClassID(info.SandboxID)
 	if err := dp.runTC(
 		"class", "add", "dev", vethName,
 		"parent", "1:", "classid", classID,
 		"htb", "rate", fmt.Sprintf("%dbit", rateBps),
 		"burst", fmt.Sprintf("%d", burstBytes),
 	); err != nil {
-		dp.logger.Warn("Failed to add tc class", zap.Error(err))
+		if !dp.tcIgnoreExists(err) {
+			dp.logger.Warn("Failed to add tc class", zap.Error(err))
+		}
 	}
 
 	// Add filter to match this pod's traffic
@@ -715,7 +748,9 @@ func (dp *DataPlane) applyTCBandwidthRules(
 		"match", "ip", "src", info.PodIP+"/32",
 		"flowid", classID,
 	); err != nil {
-		dp.logger.Warn("Failed to add tc filter", zap.Error(err))
+		if !dp.tcIgnoreExists(err) {
+			dp.logger.Warn("Failed to add tc filter", zap.Error(err))
+		}
 	}
 
 	rules.TCClass = classID
@@ -837,6 +872,14 @@ func (dp *DataPlane) UseEBPF() bool {
 	return dp.useEBPF && dp.ebpfMgr != nil
 }
 
+func (dp *DataPlane) SetSystemIngressIPProvider(provider func() []string) {
+	dp.systemIngressIPProvider = provider
+}
+
+func (dp *DataPlane) SetStorageEgressIPProvider(provider func() []string) {
+	dp.systemEgressIPProvider = provider
+}
+
 // runIPTables executes an iptables command
 func (dp *DataPlane) runIPTables(args ...string) error {
 	bin := dp.iptablesBinary
@@ -869,6 +912,99 @@ func (dp *DataPlane) runTC(args ...string) error {
 		return fmt.Errorf("tc %v: %w (%s)", args, err, string(output))
 	}
 	return nil
+}
+
+func (dp *DataPlane) filterCIDRsForPodIP(podIP string, cidrs []string) []string {
+	if len(cidrs) == 0 {
+		return nil
+	}
+	pod := net.ParseIP(podIP)
+	if pod == nil {
+		return cidrs
+	}
+	podIsV4 := pod.To4() != nil
+	filtered := make([]string, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		ip, _, err := net.ParseCIDR(cidr)
+		if err != nil {
+			dp.logger.Warn("Invalid CIDR, skipping",
+				zap.String("cidr", cidr),
+				zap.Error(err),
+			)
+			continue
+		}
+		isV4 := ip.To4() != nil
+		if isV4 == podIsV4 {
+			filtered = append(filtered, cidr)
+			continue
+		}
+		dp.logger.Debug("Skipping CIDR due to IP family mismatch",
+			zap.String("cidr", cidr),
+			zap.String("podIP", podIP),
+		)
+	}
+	return filtered
+}
+
+func (dp *DataPlane) cidrMatchesPodIPFamily(podIP, cidr string) bool {
+	filtered := dp.filterCIDRsForPodIP(podIP, []string{cidr})
+	return len(filtered) == 1
+}
+
+func (dp *DataPlane) tcClassID(sandboxID string) string {
+	if sandboxID == "" {
+		return "1:1"
+	}
+	sum := sha256.Sum256([]byte(sandboxID))
+	id := binary.BigEndian.Uint16(sum[:2])
+	if id == 0 {
+		id = 1
+	}
+	return fmt.Sprintf("1:%x", id)
+}
+
+func (dp *DataPlane) tcIgnoreExists(err error) bool {
+	if err == nil {
+		return true
+	}
+	// tc returns "File exists" when class/filter already present.
+	return strings.Contains(err.Error(), "File exists")
+}
+
+func (dp *DataPlane) resolveProviderCIDRs(podIP string, provider func() []string) []string {
+	if provider == nil {
+		return nil
+	}
+	return dp.filterCIDRsForPodIP(podIP, dp.ipListToCIDRs(provider()))
+}
+
+func (dp *DataPlane) ipListToCIDRs(ips []string) []string {
+	if len(ips) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ips))
+	result := make([]string, 0, len(ips))
+	for _, raw := range ips {
+		ip := net.ParseIP(strings.TrimSpace(raw))
+		if ip == nil {
+			dp.logger.Warn("Invalid IP, skipping",
+				zap.String("ip", raw),
+			)
+			continue
+		}
+		var cidr string
+		if ip.To4() != nil {
+			cidr = ip.String() + "/32"
+		} else {
+			cidr = ip.String() + "/128"
+		}
+		if _, ok := seen[cidr]; ok {
+			continue
+		}
+		seen[cidr] = struct{}{}
+		result = append(result, cidr)
+	}
+	return result
 }
 
 // IsPrivateIP checks if an IP is in private/reserved ranges

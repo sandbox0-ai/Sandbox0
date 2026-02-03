@@ -999,6 +999,13 @@ spec:
                             default: 9090
                             description: Metrics
                             type: integer
+                          netdPolicyApplyPollInterval:
+                            default: 500ms
+                            type: string
+                          netdPolicyApplyTimeout:
+                            default: 30s
+                            description: Netd apply wait
+                            type: string
                           pauseMemoryBufferRatio:
                             default: "1.1"
                             type: string
@@ -1236,8 +1243,6 @@ spec:
                           healthPort:
                             default: 8081
                             type: integer
-                          internalGatewayCidr:
-                            type: string
                           kubeConfig:
                             type: string
                           logLevel:
@@ -1248,8 +1253,6 @@ spec:
                             type: integer
                           metricsReportInterval:
                             default: 10s
-                            type: string
-                          namespace:
                             type: string
                           nodeName:
                             type: string
@@ -1296,8 +1299,6 @@ spec:
                             type: string
                           shutdownDelay:
                             default: 2s
-                            type: string
-                          storageProxyCidr:
                             type: string
                           useEbpf:
                             description: eBPF and tc

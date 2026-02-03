@@ -104,7 +104,7 @@ func (r *Reconciler) ReconcileNetdRBAC(ctx context.Context, infra *infrav1alpha1
 		{
 			APIGroups: []string{""},
 			Resources: []string{"pods", "pods/status", "nodes"},
-			Verbs:     []string{"get", "list", "watch"},
+			Verbs:     []string{"get", "list", "watch", "patch"},
 		},
 	}
 

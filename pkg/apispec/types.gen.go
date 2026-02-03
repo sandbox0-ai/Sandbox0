@@ -624,18 +624,18 @@ type MoveFileRequest struct {
 
 // NetworkEgressPolicy defines model for NetworkEgressPolicy.
 type NetworkEgressPolicy struct {
+	AllowedCidrs   *[]string   `json:"allowedCidrs,omitempty"`
 	AllowedDomains *[]string   `json:"allowedDomains,omitempty"`
-	AllowedCIDRs   *[]string   `json:"allowedCidrs,omitempty"`
 	AllowedPorts   *[]PortSpec `json:"allowedPorts,omitempty"`
+	DeniedCidrs    *[]string   `json:"deniedCidrs,omitempty"`
 	DeniedDomains  *[]string   `json:"deniedDomains,omitempty"`
-	DeniedCIDRs    *[]string   `json:"deniedCidrs,omitempty"`
 	DeniedPorts    *[]PortSpec `json:"deniedPorts,omitempty"`
 }
 
 // NetworkIngressPolicy defines model for NetworkIngressPolicy.
 type NetworkIngressPolicy struct {
-	AllowedCIDRs *[]string `json:"allowedCidrs,omitempty"`
-	DeniedCIDRs  *[]string `json:"deniedCidrs,omitempty"`
+	AllowedCidrs *[]string `json:"allowedCidrs,omitempty"`
+	DeniedCidrs  *[]string `json:"deniedCidrs,omitempty"`
 }
 
 // NodeAffinity defines model for NodeAffinity.

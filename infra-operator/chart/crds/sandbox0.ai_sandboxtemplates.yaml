@@ -145,11 +145,11 @@ spec:
                   egress:
                     description: NetworkEgressPolicy defines egress policy
                     properties:
-                      allowedDomains:
+                      allowedCidrs:
                         items:
                           type: string
                         type: array
-                      allowedCidrs:
+                      allowedDomains:
                         items:
                           type: string
                         type: array
@@ -172,11 +172,11 @@ spec:
                           - port
                           type: object
                         type: array
-                      deniedDomains:
+                      deniedCidrs:
                         items:
                           type: string
                         type: array
-                      deniedCidrs:
+                      deniedDomains:
                         items:
                           type: string
                         type: array

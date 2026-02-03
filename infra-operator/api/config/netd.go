@@ -23,9 +23,6 @@ type NetdConfig struct {
 	KubeConfig string `yaml:"kube_config" json:"kubeConfig"`
 
 	// +optional
-	Namespace string `yaml:"namespace" json:"namespace"`
-
-	// +optional
 	// +kubebuilder:default="30s"
 	ResyncPeriod metav1.Duration `yaml:"resync_period" json:"resyncPeriod"`
 
@@ -90,11 +87,7 @@ type NetdConfig struct {
 	// +kubebuilder:default=53
 	DNSPort int `yaml:"dns_port" json:"dnsPort"`
 	// +optional
-	StorageProxyCIDR string `yaml:"storage_proxy_cidr" json:"storageProxyCidr"`
-	// +optional
 	ClusterDNSCIDR string `yaml:"cluster_dns_cidr" json:"clusterDnsCidr"`
-	// +optional
-	InternalGatewayCIDR string `yaml:"internal_gateway_cidr" json:"internalGatewayCidr"`
 
 	// eBPF and tc
 	// +optional

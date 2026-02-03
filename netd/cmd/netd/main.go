@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/k8s"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -62,7 +65,6 @@ func main() {
 	w := watcher.NewWatcher(
 		k8sClient,
 		cfg.NodeName,
-		cfg.Namespace,
 		cfg.ResyncPeriod.Duration,
 		logger,
 	)
@@ -80,28 +82,35 @@ func main() {
 
 	// Create dataplane with eBPF support
 	dpConfig := &dataplane.Config{
-		ProxyHTTPPort:       cfg.ProxyHTTPPort,
-		ProxyHTTPSPort:      cfg.ProxyHTTPSPort,
-		ProcdPort:           cfg.ProcdPort,
-		DNSPort:             cfg.DNSPort,
-		FailClosed:          cfg.FailClosed,
-		StorageProxyCIDR:    cfg.StorageProxyCIDR,
-		ClusterDNSCIDR:      cfg.ClusterDNSCIDR,
-		InternalGatewayCIDR: cfg.InternalGatewayCIDR,
-		UseEBPF:             cfg.UseEBPF,
-		BPFFSPath:           cfg.BPFFSPath,
-		BPFPinPath:          cfg.BPFPinPath,
-		UseEDT:              cfg.UseEDT,
-		EDTHorizon:          cfg.EDTHorizon.Duration,
-		VethPrefix:          cfg.VethPrefix,
-		BurstRatio:          burstRatio,
-		PreferNFT:           preferNFT,
+		ProxyHTTPPort:  cfg.ProxyHTTPPort,
+		ProxyHTTPSPort: cfg.ProxyHTTPSPort,
+		ProcdPort:      cfg.ProcdPort,
+		DNSPort:        cfg.DNSPort,
+		FailClosed:     cfg.FailClosed,
+		ClusterDNSCIDR: cfg.ClusterDNSCIDR,
+		UseEBPF:        cfg.UseEBPF,
+		BPFFSPath:      cfg.BPFFSPath,
+		BPFPinPath:     cfg.BPFPinPath,
+		UseEDT:         cfg.UseEDT,
+		EDTHorizon:     cfg.EDTHorizon.Duration,
+		VethPrefix:     cfg.VethPrefix,
+		BurstRatio:     burstRatio,
+		PreferNFT:      preferNFT,
 	}
 
 	dp, err := dataplane.NewDataPlaneWithEBPF(logger, dpConfig)
 	if err != nil {
 		logger.Fatal("Failed to create dataplane", zap.Error(err))
 	}
+
+	dp.SetSystemIngressIPProvider(makeServiceIPProvider(w, logger, map[string]struct{}{
+		"internal-gateway": {},
+		"manager":          {},
+		"storage-proxy":    {},
+	}))
+	dp.SetStorageEgressIPProvider(makeServiceIPProvider(w, logger, map[string]struct{}{
+		"storage-proxy": {},
+	}))
 
 	logger.Info("Dataplane configured",
 		zap.Bool("useEBPF", dp.UseEBPF()),
@@ -411,4 +420,49 @@ func startMetricsReporter(ctx context.Context, w *watcher.Watcher, interval time
 			)
 		}
 	}
+}
+
+func makeServiceIPProvider(w *watcher.Watcher, logger *zap.Logger, names map[string]struct{}) func() []string {
+	var mu sync.RWMutex
+	var last []string
+
+	return func() []string {
+		ips, err := listServicePodIPs(w, names)
+		if err != nil {
+			logger.Warn("Failed to list service pod IPs", zap.Error(err))
+			mu.RLock()
+			defer mu.RUnlock()
+			return append([]string(nil), last...)
+		}
+		mu.Lock()
+		last = ips
+		mu.Unlock()
+		return ips
+	}
+}
+
+func listServicePodIPs(w *watcher.Watcher, names map[string]struct{}) ([]string, error) {
+	selector := labels.SelectorFromSet(map[string]string{
+		"app.kubernetes.io/managed-by": "sandbox0infra-operator",
+	})
+	pods, err := w.ListPods(selector)
+	if err != nil {
+		return nil, err
+	}
+
+	ips := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		if pod.Status.PodIP == "" || pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		if pod.Labels == nil {
+			continue
+		}
+		name := pod.Labels["app.kubernetes.io/name"]
+		if _, ok := names[name]; !ok {
+			continue
+		}
+		ips = append(ips, pod.Status.PodIP)
+	}
+	return ips, nil
 }

@@ -52,9 +52,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if config.NodeName == "" {
 		config.NodeName = "${NODE_NAME}"
 	}
-	if config.Namespace == "" {
-		config.Namespace = infra.Namespace
-	}
 	if config.MetricsPort == 0 {
 		config.MetricsPort = 9091
 	}
