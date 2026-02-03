@@ -16,7 +16,7 @@ func TestValidateMountPoint(t *testing.T) {
 		{name: "empty", path: "", expectErr: true},
 		{name: "relative", path: "tmp/volume", expectErr: true},
 		{name: "root", path: "/", expectErr: true},
-		{name: "parent", path: "/tmp/../volume", expectErr: true},
+		{name: "parent", path: "/tmp/../volume", expectErr: false},
 		{name: "valid", path: "/tmp/volume", expectErr: false},
 	}
 

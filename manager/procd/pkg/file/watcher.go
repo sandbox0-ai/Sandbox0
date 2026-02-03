@@ -85,8 +85,9 @@ func (wm *WatcherManager) eventLoop() {
 }
 
 func (wm *WatcherManager) handleFsEvent(event fsnotify.Event) {
-	wm.mu.RLock()
-	defer wm.mu.RUnlock()
+	if event.Name == "" {
+		return
+	}
 
 	// Convert event type
 	var eventType EventType
@@ -104,6 +105,13 @@ func (wm *WatcherManager) handleFsEvent(event fsnotify.Event) {
 	default:
 		return
 	}
+
+	if eventType == EventCreate {
+		wm.maybeAddRecursiveWatch(event.Name)
+	}
+
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 
 	// Broadcast to matching watchers
 	for _, watcher := range wm.watchers {
@@ -123,6 +131,36 @@ func (wm *WatcherManager) handleFsEvent(event fsnotify.Event) {
 	}
 }
 
+func (wm *WatcherManager) maybeAddRecursiveWatch(path string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	wm.mu.RLock()
+	hasRecursive := false
+	for _, watcher := range wm.watchers {
+		if watcher.Recursive && wm.matchWatcher(watcher, path) {
+			hasRecursive = true
+			break
+		}
+	}
+	wm.mu.RUnlock()
+	if !hasRecursive {
+		return
+	}
+
+	filepath.Walk(path, func(walkPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			_ = wm.fsNotify.Add(walkPath)
+		}
+		return nil
+	})
+}
+
 func (wm *WatcherManager) matchWatcher(watcher *Watcher, eventPath string) bool {
 	if eventPath == watcher.Path {
 		return true
@@ -140,6 +178,22 @@ func (wm *WatcherManager) WatchDir(path string, recursive bool) (*Watcher, error
 
 	if wm.closed {
 		return nil, ErrWatcherClosed
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				return nil, err
+			}
+			info, err = os.Stat(path)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !info.IsDir() {
+		return nil, ErrPathNotDir
 	}
 
 	eventChan := make(chan WatchEvent, 100)

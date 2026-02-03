@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -63,18 +64,25 @@ type Options struct {
 }
 
 // Dispatcher sends webhook events asynchronously.
+// Guarantee: on graceful shutdown, Shutdown drains the in-memory queue and
+// attempts delivery with configured retries. It cannot guarantee delivery for
+// SIGKILL, node crash, or forced termination, and events may be dropped if the
+// queue is full or retries are exhausted.
 type Dispatcher struct {
 	logger *zap.Logger
 	client *http.Client
 
 	queue chan Event
 
-	mu       sync.RWMutex
-	config   Config
-	sandbox  string
-	teamID   string
-	options  Options
-	randSeed *rand.Rand
+	mu         sync.RWMutex
+	config     Config
+	sandbox    string
+	teamID     string
+	options    Options
+	randSeed   *rand.Rand
+	enqueueMu  sync.Mutex
+	closed     bool
+	workerDone chan struct{}
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -93,11 +101,12 @@ func NewDispatcher(options Options, logger *zap.Logger) *Dispatcher {
 	}
 
 	d := &Dispatcher{
-		logger:   logger,
-		client:   &http.Client{Timeout: options.RequestTimeout},
-		queue:    make(chan Event, options.QueueSize),
-		options:  options,
-		randSeed: rand.New(rand.NewSource(time.Now().UnixNano())),
+		logger:     logger,
+		client:     &http.Client{Timeout: options.RequestTimeout},
+		queue:      make(chan Event, options.QueueSize),
+		options:    options,
+		randSeed:   rand.New(rand.NewSource(time.Now().UnixNano())),
+		workerDone: make(chan struct{}),
 	}
 
 	go d.worker()
@@ -143,6 +152,11 @@ func (d *Dispatcher) Enqueue(event Event) {
 		return
 	}
 
+	d.enqueueMu.Lock()
+	if d.closed {
+		d.enqueueMu.Unlock()
+		return
+	}
 	select {
 	case d.queue <- event:
 	default:
@@ -153,11 +167,32 @@ func (d *Dispatcher) Enqueue(event Event) {
 			)
 		}
 	}
+	d.enqueueMu.Unlock()
 }
 
 func (d *Dispatcher) worker() {
+	defer close(d.workerDone)
 	for event := range d.queue {
 		d.sendWithRetry(event)
+	}
+}
+
+// Shutdown drains the queue and waits for the worker to finish.
+func (d *Dispatcher) Shutdown(ctx context.Context) error {
+	d.enqueueMu.Lock()
+	if d.closed {
+		d.enqueueMu.Unlock()
+	} else {
+		d.closed = true
+		close(d.queue)
+		d.enqueueMu.Unlock()
+	}
+
+	select {
+	case <-d.workerDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

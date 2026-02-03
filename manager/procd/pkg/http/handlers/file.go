@@ -195,12 +195,18 @@ func (h *FileHandler) Watch(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	// Active watchers for this connection
-	watchers := make(map[string]*file.Watcher)
+	type watchSubscription struct {
+		watcher     *file.Watcher
+		unsubscribe func() error
+	}
+	watchers := make(map[string]watchSubscription)
 
 	defer func() {
 		// Cleanup all watchers on disconnect
 		for _, watcher := range watchers {
-			h.manager.UnwatchDir(watcher.ID)
+			if watcher.unsubscribe != nil {
+				_ = watcher.unsubscribe()
+			}
 		}
 	}()
 
@@ -223,7 +229,14 @@ func (h *FileHandler) Watch(w http.ResponseWriter, r *http.Request) {
 
 		switch req.Action {
 		case "subscribe":
-			watcher, err := h.manager.WatchDir(req.Path, req.Recursive)
+			watcher, unsubscribe, err := h.manager.SubscribeWatch(req.Path, req.Recursive, func(event file.WatchEvent) {
+				conn.WriteJSON(map[string]any{
+					"type":     "event",
+					"watch_id": event.WatchID,
+					"event":    string(event.Type),
+					"path":     event.Path,
+				})
+			})
 			if err != nil {
 				conn.WriteJSON(map[string]any{
 					"type":  "error",
@@ -232,7 +245,10 @@ func (h *FileHandler) Watch(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			watchers[watcher.ID] = watcher
+			watchers[watcher.ID] = watchSubscription{
+				watcher:     watcher,
+				unsubscribe: unsubscribe,
+			}
 
 			// Send subscription confirmation
 			conn.WriteJSON(map[string]any{
@@ -241,21 +257,11 @@ func (h *FileHandler) Watch(w http.ResponseWriter, r *http.Request) {
 				"path":     req.Path,
 			})
 
-			// Forward events for this watcher
-			go func(w *file.Watcher) {
-				for event := range w.EventChan {
-					conn.WriteJSON(map[string]any{
-						"type":     "event",
-						"watch_id": event.WatchID,
-						"event":    string(event.Type),
-						"path":     event.Path,
-					})
-				}
-			}(watcher)
-
 		case "unsubscribe":
 			if watcher, ok := watchers[req.WatchID]; ok {
-				h.manager.UnwatchDir(watcher.ID)
+				if watcher.unsubscribe != nil {
+					_ = watcher.unsubscribe()
+				}
 				delete(watchers, req.WatchID)
 
 				conn.WriteJSON(map[string]any{

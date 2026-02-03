@@ -212,6 +212,10 @@ func main() {
 		contextManager.Cleanup()
 		volumeManager.Cleanup()
 		fileManager.Close()
+
+		if err := webhookDispatcher.Shutdown(context.Background()); err != nil {
+			logger.Warn("Webhook dispatcher shutdown error", zap.Error(err))
+		}
 		done <- true
 	}()
 

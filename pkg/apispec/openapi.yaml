@@ -2422,8 +2422,13 @@ components:
       type: object
       properties:
         url:
+          description: Required when webhook is enabled. Target URL that receives event callbacks.
           type: string
         secret:
+          description: Optional. Shared secret used to sign webhook payloads.
+          type: string
+        watch_dir:
+          description: Optional. When set, procd subscribes to file events under this directory (same semantics as the file watch WebSocket API) and emits file.modified events.
           type: string
     ClaimResponse:
       type: object

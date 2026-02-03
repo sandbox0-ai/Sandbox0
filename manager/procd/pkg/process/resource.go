@@ -58,6 +58,65 @@ func (c *cgroupReader) detectVersion() CgroupVersion {
 	return c.version
 }
 
+func readCgroupLines() ([]string, error) {
+	data, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return nil, err
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return nil, fmt.Errorf("empty cgroup file")
+	}
+	return strings.Split(content, "\n"), nil
+}
+
+func (c *cgroupReader) cgroupV2BasePath() (string, error) {
+	lines, err := readCgroupLines()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range lines {
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if parts[1] == "" {
+			path := parts[2]
+			if path == "" || path == "/" {
+				return "/sys/fs/cgroup", nil
+			}
+			return filepath.Join("/sys/fs/cgroup", path), nil
+		}
+	}
+	return "", fmt.Errorf("cgroup v2 path not found")
+}
+
+func (c *cgroupReader) cgroupV1BasePath(controller string) (string, error) {
+	lines, err := readCgroupLines()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range lines {
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		controllers := strings.Split(parts[1], ",")
+		for _, ctl := range controllers {
+			if ctl == controller {
+				mountName := parts[1]
+				path := parts[2]
+				base := filepath.Join("/sys/fs/cgroup", mountName)
+				if path == "" || path == "/" {
+					return base, nil
+				}
+				return filepath.Join(base, path), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("cgroup v1 path not found for %s", controller)
+}
+
 // ProcessMemoryStats contains detailed memory statistics for a process.
 type ProcessMemoryStats struct {
 	// RSS is the Resident Set Size - actual physical memory used.
@@ -379,14 +438,18 @@ func (c *cgroupReader) ReadContainerMemoryStats() (*ContainerMemoryStats, error)
 
 func (c *cgroupReader) readMemoryStatsV2() (*ContainerMemoryStats, error) {
 	stats := &ContainerMemoryStats{}
+	basePath := "/sys/fs/cgroup"
+	if resolved, err := c.cgroupV2BasePath(); err == nil {
+		basePath = resolved
+	}
 
 	// Read current usage
-	if usage, err := readFileInt64("/sys/fs/cgroup/memory.current"); err == nil {
+	if usage, err := readFileInt64(filepath.Join(basePath, "memory.current")); err == nil {
 		stats.Usage = usage
 	}
 
 	// Read limit (may be "max" for unlimited)
-	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
+	if data, err := os.ReadFile(filepath.Join(basePath, "memory.max")); err == nil {
 		s := strings.TrimSpace(string(data))
 		if s != "max" {
 			if limit, err := strconv.ParseInt(s, 10, 64); err == nil {
@@ -396,12 +459,12 @@ func (c *cgroupReader) readMemoryStatsV2() (*ContainerMemoryStats, error) {
 	}
 
 	// Read swap
-	if swap, err := readFileInt64("/sys/fs/cgroup/memory.swap.current"); err == nil {
+	if swap, err := readFileInt64(filepath.Join(basePath, "memory.swap.current")); err == nil {
 		stats.Swap = swap
 	}
 
 	// Read detailed stats from memory.stat
-	if memStat, err := readKeyValueFile("/sys/fs/cgroup/memory.stat"); err == nil {
+	if memStat, err := readKeyValueFile(filepath.Join(basePath, "memory.stat")); err == nil {
 		if v, ok := memStat["file"]; ok {
 			stats.Cache = v
 		}
@@ -422,6 +485,9 @@ func (c *cgroupReader) readMemoryStatsV2() (*ContainerMemoryStats, error) {
 func (c *cgroupReader) readMemoryStatsV1() (*ContainerMemoryStats, error) {
 	stats := &ContainerMemoryStats{}
 	basePath := "/sys/fs/cgroup/memory"
+	if resolved, err := c.cgroupV1BasePath("memory"); err == nil {
+		basePath = resolved
+	}
 
 	// Read current usage
 	if usage, err := readFileInt64(filepath.Join(basePath, "memory.usage_in_bytes")); err == nil {
@@ -480,9 +546,13 @@ func (c *cgroupReader) ReadContainerCPUStats() (*ContainerCPUStats, error) {
 
 func (c *cgroupReader) readCPUStatsV2() (*ContainerCPUStats, error) {
 	stats := &ContainerCPUStats{}
+	basePath := "/sys/fs/cgroup"
+	if resolved, err := c.cgroupV2BasePath(); err == nil {
+		basePath = resolved
+	}
 
 	// Read cpu.stat
-	if cpuStat, err := readKeyValueFile("/sys/fs/cgroup/cpu.stat"); err == nil {
+	if cpuStat, err := readKeyValueFile(filepath.Join(basePath, "cpu.stat")); err == nil {
 		if v, ok := cpuStat["usage_usec"]; ok {
 			stats.UsageTotal = uint64(v) * 1000 // convert to nanoseconds
 		}
@@ -506,6 +576,11 @@ func (c *cgroupReader) readCPUStatsV2() (*ContainerCPUStats, error) {
 func (c *cgroupReader) readCPUStatsV1() (*ContainerCPUStats, error) {
 	stats := &ContainerCPUStats{}
 	basePath := "/sys/fs/cgroup/cpu,cpuacct"
+	if resolved, err := c.cgroupV1BasePath("cpuacct"); err == nil {
+		basePath = resolved
+	} else if resolved, err := c.cgroupV1BasePath("cpu"); err == nil {
+		basePath = resolved
+	}
 
 	// Try combined path first, then separate paths
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
@@ -538,7 +613,9 @@ func (c *cgroupReader) readCPUStatsV1() (*ContainerCPUStats, error) {
 
 	// Read throttling stats
 	cpuBasePath := "/sys/fs/cgroup/cpu"
-	if _, err := os.Stat(filepath.Join(basePath, "cpu.stat")); err == nil {
+	if resolved, err := c.cgroupV1BasePath("cpu"); err == nil {
+		cpuBasePath = resolved
+	} else if _, err := os.Stat(filepath.Join(basePath, "cpu.stat")); err == nil {
 		cpuBasePath = basePath
 	}
 

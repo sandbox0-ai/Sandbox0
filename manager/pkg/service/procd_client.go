@@ -115,8 +115,9 @@ type InitializeRequest struct {
 
 // InitializeWebhook represents webhook configuration for initialization.
 type InitializeWebhook struct {
-	URL    string `json:"url"`
-	Secret string `json:"secret,omitempty"`
+	URL      string `json:"url"`
+	Secret   string `json:"secret,omitempty"`
+	WatchDir string `json:"watch_dir,omitempty"`
 }
 
 // InitializeResponse represents the response from procd initialize API.

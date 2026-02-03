@@ -289,6 +289,13 @@ const (
 	UpdateTeamMemberRequestRoleViewer    UpdateTeamMemberRequestRole = "viewer"
 )
 
+// Defines values for VolumeAccessMode.
+const (
+	ROX VolumeAccessMode = "ROX"
+	RWO VolumeAccessMode = "RWO"
+	RWX VolumeAccessMode = "RWX"
+)
+
 // APIKey defines model for APIKey.
 type APIKey struct {
 	CreatedAt  time.Time  `json:"created_at"`
@@ -472,6 +479,7 @@ type CreateREPLContextRequest struct {
 
 // CreateSandboxVolumeRequest defines model for CreateSandboxVolumeRequest.
 type CreateSandboxVolumeRequest struct {
+	// AccessMode Access mode for sandbox volumes. Enforcement is scoped to storage-proxy instances. RWO allows read-write mounts on a single instance; ROX allows read-only mounts across instances; RWX allows read-write mounts across instances.
 	AccessMode *VolumeAccessMode `json:"access_mode,omitempty"`
 	BufferSize *string           `json:"buffer_size,omitempty"`
 	CacheSize  *string           `json:"cache_size,omitempty"`
@@ -914,6 +922,7 @@ type SandboxUpdateRequest struct {
 
 // SandboxVolume defines model for SandboxVolume.
 type SandboxVolume struct {
+	// AccessMode Access mode for sandbox volumes. Enforcement is scoped to storage-proxy instances. RWO allows read-write mounts on a single instance; ROX allows read-only mounts across instances; RWX allows read-write mounts across instances.
 	AccessMode *VolumeAccessMode `json:"access_mode,omitempty"`
 	BufferSize string            `json:"buffer_size"`
 	CacheSize  string            `json:"cache_size"`
@@ -1461,6 +1470,9 @@ type User struct {
 	UpdatedAt     time.Time           `json:"updated_at"`
 }
 
+// VolumeAccessMode Access mode for sandbox volumes. Enforcement is scoped to storage-proxy instances. RWO allows read-write mounts on a single instance; ROX allows read-only mounts across instances; RWX allows read-write mounts across instances.
+type VolumeAccessMode string
+
 // VolumeConfig defines model for VolumeConfig.
 type VolumeConfig struct {
 	BufferSize *string `json:"buffer_size,omitempty"`
@@ -1469,9 +1481,6 @@ type VolumeConfig struct {
 	Writeback  *bool   `json:"writeback,omitempty"`
 }
 
-// VolumeAccessMode defines model for VolumeAccessMode.
-type VolumeAccessMode string
-
 // WarmPoolRequest defines model for WarmPoolRequest.
 type WarmPoolRequest struct {
 	Count int32 `json:"count"`
@@ -1479,8 +1488,14 @@ type WarmPoolRequest struct {
 
 // WebhookConfig defines model for WebhookConfig.
 type WebhookConfig struct {
+	// Secret Optional. Shared secret used to sign webhook payloads.
 	Secret *string `json:"secret,omitempty"`
-	Url    *string `json:"url,omitempty"`
+
+	// Url Required when webhook is enabled. Target URL that receives event callbacks.
+	Url *string `json:"url,omitempty"`
+
+	// WatchDir Optional. When set, procd subscribes to file events under this directory (same semantics as the file watch WebSocket API) and emits file.modified events.
+	WatchDir *string `json:"watch_dir,omitempty"`
 }
 
 // WeightedPodAffinityTerm defines model for WeightedPodAffinityTerm.

@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/sandbox0-ai/infra/manager/procd/pkg/file"
 	"github.com/sandbox0-ai/infra/manager/procd/pkg/webhook"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"go.uber.org/zap"
@@ -12,18 +14,23 @@ import (
 
 // InitializeHandler handles sandbox initialization requests.
 type InitializeHandler struct {
-	dispatcher *webhook.Dispatcher
-	httpPort   int
-	logger     *zap.Logger
-	readyOnce  sync.Once
+	dispatcher  *webhook.Dispatcher
+	fileManager *file.Manager
+	httpPort    int
+	logger      *zap.Logger
+	readyOnce   sync.Once
+	watchMu     sync.Mutex
+	watchPath   string
+	unsubscribe func() error
 }
 
 // NewInitializeHandler creates a new initialize handler.
-func NewInitializeHandler(dispatcher *webhook.Dispatcher, httpPort int, logger *zap.Logger) *InitializeHandler {
+func NewInitializeHandler(dispatcher *webhook.Dispatcher, fileManager *file.Manager, httpPort int, logger *zap.Logger) *InitializeHandler {
 	return &InitializeHandler{
-		dispatcher: dispatcher,
-		httpPort:   httpPort,
-		logger:     logger,
+		dispatcher:  dispatcher,
+		fileManager: fileManager,
+		httpPort:    httpPort,
+		logger:      logger,
 	}
 }
 
@@ -36,8 +43,9 @@ type InitializeRequest struct {
 
 // InitializeWebhook represents webhook configuration.
 type InitializeWebhook struct {
-	URL    string `json:"url"`
-	Secret string `json:"secret,omitempty"`
+	URL      string `json:"url"`
+	Secret   string `json:"secret,omitempty"`
+	WatchDir string `json:"watch_dir,omitempty"`
 }
 
 // InitializeResponse is returned after initialization.
@@ -77,13 +85,17 @@ func (h *InitializeHandler) Initialize(w http.ResponseWriter, r *http.Request) {
 
 	webhookURL := ""
 	webhookSecret := ""
+	webhookWatchDir := ""
 	if req.Webhook != nil {
 		webhookURL = req.Webhook.URL
 		webhookSecret = req.Webhook.Secret
+		webhookWatchDir = req.Webhook.WatchDir
 	}
 
 	h.dispatcher.SetConfig(webhookURL, webhookSecret)
 	h.dispatcher.SetIdentity(req.SandboxID, teamID)
+
+	h.configureWebhookWatch(strings.TrimSpace(webhookURL), strings.TrimSpace(webhookWatchDir))
 
 	if webhookURL != "" {
 		h.readyOnce.Do(func() {
@@ -101,4 +113,61 @@ func (h *InitializeHandler) Initialize(w http.ResponseWriter, r *http.Request) {
 		SandboxID: req.SandboxID,
 		TeamID:    teamID,
 	})
+}
+
+func (h *InitializeHandler) configureWebhookWatch(webhookURL, watchDir string) {
+	if h.fileManager == nil {
+		return
+	}
+
+	h.watchMu.Lock()
+	defer h.watchMu.Unlock()
+
+	if webhookURL == "" || watchDir == "" {
+		if h.unsubscribe != nil {
+			_ = h.unsubscribe()
+		}
+		h.unsubscribe = nil
+		h.watchPath = ""
+		return
+	}
+
+	if watchDir == h.watchPath {
+		return
+	}
+
+	if h.unsubscribe != nil {
+		_ = h.unsubscribe()
+		h.unsubscribe = nil
+		h.watchPath = ""
+	}
+
+	_, unsubscribe, err := h.fileManager.SubscribeWatch(watchDir, true, func(event file.WatchEvent) {
+		if event.Type == file.EventInvalidate {
+			return
+		}
+		payload := map[string]any{
+			"event_type": event.Type,
+			"path":       event.Path,
+		}
+		if event.OldPath != "" {
+			payload["old_path"] = event.OldPath
+		}
+		h.dispatcher.Enqueue(webhook.Event{
+			EventType: webhook.EventTypeFileModified,
+			Payload:   payload,
+		})
+	})
+	if err != nil {
+		if h.logger != nil {
+			h.logger.Warn("Failed to watch webhook directory",
+				zap.String("watch_dir", watchDir),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+
+	h.unsubscribe = unsubscribe
+	h.watchPath = watchDir
 }

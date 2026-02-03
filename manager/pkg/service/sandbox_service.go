@@ -166,8 +166,9 @@ type SandboxConfig struct {
 
 // WebhookConfig represents outbound webhook configuration.
 type WebhookConfig struct {
-	URL    string `json:"url"`
-	Secret string `json:"secret,omitempty"`
+	URL      string `json:"url"`
+	Secret   string `json:"secret,omitempty"`
+	WatchDir string `json:"watch_dir,omitempty"`
 }
 
 // ClaimResponse represents a sandbox claim response
@@ -458,8 +459,9 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 }
 
 type webhookInfo struct {
-	URL    string
-	Secret string
+	URL      string
+	Secret   string
+	WatchDir string
 }
 
 func (s *SandboxService) getWebhookInfo(req *ClaimRequest) *webhookInfo {
@@ -471,8 +473,9 @@ func (s *SandboxService) getWebhookInfo(req *ClaimRequest) *webhookInfo {
 		return nil
 	}
 	return &webhookInfo{
-		URL:    urlValue,
-		Secret: strings.TrimSpace(req.Config.Webhook.Secret),
+		URL:      urlValue,
+		Secret:   strings.TrimSpace(req.Config.Webhook.Secret),
+		WatchDir: strings.TrimSpace(req.Config.Webhook.WatchDir),
 	}
 }
 
@@ -634,8 +637,9 @@ func (s *SandboxService) initializeProcd(
 	var webhookConfig *InitializeWebhook
 	if webhookInfo != nil {
 		webhookConfig = &InitializeWebhook{
-			URL:    webhookInfo.URL,
-			Secret: webhookInfo.Secret,
+			URL:      webhookInfo.URL,
+			Secret:   webhookInfo.Secret,
+			WatchDir: webhookInfo.WatchDir,
 		}
 	}
 

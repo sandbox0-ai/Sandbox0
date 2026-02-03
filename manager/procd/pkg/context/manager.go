@@ -345,6 +345,12 @@ func (m *Manager) GetAllResourceUsage() *SandboxResourceUsage {
 		Contexts: make([]ContextResourceUsage, 0, len(m.contexts)),
 	}
 
+	if containerStats, err := process.GetContainerResourceUsage(); err == nil {
+		result.ContainerMemoryUsage = containerStats.Usage
+		result.ContainerMemoryLimit = containerStats.Limit
+		result.ContainerMemoryWorkingSet = containerStats.WorkingSet
+	}
+
 	for _, ctx := range m.contexts {
 		usage := ctx.ResourceUsage()
 
@@ -366,13 +372,6 @@ func (m *Manager) GetAllResourceUsage() *SandboxResourceUsage {
 		result.TotalIOReadBytes += usage.IOReadBytes
 		result.TotalIOWriteBytes += usage.IOWriteBytes
 
-		// Use container-level stats from the first context (they're the same for all)
-		if result.ContainerMemoryUsage == 0 {
-			result.ContainerMemoryUsage = usage.ContainerMemoryUsage
-			result.ContainerMemoryLimit = usage.ContainerMemoryLimit
-			result.ContainerMemoryWorkingSet = usage.ContainerMemoryWorkingSet
-		}
-
 		// Count states
 		result.ContextCount++
 		if ctx.IsRunning() {
@@ -380,16 +379,6 @@ func (m *Manager) GetAllResourceUsage() *SandboxResourceUsage {
 		}
 		if ctx.IsPaused() {
 			result.PausedContextCount++
-		}
-	}
-
-	// If no contexts, still try to get container-level stats
-	if result.ContextCount == 0 {
-		containerStats, err := process.GetContainerResourceUsage()
-		if err == nil {
-			result.ContainerMemoryUsage = containerStats.Usage
-			result.ContainerMemoryLimit = containerStats.Limit
-			result.ContainerMemoryWorkingSet = containerStats.WorkingSet
 		}
 	}
 

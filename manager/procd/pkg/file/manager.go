@@ -347,6 +347,30 @@ func (m *Manager) WatchDir(path string, recursive bool) (*Watcher, error) {
 	return m.watcherMgr.WatchDir(cleanPath, recursive)
 }
 
+// SubscribeWatch starts watching a directory and forwards events to handler.
+func (m *Manager) SubscribeWatch(path string, recursive bool, handler func(WatchEvent)) (*Watcher, func() error, error) {
+	if handler == nil {
+		return nil, nil, fmt.Errorf("watch handler is required")
+	}
+
+	watcher, err := m.WatchDir(path, recursive)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	go func(w *Watcher) {
+		for event := range w.EventChan {
+			handler(event)
+		}
+	}(watcher)
+
+	unsubscribe := func() error {
+		return m.UnwatchDir(watcher.ID)
+	}
+
+	return watcher, unsubscribe, nil
+}
+
 // UnwatchDir stops watching a directory.
 func (m *Manager) UnwatchDir(watchID string) error {
 	return m.watcherMgr.UnwatchDir(watchID)
