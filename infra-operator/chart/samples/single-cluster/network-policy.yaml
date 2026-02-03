@@ -11,9 +11,6 @@ metadata:
   namespace: sandbox0-system
 spec:
   version: "latest"
-  network:
-    # Enable network policy with netd.
-    provider: netd
   database:
     # Use builtin for quick start; switch to external for managed PG.
     type: builtin

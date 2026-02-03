@@ -149,23 +149,65 @@ spec:
                         items:
                           type: string
                         type: array
-                      allowedIPs:
+                      allowedCidrs:
                         items:
                           type: string
                         type: array
-                      blockedIPs:
+                      allowedPorts:
+                        items:
+                          description: PortSpec defines a port specification
+                          properties:
+                            endPort:
+                              description: EndPort for port ranges (optional)
+                              format: int32
+                              type: integer
+                            port:
+                              description: Port number
+                              format: int32
+                              type: integer
+                            protocol:
+                              description: Protocol (tcp or udp)
+                              type: string
+                          required:
+                          - port
+                          type: object
+                        type: array
+                      deniedDomains:
                         items:
                           type: string
+                        type: array
+                      deniedCidrs:
+                        items:
+                          type: string
+                        type: array
+                      deniedPorts:
+                        items:
+                          description: PortSpec defines a port specification
+                          properties:
+                            endPort:
+                              description: EndPort for port ranges (optional)
+                              format: int32
+                              type: integer
+                            port:
+                              description: Port number
+                              format: int32
+                              type: integer
+                            protocol:
+                              description: Protocol (tcp or udp)
+                              type: string
+                          required:
+                          - port
+                          type: object
                         type: array
                     type: object
                   ingress:
                     description: NetworkIngressPolicy defines ingress policy
                     properties:
-                      allowedIPs:
+                      allowedCidrs:
                         items:
                           type: string
                         type: array
-                      blockedIPs:
+                      deniedCidrs:
                         items:
                           type: string
                         type: array

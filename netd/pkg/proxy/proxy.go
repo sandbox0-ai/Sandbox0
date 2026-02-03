@@ -434,7 +434,10 @@ func (p *Proxy) checkPolicy(sandboxID, destHost string, destPort int) (decision,
 	}
 
 	if policy.Egress == nil {
-		// No egress rules = default deny unless configured otherwise
+		// No egress rules = default deny unless mode is allow-all
+		if policy.Mode == v1alpha1.NetworkModeAllowAll {
+			return "allow", "no egress rules, default allow"
+		}
 		if p.failClosed {
 			return "deny", "no egress policy, default deny"
 		}
@@ -458,7 +461,7 @@ func (p *Proxy) checkPolicy(sandboxID, destHost string, destPort int) (decision,
 	}
 
 	// Default action
-	if egress.DefaultAction == "allow" {
+	if policy.Mode == v1alpha1.NetworkModeAllowAll {
 		return "allow", "default allow"
 	}
 

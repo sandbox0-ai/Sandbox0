@@ -3582,7 +3582,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [allow-all, block-all, custom]
+          enum: [allow-all, block-all]
         egress:
           $ref: "#/components/schemas/NetworkEgressPolicy"
         ingress:
@@ -3591,7 +3591,7 @@ components:
     NetworkEgressPolicy:
       type: object
       properties:
-        allowedIPs:
+        allowedCidrs:
           type: array
           items:
             type: string
@@ -3603,26 +3603,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PortSpec"
-        blockedDomains:
+        deniedDomains:
           type: array
           items:
             type: string
-        blockedIPs:
+        deniedCidrs:
           type: array
           items:
             type: string
-        blockedPorts:
+        deniedPorts:
           type: array
           items:
             $ref: "#/components/schemas/PortSpec"
     NetworkIngressPolicy:
       type: object
       properties:
-        allowedIPs:
+        allowedCidrs:
           type: array
           items:
             type: string
-        blockedIPs:
+        deniedCidrs:
           type: array
           items:
             type: string

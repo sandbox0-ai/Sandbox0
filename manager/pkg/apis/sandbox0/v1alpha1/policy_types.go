@@ -11,54 +11,14 @@ type NetworkPolicySpec struct {
 	// TeamID is the team that owns this sandbox
 	TeamID string `json:"teamId"`
 
-	// Egress defines outbound traffic rules (default deny)
-	Egress *EgressPolicySpec `json:"egress,omitempty"`
+	// Mode controls the baseline policy for egress
+	Mode NetworkPolicyMode `json:"mode"`
 
-	// Ingress defines inbound traffic rules (default deny)
-	Ingress *IngressPolicySpec `json:"ingress,omitempty"`
-}
+	// Egress defines outbound traffic rules
+	Egress *NetworkEgressPolicy `json:"egress,omitempty"`
 
-// EgressPolicySpec defines egress policy specification
-type EgressPolicySpec struct {
-	// DefaultAction is the default action for egress traffic (deny or allow)
-	DefaultAction string `json:"defaultAction,omitempty"`
-
-	// AllowedCIDRs is a list of allowed destination CIDRs
-	AllowedCIDRs []string `json:"allowedCidrs,omitempty"`
-
-	// DeniedCIDRs is a list of denied destination CIDRs
-	DeniedCIDRs []string `json:"deniedCidrs,omitempty"`
-
-	// AllowedPorts is a list of allowed destination ports (egress)
-	AllowedPorts []PortSpec `json:"allowedPorts,omitempty"`
-
-	// DeniedPorts is a list of denied destination ports (egress)
-	DeniedPorts []PortSpec `json:"deniedPorts,omitempty"`
-
-	// AllowedDomains is a list of allowed destination domains (supports wildcards like *.example.com)
-	AllowedDomains []string `json:"allowedDomains,omitempty"`
-
-	// DeniedDomains is a list of denied destination domains (supports wildcards like *.example.com)
-	DeniedDomains []string `json:"deniedDomains,omitempty"`
-
-	// AlwaysDeniedCIDRs are platform-enforced deny CIDRs (user cannot override)
-	// This includes RFC1918, metadata services, cluster services, etc.
-	AlwaysDeniedCIDRs []string `json:"alwaysDeniedCidrs,omitempty"`
-}
-
-// IngressPolicySpec defines ingress policy specification
-type IngressPolicySpec struct {
-	// DefaultAction is the default action for ingress traffic (deny or allow)
-	DefaultAction string `json:"defaultAction,omitempty"`
-
-	// AllowedSourceCIDRs is a list of allowed source CIDRs
-	AllowedSourceCIDRs []string `json:"allowedSourceCidrs,omitempty"`
-
-	// DeniedSourceCIDRs is a list of denied source CIDRs
-	DeniedSourceCIDRs []string `json:"deniedSourceCidrs,omitempty"`
-
-	// AllowedPorts is a list of allowed destination ports (ports on the sandbox)
-	AllowedPorts []PortSpec `json:"allowedPorts,omitempty"`
+	// Ingress defines inbound traffic rules
+	Ingress *NetworkIngressPolicy `json:"ingress,omitempty"`
 }
 
 // PortSpec defines a port specification

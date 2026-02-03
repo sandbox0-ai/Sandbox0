@@ -315,56 +315,30 @@ func convertCapabilities(caps []string) []corev1.Capability {
 	return result
 }
 
-// BuildEgressSpec builds EgressPolicySpec from SandboxNetworkPolicy
-func BuildEgressSpec(policy *TplSandboxNetworkPolicy) *EgressPolicySpec {
-	if policy == nil {
-		return &EgressPolicySpec{
-			DefaultAction:     "deny",
-			AlwaysDeniedCIDRs: PlatformDeniedCIDRs,
-		}
+// BuildEgressSpec builds NetworkEgressPolicy from SandboxNetworkPolicy
+func BuildEgressSpec(policy *TplSandboxNetworkPolicy) *NetworkEgressPolicy {
+	if policy == nil || policy.Egress == nil {
+		return nil
 	}
 
-	spec := &EgressPolicySpec{
-		AlwaysDeniedCIDRs: PlatformDeniedCIDRs,
+	return &NetworkEgressPolicy{
+		AllowedCIDRs:   policy.Egress.AllowedCIDRs,
+		DeniedCIDRs:    policy.Egress.DeniedCIDRs,
+		AllowedDomains: policy.Egress.AllowedDomains,
+		DeniedDomains:  policy.Egress.DeniedDomains,
+		AllowedPorts:   policy.Egress.AllowedPorts,
+		DeniedPorts:    policy.Egress.DeniedPorts,
 	}
-
-	switch policy.Mode {
-	case NetworkModeAllowAll:
-		spec.DefaultAction = "allow"
-	case NetworkModeBlockAll:
-		spec.DefaultAction = "deny"
-	case NetworkModeCustom:
-		spec.DefaultAction = "deny" // Custom defaults to deny
-	default:
-		spec.DefaultAction = "deny"
-	}
-
-	if policy.Egress != nil {
-		spec.AllowedCIDRs = policy.Egress.AllowedIPs
-		spec.DeniedCIDRs = policy.Egress.BlockedIPs
-		spec.AllowedDomains = policy.Egress.AllowedDomains
-		spec.DeniedDomains = policy.Egress.BlockedDomains
-		spec.AllowedPorts = policy.Egress.AllowedPorts
-		spec.DeniedPorts = policy.Egress.BlockedPorts
-	}
-
-	return spec
 }
 
-// BuildIngressSpec builds IngressPolicySpec from SandboxNetworkPolicy
-func BuildIngressSpec(policy *TplSandboxNetworkPolicy) *IngressPolicySpec {
-	spec := &IngressPolicySpec{
-		DefaultAction: "deny", // Always default deny for ingress
-		// Allow procd port from internal-gateway
-		AllowedPorts: []PortSpec{
-			{Port: 49983, Protocol: "tcp"},
-		},
+// BuildIngressSpec builds NetworkIngressPolicy from SandboxNetworkPolicy
+func BuildIngressSpec(policy *TplSandboxNetworkPolicy) *NetworkIngressPolicy {
+	if policy == nil || policy.Ingress == nil {
+		return nil
 	}
 
-	if policy != nil && policy.Ingress != nil {
-		spec.AllowedSourceCIDRs = policy.Ingress.AllowedIPs
-		spec.DeniedSourceCIDRs = policy.Ingress.BlockedIPs
+	return &NetworkIngressPolicy{
+		AllowedCIDRs: policy.Ingress.AllowedCIDRs,
+		DeniedCIDRs:  policy.Ingress.DeniedCIDRs,
 	}
-
-	return spec
 }

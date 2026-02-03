@@ -207,23 +207,22 @@ type NetworkPolicyMode string
 const (
 	NetworkModeAllowAll NetworkPolicyMode = "allow-all"
 	NetworkModeBlockAll NetworkPolicyMode = "block-all"
-	NetworkModeCustom   NetworkPolicyMode = "custom"
 )
 
 // NetworkEgressPolicy defines egress policy
 type NetworkEgressPolicy struct {
-	AllowedIPs     []string   `json:"allowedIPs,omitempty"`
+	AllowedCIDRs   []string   `json:"allowedCidrs,omitempty"`
 	AllowedDomains []string   `json:"allowedDomains,omitempty"`
-	BlockedIPs     []string   `json:"blockedIPs,omitempty"`
-	BlockedDomains []string   `json:"blockedDomains,omitempty"`
+	DeniedCIDRs    []string   `json:"deniedCidrs,omitempty"`
+	DeniedDomains  []string   `json:"deniedDomains,omitempty"`
 	AllowedPorts   []PortSpec `json:"allowedPorts,omitempty"`
-	BlockedPorts   []PortSpec `json:"blockedPorts,omitempty"`
+	DeniedPorts    []PortSpec `json:"deniedPorts,omitempty"`
 }
 
 // NetworkIngressPolicy defines ingress policy
 type NetworkIngressPolicy struct {
-	AllowedIPs []string `json:"allowedIPs,omitempty"`
-	BlockedIPs []string `json:"blockedIPs,omitempty"`
+	AllowedCIDRs []string `json:"allowedCidrs,omitempty"`
+	DeniedCIDRs  []string `json:"deniedCidrs,omitempty"`
 }
 
 // LifecyclePolicy defines lifecycle policy

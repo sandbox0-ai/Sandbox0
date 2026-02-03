@@ -354,9 +354,6 @@ func (dp *DataPlane) applyEgressRules(
 
 	// 5. Block platform-denied CIDRs (RFC1918, metadata, etc.)
 	deniedCIDRs := v1alpha1.PlatformDeniedCIDRs
-	if policy != nil && policy.Egress != nil && len(policy.Egress.AlwaysDeniedCIDRs) > 0 {
-		deniedCIDRs = policy.Egress.AlwaysDeniedCIDRs
-	}
 
 	if len(deniedCIDRs) > 0 {
 		setName := dp.ipsetName("eg-platform-deny", sandboxID)
@@ -473,10 +470,12 @@ func (dp *DataPlane) applyEgressRules(
 	// 7. Default action (deny by default for enterprise security)
 	defaultAction := "DROP"
 	if policy == nil || policy.Egress == nil {
-		if !dp.failClosed {
+		if policy != nil && policy.Mode == v1alpha1.NetworkModeAllowAll {
+			defaultAction = "ACCEPT"
+		} else if !dp.failClosed {
 			defaultAction = "ACCEPT"
 		}
-	} else if policy.Egress.DefaultAction == "allow" {
+	} else if policy.Mode == v1alpha1.NetworkModeAllowAll {
 		defaultAction = "ACCEPT"
 	}
 	if policy != nil && policy.Egress != nil && len(policy.Egress.AllowedPorts) > 0 && defaultAction == "ACCEPT" {
@@ -535,9 +534,9 @@ func (dp *DataPlane) applyIngressRules(
 
 	// 3. Apply allowed source CIDRs from policy
 	if policy != nil && policy.Ingress != nil {
-		if len(policy.Ingress.DeniedSourceCIDRs) > 0 {
+		if len(policy.Ingress.DeniedCIDRs) > 0 {
 			setName := dp.ipsetName("in-deny", sandboxID)
-			if dp.applyIPSet(ctx, setName, policy.Ingress.DeniedSourceCIDRs, rules) {
+			if dp.applyIPSet(ctx, setName, policy.Ingress.DeniedCIDRs, rules) {
 				if err := dp.runIPTables(
 					"-t", "filter", "-A", "NETD-INGRESS",
 					"-m", "set", "--match-set", setName, "src",
@@ -548,7 +547,7 @@ func (dp *DataPlane) applyIngressRules(
 					return err
 				}
 			} else {
-				for _, cidr := range policy.Ingress.DeniedSourceCIDRs {
+				for _, cidr := range policy.Ingress.DeniedCIDRs {
 					if err := dp.runIPTables(
 						"-t", "filter", "-A", "NETD-INGRESS",
 						"-s", cidr, "-d", podIP,
@@ -561,9 +560,9 @@ func (dp *DataPlane) applyIngressRules(
 			}
 		}
 
-		if len(policy.Ingress.AllowedSourceCIDRs) > 0 {
+		if len(policy.Ingress.AllowedCIDRs) > 0 {
 			setName := dp.ipsetName("in-allow", sandboxID)
-			if dp.applyIPSet(ctx, setName, policy.Ingress.AllowedSourceCIDRs, rules) {
+			if dp.applyIPSet(ctx, setName, policy.Ingress.AllowedCIDRs, rules) {
 				if err := dp.runIPTables(
 					"-t", "filter", "-A", "NETD-INGRESS",
 					"-m", "set", "--match-set", setName, "src",
@@ -574,7 +573,7 @@ func (dp *DataPlane) applyIngressRules(
 					return err
 				}
 			} else {
-				for _, cidr := range policy.Ingress.AllowedSourceCIDRs {
+				for _, cidr := range policy.Ingress.AllowedCIDRs {
 					if err := dp.runIPTables(
 						"-t", "filter", "-A", "NETD-INGRESS",
 						"-s", cidr, "-d", podIP,
@@ -587,12 +586,6 @@ func (dp *DataPlane) applyIngressRules(
 			}
 		}
 
-		// Apply allowed ports
-		for _, portSpec := range policy.Ingress.AllowedPorts {
-			if err := dp.applyIngressPortRule(podIP, portSpec, "ACCEPT", comment+":allow-port"); err != nil {
-				return err
-			}
-		}
 	}
 
 	// 4. Default deny for ingress
@@ -601,8 +594,6 @@ func (dp *DataPlane) applyIngressRules(
 		if !dp.failClosed {
 			defaultAction = "ACCEPT"
 		}
-	} else if policy.Ingress.DefaultAction == "allow" {
-		defaultAction = "ACCEPT"
 	}
 
 	if err := dp.runIPTables(

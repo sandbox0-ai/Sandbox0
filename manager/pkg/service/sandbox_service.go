@@ -508,7 +508,7 @@ func (s *SandboxService) appendWebhookNetworkPolicy(
 		requestNetwork.Egress = &v1alpha1.NetworkEgressPolicy{}
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		requestNetwork.Egress.AllowedIPs = append(requestNetwork.Egress.AllowedIPs, formatCIDRForIP(ip))
+		requestNetwork.Egress.AllowedCIDRs = append(requestNetwork.Egress.AllowedCIDRs, formatCIDRForIP(ip))
 		return requestNetwork
 	}
 	requestNetwork.Egress.AllowedDomains = append(requestNetwork.Egress.AllowedDomains, host)
@@ -986,44 +986,51 @@ func networkPolicyFromSpec(spec *v1alpha1.NetworkPolicySpec) *v1alpha1.TplSandbo
 	}
 
 	var (
-		egressAllowedIPs     []string
-		egressBlockedIPs     []string
+		egressAllowedCIDRs   []string
+		egressDeniedCIDRs    []string
 		egressAllowedDomains []string
+		egressDeniedDomains  []string
+		egressAllowedPorts   []v1alpha1.PortSpec
+		egressDeniedPorts    []v1alpha1.PortSpec
 	)
 	if spec.Egress != nil {
-		egressAllowedIPs = append(egressAllowedIPs, spec.Egress.AllowedCIDRs...)
-		egressBlockedIPs = append(egressBlockedIPs, spec.Egress.DeniedCIDRs...)
+		egressAllowedCIDRs = append(egressAllowedCIDRs, spec.Egress.AllowedCIDRs...)
+		egressDeniedCIDRs = append(egressDeniedCIDRs, spec.Egress.DeniedCIDRs...)
 		egressAllowedDomains = append(egressAllowedDomains, spec.Egress.AllowedDomains...)
+		egressDeniedDomains = append(egressDeniedDomains, spec.Egress.DeniedDomains...)
+		egressAllowedPorts = append(egressAllowedPorts, spec.Egress.AllowedPorts...)
+		egressDeniedPorts = append(egressDeniedPorts, spec.Egress.DeniedPorts...)
 	}
 
-	var ingressAllowedIPs []string
-	var ingressBlockedIPs []string
+	var ingressAllowedCIDRs []string
+	var ingressDeniedCIDRs []string
 	if spec.Ingress != nil {
-		ingressAllowedIPs = append(ingressAllowedIPs, spec.Ingress.AllowedSourceCIDRs...)
-		ingressBlockedIPs = append(ingressBlockedIPs, spec.Ingress.DeniedSourceCIDRs...)
+		ingressAllowedCIDRs = append(ingressAllowedCIDRs, spec.Ingress.AllowedCIDRs...)
+		ingressDeniedCIDRs = append(ingressDeniedCIDRs, spec.Ingress.DeniedCIDRs...)
 	}
 
-	mode := v1alpha1.NetworkModeCustom
-	if spec.Egress != nil && strings.EqualFold(spec.Egress.DefaultAction, "allow") {
-		mode = v1alpha1.NetworkModeAllowAll
-	} else if len(egressAllowedIPs)+len(egressBlockedIPs)+len(egressAllowedDomains)+len(ingressAllowedIPs)+len(ingressBlockedIPs) == 0 {
-		mode = v1alpha1.NetworkModeBlockAll
+	mode := v1alpha1.NetworkModeBlockAll
+	if spec.Mode != "" {
+		mode = spec.Mode
 	}
 
 	policy := &v1alpha1.TplSandboxNetworkPolicy{
 		Mode: mode,
 	}
-	if len(egressAllowedIPs)+len(egressBlockedIPs)+len(egressAllowedDomains) > 0 {
+	if len(egressAllowedCIDRs)+len(egressDeniedCIDRs)+len(egressAllowedDomains)+len(egressDeniedDomains)+len(egressAllowedPorts)+len(egressDeniedPorts) > 0 {
 		policy.Egress = &v1alpha1.NetworkEgressPolicy{
-			AllowedIPs:     egressAllowedIPs,
-			BlockedIPs:     egressBlockedIPs,
+			AllowedCIDRs:   egressAllowedCIDRs,
+			DeniedCIDRs:    egressDeniedCIDRs,
 			AllowedDomains: egressAllowedDomains,
+			DeniedDomains:  egressDeniedDomains,
+			AllowedPorts:   egressAllowedPorts,
+			DeniedPorts:    egressDeniedPorts,
 		}
 	}
-	if len(ingressAllowedIPs)+len(ingressBlockedIPs) > 0 {
+	if len(ingressAllowedCIDRs)+len(ingressDeniedCIDRs) > 0 {
 		policy.Ingress = &v1alpha1.NetworkIngressPolicy{
-			AllowedIPs: ingressAllowedIPs,
-			BlockedIPs: ingressBlockedIPs,
+			AllowedCIDRs: ingressAllowedCIDRs,
+			DeniedCIDRs:  ingressDeniedCIDRs,
 		}
 	}
 

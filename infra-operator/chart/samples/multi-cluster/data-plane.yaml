@@ -11,9 +11,6 @@ metadata:
   namespace: sandbox0-system
 spec:
   version: "latest"
-  network:
-    # Optional network policy; remove if not needed.
-    provider: netd
   database:
     # Must match the control plane database.
     type: external
