@@ -22,7 +22,6 @@ type Store struct {
 type policyEntry struct {
 	compiled   *CompiledPolicy
 	policyHash string
-	applied    bool
 	podIP      string
 	updatedAt  time.Time
 }
@@ -69,7 +68,6 @@ func (s *Store) UpsertFromSandbox(info *watcher.SandboxInfo) (bool, string) {
 	entry := &policyEntry{
 		compiled:   compiled,
 		policyHash: info.NetworkPolicyHash,
-		applied:    false,
 		podIP:      info.PodIP,
 		updatedAt:  time.Now(),
 	}
@@ -129,29 +127,6 @@ func (s *Store) getPlatformPolicy() *PlatformPolicy {
 	s.platformMu.RLock()
 	defer s.platformMu.RUnlock()
 	return s.platform
-}
-
-func (s *Store) MarkApplied(namespace, name, hash string) {
-	key := namespace + "/" + name
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if entry := s.byKey[key]; entry != nil && entry.policyHash == hash {
-		entry.applied = true
-	}
-}
-
-func (s *Store) HasPolicyApplied(namespace, name, hash string) bool {
-	if hash == "" {
-		return false
-	}
-	key := namespace + "/" + name
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	entry := s.byKey[key]
-	if entry == nil {
-		return false
-	}
-	return entry.policyHash == hash && entry.applied
 }
 
 func (s *Store) HasPolicyHash(namespace, name, hash string) bool {

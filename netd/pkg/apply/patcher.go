@@ -31,17 +31,11 @@ func (p *Patcher) SyncAppliedHashes(ctx context.Context, sandboxes []*watcher.Sa
 		return fmt.Errorf("k8s client is nil")
 	}
 	for _, sandbox := range sandboxes {
-		if sandbox == nil {
-			continue
-		}
-		if sandbox.NetworkPolicyHash == "" && sandbox.BandwidthHash == "" {
+		if sandbox == nil || (sandbox.NetworkPolicyHash == "" && sandbox.BandwidthHash == "") {
 			continue
 		}
 		annotations := map[string]string{}
 		if sandbox.NetworkPolicyHash != "" && sandbox.NetworkPolicyHash != sandbox.NetworkAppliedHash {
-			if store == nil || !store.HasPolicyApplied(sandbox.Namespace, sandbox.Name, sandbox.NetworkPolicyHash) {
-				continue
-			}
 			annotations[controller.AnnotationNetworkPolicyAppliedHash] = sandbox.NetworkPolicyHash
 		}
 		if sandbox.BandwidthHash != "" && sandbox.BandwidthHash != sandbox.BandwidthAppliedHash {
