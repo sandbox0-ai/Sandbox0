@@ -177,9 +177,7 @@ func (m *iptablesManager) Cleanup(ctx context.Context) error {
 
 	// Cleanup ipset
 	cmd := exec.CommandContext(ctx, "ipset", "destroy", ipsetName)
-	_ = cmd.Run()
-
-	return nil
+	return cmd.Run()
 }
 
 func (m *iptablesManager) ensureChain(ctx context.Context) error {

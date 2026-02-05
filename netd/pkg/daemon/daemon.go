@@ -98,7 +98,24 @@ func (d *Daemon) runNetd(ctx context.Context) error {
 		changed, prevHash := policyStore.UpsertFromSandbox(info)
 		if changed && info.PodIP != "" {
 			flows := tracker.PopBySrc(info.PodIP)
-			conntrackManager.CleanupFlows(ctx, flows)
+			p := policyStore.GetByIP(info.PodIP)
+			var flowsToKill []conntrack.FlowKey
+			// Only kill flows that are denied by the new policy.
+			// This prevents a race condition where a new connection established
+			// immediately after the policy update but before this handler runs
+			// would be killed if we blindly cleared all flows.
+			for _, flow := range flows {
+				proto := "tcp"
+				if flow.Proto == 17 {
+					proto = "udp"
+				}
+				if !policy.AllowEgressL4(p, net.IP(flow.DstIP.AsSlice()), int(flow.DstPort), proto) {
+					flowsToKill = append(flowsToKill, flow)
+				}
+			}
+			if len(flowsToKill) > 0 {
+				conntrackManager.CleanupFlows(ctx, flowsToKill)
+			}
 		}
 		d.logger.Info("Sandbox policy handler triggered",
 			zap.String("sandbox", info.Namespace+"/"+info.Name),
