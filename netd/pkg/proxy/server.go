@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
@@ -29,6 +30,8 @@ type Server struct {
 	httpsListener net.Listener
 	udpConn       *net.UDPConn
 	reassembler   *quicReassembler
+	exitCh        chan error
+	exitOnce      sync.Once
 }
 
 func NewServer(cfg *config.NetdConfig, store *policy.Store, tracker *conntrack.Tracker, logger *zap.Logger) (*Server, error) {
@@ -68,13 +71,23 @@ func NewServer(cfg *config.NetdConfig, store *policy.Store, tracker *conntrack.T
 		httpsListener: httpsLn,
 		udpConn:       udpConn,
 		reassembler:   newQuicReassembler(),
+		exitCh:        make(chan error, 1),
 	}, nil
 }
 
 func (s *Server) Start(ctx context.Context) {
-	go s.acceptLoop(ctx, s.httpListener, s.handleHTTPConn)
-	go s.acceptLoop(ctx, s.httpsListener, s.handleHTTPSConn)
-	go s.handleUDP(ctx)
+	if s.exitCh == nil {
+		s.exitCh = make(chan error, 1)
+	}
+	go s.runLoop(ctx, "http accept loop", func() {
+		s.acceptLoop(ctx, s.httpListener, s.handleHTTPConn)
+	})
+	go s.runLoop(ctx, "https accept loop", func() {
+		s.acceptLoop(ctx, s.httpsListener, s.handleHTTPSConn)
+	})
+	go s.runLoop(ctx, "udp handler", func() {
+		s.handleUDP(ctx)
+	})
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
@@ -97,6 +110,39 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return err
 }
 
+func (s *Server) Done() <-chan error {
+	return s.exitCh
+}
+
+func (s *Server) runLoop(ctx context.Context, name string, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.signalExit(fmt.Errorf("%s panic: %v", name, r))
+			return
+		}
+		if ctx.Err() != nil {
+			s.signalExit(ctx.Err())
+			return
+		}
+		s.signalExit(fmt.Errorf("%s exited", name))
+	}()
+	fn()
+}
+
+func (s *Server) signalExit(err error) {
+	s.exitOnce.Do(func() {
+		if err == nil {
+			err = errors.New("proxy server stopped")
+		}
+		_ = s.Shutdown(context.Background())
+		if s.exitCh == nil {
+			s.exitCh = make(chan error, 1)
+		}
+		s.exitCh <- err
+		close(s.exitCh)
+	})
+}
+
 func (s *Server) acceptLoop(ctx context.Context, ln net.Listener, handler func(net.Conn)) {
 	for {
 		conn, err := ln.Accept()
@@ -107,9 +153,9 @@ func (s *Server) acceptLoop(ctx context.Context, ln net.Listener, handler func(n
 			default:
 			}
 			if errors.Is(err, net.ErrClosed) {
+				s.logger.Warn("Proxy connection closed", zap.Error(err))
 				return
 			}
-			s.logger.Error("Proxy accept failed", zap.Error(err))
 			continue
 		}
 		go handler(conn)
@@ -139,7 +185,7 @@ func (s *Server) handleHTTPConn(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	req, err := http.ReadRequest(reader)
 	if err != nil {
-		s.logger.Debug("HTTP parse failed", zap.Error(err))
+		s.logger.Error("HTTP parse failed", zap.Error(err))
 		return
 	}
 	host := normalizeHost(req.Host)
@@ -156,13 +202,13 @@ func (s *Server) handleHTTPConn(conn net.Conn) {
 
 	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(origIP.String(), fmt.Sprintf("%d", origPort)), s.cfg.ProxyUpstreamTimeout.Duration)
 	if err != nil {
-		s.logger.Debug("HTTP upstream dial failed", zap.Error(err))
+		s.logger.Warn("HTTP upstream dial failed", zap.Error(err))
 		return
 	}
 	defer upstream.Close()
 
 	if err := req.Write(upstream); err != nil {
-		s.logger.Debug("HTTP upstream write failed", zap.Error(err))
+		s.logger.Warn("HTTP upstream write failed", zap.Error(err))
 		return
 	}
 
@@ -191,7 +237,7 @@ func (s *Server) handleHTTPSConn(conn net.Conn) {
 
 	clientHello, err := readClientHello(conn, int(s.cfg.ProxyHeaderLimit))
 	if err != nil {
-		s.logger.Debug("TLS parse failed", zap.Error(err))
+		s.logger.Warn("TLS parse failed", zap.Error(err))
 		return
 	}
 	host := normalizeHost(clientHello.ServerName)
@@ -208,7 +254,7 @@ func (s *Server) handleHTTPSConn(conn net.Conn) {
 
 	upstream, err := net.DialTimeout("tcp", net.JoinHostPort(origIP.String(), fmt.Sprintf("%d", origPort)), s.cfg.ProxyUpstreamTimeout.Duration)
 	if err != nil {
-		s.logger.Debug("TLS upstream dial failed", zap.Error(err))
+		s.logger.Warn("TLS upstream dial failed", zap.Error(err))
 		return
 	}
 	defer upstream.Close()
@@ -231,9 +277,11 @@ func (s *Server) handleUDP(ctx context.Context) {
 		n, addr, destIP, destPort, err := readUDPDatagram(s.udpConn, buffer)
 		if err != nil {
 			if ctx.Err() != nil {
+				s.logger.Error("UDP read failed", zap.Error(err))
 				return
 			}
 			if errors.Is(err, net.ErrClosed) {
+				s.logger.Warn("UDP connection closed", zap.Error(err))
 				return
 			}
 			s.logger.Error("UDP read failed", zap.Error(err))
@@ -299,21 +347,21 @@ func (s *Server) handleUDPDatagram(src *net.UDPAddr, payload []byte, destIP net.
 	upstreamAddr := &net.UDPAddr{IP: destIP, Port: destPort}
 	upstreamConn, err := net.DialUDP("udp", nil, upstreamAddr)
 	if err != nil {
-		s.logger.Debug("UDP upstream dial failed", zap.Error(err))
+		s.logger.Warn("UDP upstream dial failed", zap.Error(err))
 		return
 	}
 	defer upstreamConn.Close()
 
 	_ = upstreamConn.SetDeadline(time.Now().Add(s.cfg.ProxyUpstreamTimeout.Duration))
 	if _, err := upstreamConn.Write(payload); err != nil {
-		s.logger.Debug("UDP upstream write failed", zap.Error(err))
+		s.logger.Warn("UDP upstream write failed", zap.Error(err))
 		return
 	}
 
 	replyBuf := make([]byte, 64*1024)
 	n, _, err := upstreamConn.ReadFromUDP(replyBuf)
 	if err != nil {
-		s.logger.Debug("UDP upstream read failed", zap.Error(err))
+		s.logger.Warn("UDP upstream read failed", zap.Error(err))
 		return
 	}
 	_, _ = s.udpConn.WriteToUDP(replyBuf[:n], src)

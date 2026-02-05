@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -26,6 +27,7 @@ type Daemon struct {
 	logger        *zap.Logger
 	healthServer  *http.Server
 	metricsServer *http.Server
+	proxyServer   *proxy.Server
 	ready         atomic.Bool
 }
 
@@ -43,14 +45,24 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if d.cfg == nil {
 		return fmt.Errorf("netd config is nil")
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	if err := d.startServers(); err != nil {
 		return err
 	}
-	if err := d.runNetd(ctx); err != nil {
+	proxyExitCh := make(chan error, 1)
+	if err := d.runNetd(runCtx, cancel, proxyExitCh); err != nil {
 		return err
 	}
 
-	<-ctx.Done()
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case runErr = <-proxyExitCh:
+		cancel()
+	}
+
+	<-runCtx.Done()
 
 	shutdownCtx := context.Background()
 	if d.cfg.ShutdownDelay.Duration > 0 {
@@ -58,10 +70,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 		shutdownCtx, cancel = context.WithTimeout(context.Background(), d.cfg.ShutdownDelay.Duration)
 		defer cancel()
 	}
-	return d.shutdown(shutdownCtx)
+	shutdownErr := d.shutdown(shutdownCtx)
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		if shutdownErr != nil {
+			d.logger.Error("Shutdown completed with error", zap.Error(shutdownErr))
+		}
+		return runErr
+	}
+	return shutdownErr
 }
 
-func (d *Daemon) runNetd(ctx context.Context) error {
+func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyExitCh chan<- error) error {
 	if d.cfg.NodeName == "" {
 		return fmt.Errorf("node name is required")
 	}
@@ -147,8 +166,20 @@ func (d *Daemon) runNetd(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	d.proxyServer = proxyServer
 	proxyServer.Start(ctx)
-	defer proxyServer.Shutdown(context.Background())
+	if proxyExitCh != nil {
+		go func() {
+			err := <-proxyServer.Done()
+			select {
+			case proxyExitCh <- err:
+			default:
+			}
+			if cancel != nil {
+				cancel()
+			}
+		}()
+	}
 
 	redirectManager := redirect.NewManager(redirect.Config{
 		PreferNFT:      d.cfg.PreferNFT != nil && *d.cfg.PreferNFT,
@@ -307,6 +338,12 @@ func (d *Daemon) listenAndServe(server *http.Server, name string) error {
 
 func (d *Daemon) shutdown(ctx context.Context) error {
 	var shutdownErr error
+	if d.proxyServer != nil {
+		if err := d.proxyServer.Shutdown(ctx); err != nil {
+			shutdownErr = err
+			d.logger.Error("Failed to shutdown proxy server", zap.Error(err))
+		}
+	}
 	if d.healthServer != nil {
 		if err := d.healthServer.Shutdown(ctx); err != nil {
 			shutdownErr = err

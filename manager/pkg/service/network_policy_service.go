@@ -117,7 +117,7 @@ func (s *NetworkPolicyService) mergeNetworkPolicies(
 ) *v1alpha1.TplSandboxNetworkPolicy {
 	if template == nil && request == nil {
 		return &v1alpha1.TplSandboxNetworkPolicy{
-			Mode: v1alpha1.NetworkModeBlockAll, // Default to block all
+			Mode: v1alpha1.NetworkModeAllowAll, // Default to allow all
 		}
 	}
 

@@ -86,29 +86,6 @@ func (s *Store) UpsertFromSandbox(info *watcher.SandboxInfo) (bool, string) {
 	return changed, prevHash
 }
 
-func (s *Store) DeleteByIP(podIP string) {
-	if podIP == "" {
-		return
-	}
-	s.mu.Lock()
-	entry := s.byIP[podIP]
-	delete(s.byIP, podIP)
-	if entry != nil {
-		for key, val := range s.byKey {
-			if val == entry {
-				delete(s.byKey, key)
-				s.logger.Info(
-					"Sandbox network policy deleted by IP",
-					zap.String("sandbox", key),
-					zap.String("pod_ip", podIP),
-				)
-				break
-			}
-		}
-	}
-	s.mu.Unlock()
-}
-
 func (s *Store) DeleteByKey(namespace, name string) {
 	key := namespace + "/" + name
 	s.mu.Lock()

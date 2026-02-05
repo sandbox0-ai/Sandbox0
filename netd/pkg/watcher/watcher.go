@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,39 +17,43 @@ import (
 )
 
 type SandboxInfo struct {
-	Namespace         string
-	Name              string
-	UID               types.UID
-	PodIP             string
-	NodeName          string
-	SandboxID         string
-	TeamID            string
-	NetworkPolicy     string
-	NetworkPolicyHash string
-	NetworkAppliedHash string
-	BandwidthPolicy   string
-	BandwidthHash     string
+	Namespace            string
+	Name                 string
+	UID                  types.UID
+	ResourceVersion      string
+	PodIP                string
+	NodeName             string
+	SandboxID            string
+	TeamID               string
+	NetworkPolicy        string
+	NetworkPolicyHash    string
+	NetworkAppliedHash   string
+	BandwidthPolicy      string
+	BandwidthHash        string
 	BandwidthAppliedHash string
 }
 
 type ServiceInfo struct {
-	Namespace string
-	Name      string
-	ClusterIP string
-	Ports     []corev1.ServicePort
-	Labels    map[string]string
+	Namespace       string
+	Name            string
+	ResourceVersion string
+	ClusterIP       string
+	Ports           []corev1.ServicePort
+	Labels          map[string]string
 }
 
 type EndpointsInfo struct {
-	Namespace string
-	Name      string
-	Addresses []string
-	Ports     []corev1.EndpointPort
+	Namespace       string
+	Name            string
+	ResourceVersion string
+	Addresses       []string
+	Ports           []corev1.EndpointPort
 }
 
 type NodeInfo struct {
-	Name        string
-	InternalIPs []string
+	Name            string
+	ResourceVersion string
+	InternalIPs     []string
 }
 
 type Watcher struct {
@@ -62,14 +67,14 @@ type Watcher struct {
 	endpoints map[string]*EndpointsInfo
 	nodes     map[string]*NodeInfo
 
-	onSandboxUpsert  func(*SandboxInfo)
-	onSandboxDelete  func(*SandboxInfo)
-	onServiceUpsert  func(*ServiceInfo)
-	onServiceDelete  func(*ServiceInfo)
+	onSandboxUpsert   func(*SandboxInfo)
+	onSandboxDelete   func(*SandboxInfo)
+	onServiceUpsert   func(*ServiceInfo)
+	onServiceDelete   func(*ServiceInfo)
 	onEndpointsUpsert func(*EndpointsInfo)
 	onEndpointsDelete func(*EndpointsInfo)
-	onNodeUpsert     func(*NodeInfo)
-	onNodeDelete     func(*NodeInfo)
+	onNodeUpsert      func(*NodeInfo)
+	onNodeDelete      func(*NodeInfo)
 }
 
 func NewWatcher(
@@ -223,6 +228,12 @@ func (w *Watcher) handlePodUpsert(obj any) {
 
 	key := pod.Namespace + "/" + pod.Name
 	w.mu.Lock()
+	if existing := w.sandboxes[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	w.sandboxes[key] = info
 	w.mu.Unlock()
 
@@ -257,6 +268,12 @@ func (w *Watcher) handlePodDelete(obj any) {
 	}
 
 	w.mu.Lock()
+	if existing := w.sandboxes[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	delete(w.sandboxes, key)
 	w.mu.Unlock()
 
@@ -283,6 +300,12 @@ func (w *Watcher) handleServiceUpsert(obj any) {
 
 	key := service.Namespace + "/" + service.Name
 	w.mu.Lock()
+	if existing := w.services[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	w.services[key] = info
 	w.mu.Unlock()
 
@@ -303,6 +326,12 @@ func (w *Watcher) handleServiceDelete(obj any) {
 
 	key := service.Namespace + "/" + service.Name
 	w.mu.Lock()
+	if existing := w.services[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	delete(w.services, key)
 	w.mu.Unlock()
 
@@ -323,6 +352,12 @@ func (w *Watcher) handleEndpointsUpsert(obj any) {
 
 	key := endpoints.Namespace + "/" + endpoints.Name
 	w.mu.Lock()
+	if existing := w.endpoints[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	w.endpoints[key] = info
 	w.mu.Unlock()
 
@@ -343,6 +378,12 @@ func (w *Watcher) handleEndpointsDelete(obj any) {
 
 	key := endpoints.Namespace + "/" + endpoints.Name
 	w.mu.Lock()
+	if existing := w.endpoints[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	delete(w.endpoints, key)
 	w.mu.Unlock()
 
@@ -362,6 +403,12 @@ func (w *Watcher) handleNodeUpsert(obj any) {
 	}
 
 	w.mu.Lock()
+	if existing := w.nodes[node.Name]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	w.nodes[node.Name] = info
 	w.mu.Unlock()
 
@@ -381,6 +428,12 @@ func (w *Watcher) handleNodeDelete(obj any) {
 	}
 
 	w.mu.Lock()
+	if existing := w.nodes[node.Name]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
 	delete(w.nodes, node.Name)
 	w.mu.Unlock()
 
@@ -402,18 +455,19 @@ func sandboxInfoFromPod(pod *corev1.Pod) *SandboxInfo {
 	}
 	teamID := pod.Annotations[controller.AnnotationTeamID]
 	return &SandboxInfo{
-		Namespace:         pod.Namespace,
-		Name:              pod.Name,
-		UID:               pod.UID,
-		PodIP:             pod.Status.PodIP,
-		NodeName:          pod.Spec.NodeName,
-		SandboxID:         sandboxID,
-		TeamID:            teamID,
-		NetworkPolicy:     pod.Annotations[controller.AnnotationNetworkPolicy],
-		NetworkPolicyHash: pod.Annotations[controller.AnnotationNetworkPolicyHash],
-		NetworkAppliedHash: pod.Annotations[controller.AnnotationNetworkPolicyAppliedHash],
-		BandwidthPolicy:   pod.Annotations[controller.AnnotationBandwidthPolicy],
-		BandwidthHash:     pod.Annotations[controller.AnnotationBandwidthPolicyHash],
+		Namespace:            pod.Namespace,
+		Name:                 pod.Name,
+		UID:                  pod.UID,
+		ResourceVersion:      pod.ResourceVersion,
+		PodIP:                pod.Status.PodIP,
+		NodeName:             pod.Spec.NodeName,
+		SandboxID:            sandboxID,
+		TeamID:               teamID,
+		NetworkPolicy:        pod.Annotations[controller.AnnotationNetworkPolicy],
+		NetworkPolicyHash:    pod.Annotations[controller.AnnotationNetworkPolicyHash],
+		NetworkAppliedHash:   pod.Annotations[controller.AnnotationNetworkPolicyAppliedHash],
+		BandwidthPolicy:      pod.Annotations[controller.AnnotationBandwidthPolicy],
+		BandwidthHash:        pod.Annotations[controller.AnnotationBandwidthPolicyHash],
 		BandwidthAppliedHash: pod.Annotations[controller.AnnotationBandwidthPolicyAppliedHash],
 	}
 }
@@ -423,11 +477,12 @@ func serviceInfoFromService(service *corev1.Service) *ServiceInfo {
 		return nil
 	}
 	return &ServiceInfo{
-		Namespace: service.Namespace,
-		Name:      service.Name,
-		ClusterIP: service.Spec.ClusterIP,
-		Ports:     append([]corev1.ServicePort(nil), service.Spec.Ports...),
-		Labels:    cloneStringMap(service.Labels),
+		Namespace:       service.Namespace,
+		Name:            service.Name,
+		ResourceVersion: service.ResourceVersion,
+		ClusterIP:       service.Spec.ClusterIP,
+		Ports:           append([]corev1.ServicePort(nil), service.Spec.Ports...),
+		Labels:          cloneStringMap(service.Labels),
 	}
 }
 
@@ -436,10 +491,11 @@ func endpointsInfoFromEndpoints(endpoints *corev1.Endpoints) *EndpointsInfo {
 		return nil
 	}
 	info := &EndpointsInfo{
-		Namespace: endpoints.Namespace,
-		Name:      endpoints.Name,
-		Ports:     []corev1.EndpointPort{},
-		Addresses: []string{},
+		Namespace:       endpoints.Namespace,
+		Name:            endpoints.Name,
+		ResourceVersion: endpoints.ResourceVersion,
+		Ports:           []corev1.EndpointPort{},
+		Addresses:       []string{},
 	}
 	for _, subset := range endpoints.Subsets {
 		info.Ports = append(info.Ports, subset.Ports...)
@@ -456,7 +512,10 @@ func nodeInfoFromNode(node *corev1.Node) *NodeInfo {
 	if node == nil {
 		return nil
 	}
-	info := &NodeInfo{Name: node.Name}
+	info := &NodeInfo{
+		Name:            node.Name,
+		ResourceVersion: node.ResourceVersion,
+	}
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == corev1.NodeInternalIP && addr.Address != "" {
 			info.InternalIPs = append(info.InternalIPs, addr.Address)
@@ -563,4 +622,19 @@ func cloneStringMap(in map[string]string) map[string]string {
 		out[key] = val
 	}
 	return out
+}
+
+func isResourceVersionNewer(current, incoming string) bool {
+	if current == "" {
+		return true
+	}
+	if incoming == "" {
+		return false
+	}
+	currentVal, currentErr := strconv.ParseInt(current, 10, 64)
+	incomingVal, incomingErr := strconv.ParseInt(incoming, 10, 64)
+	if currentErr != nil || incomingErr != nil {
+		return true
+	}
+	return incomingVal > currentVal
 }

@@ -777,7 +777,7 @@ func (s *SandboxService) GetNetworkPolicy(ctx context.Context, sandboxID string)
 		return templateSpec.DeepCopy(), nil
 	}
 
-	return &v1alpha1.TplSandboxNetworkPolicy{Mode: v1alpha1.NetworkModeBlockAll}, nil
+	return &v1alpha1.TplSandboxNetworkPolicy{Mode: v1alpha1.NetworkModeAllowAll}, nil
 }
 
 // UpdateNetworkPolicy updates the network policy for a sandbox.
@@ -1024,7 +1024,7 @@ func (s *SandboxService) normalizeBandwidthPolicy(policy *v1alpha1.BandwidthPoli
 
 func networkPolicyFromSpec(spec *v1alpha1.NetworkPolicySpec) *v1alpha1.TplSandboxNetworkPolicy {
 	if spec == nil {
-		return &v1alpha1.TplSandboxNetworkPolicy{Mode: v1alpha1.NetworkModeBlockAll}
+		return &v1alpha1.TplSandboxNetworkPolicy{Mode: v1alpha1.NetworkModeAllowAll}
 	}
 
 	var (
@@ -1044,7 +1044,7 @@ func networkPolicyFromSpec(spec *v1alpha1.NetworkPolicySpec) *v1alpha1.TplSandbo
 		egressDeniedPorts = append(egressDeniedPorts, spec.Egress.DeniedPorts...)
 	}
 
-	mode := v1alpha1.NetworkModeBlockAll
+	mode := v1alpha1.NetworkModeAllowAll
 	if spec.Mode != "" {
 		mode = spec.Mode
 	}
