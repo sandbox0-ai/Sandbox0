@@ -62,6 +62,7 @@ type SandboxServiceConfig struct {
 	PauseMinCPU                 string
 	ProcdPort                   int
 	ProcdClientTimeout          time.Duration
+	ProcdInitTimeout            time.Duration
 }
 
 // SandboxService handles sandbox operations
@@ -698,15 +699,30 @@ func (s *SandboxService) initializeProcd(
 	}
 
 	var initErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		_, initErr = s.procdClient.Initialize(ctx, procdAddress, initReq, internalToken, procdToken)
+	timeout := s.config.ProcdInitTimeout
+	if timeout == 0 {
+		timeout = 6 * time.Second
+	}
+
+	initCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		_, initErr = s.procdClient.Initialize(initCtx, procdAddress, initReq, internalToken, procdToken)
 		if initErr == nil {
 			return nil
 		}
-		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
-	}
 
-	return initErr
+		select {
+		case <-initCtx.Done():
+			return fmt.Errorf("initialize procd timed out after %s: %w", timeout, initErr)
+		case <-ticker.C:
+			continue
+		}
+	}
 }
 
 // TerminateSandbox terminates a sandbox

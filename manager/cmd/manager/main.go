@@ -227,6 +227,7 @@ func main() {
 		PauseMinCPU:                 cfg.PauseMinCPU,
 		ProcdPort:                   cfg.ProcdConfig.HTTPPort,
 		ProcdClientTimeout:          cfg.ProcdClientTimeout.Duration,
+		ProcdInitTimeout:            cfg.ProcdInitTimeout.Duration,
 	}
 
 	sandboxService := service.NewSandboxService(
