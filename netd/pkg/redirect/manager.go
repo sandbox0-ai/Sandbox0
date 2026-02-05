@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -70,79 +69,64 @@ func (m *iptablesManager) Sync(ctx context.Context, sandboxIPs []string, bypassC
 	if err := m.ensureJump(ctx); err != nil {
 		return err
 	}
-	if err := m.flushCustomChain(ctx); err != nil {
-		return err
-	}
-
-	bypass := append([]string{defaultLoopback}, bypassCIDRs...)
-	for _, cidr := range normalizeCIDRs(bypass) {
-		if err := m.appendCustomRule(ctx, "-d", cidr, "-j", "RETURN"); err != nil {
-			return err
-		}
-	}
-
 	if err := m.syncIPSet(ctx, normalizeIPs(sandboxIPs)); err != nil {
 		return err
 	}
 
+	// 2. Build iptables-restore input
+	var buf bytes.Buffer
+	buf.WriteString("*mangle\n")
+	// Explicitly flush the custom chain within the atomic transaction
+	buf.WriteString(fmt.Sprintf("-F %s\n", chainName))
+
+	bypass := append([]string{defaultLoopback}, bypassCIDRs...)
+	for _, cidr := range normalizeCIDRs(bypass) {
+		buf.WriteString(fmt.Sprintf("-A %s -d %s -j RETURN\n", chainName, cidr))
+	}
+
 	// TCP 443
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "tcp", "--dport", "443", "-m", "conntrack", "--ctstate", "NEW", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "tcp", "--dport", "443", "-m", "socket", "--transparent", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p tcp --dport 443 -m conntrack --ctstate NEW -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p tcp --dport 443 -m socket --transparent -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
 
 	// TCP 853
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "tcp", "--dport", "853", "-m", "conntrack", "--ctstate", "NEW", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "tcp", "--dport", "853", "-m", "socket", "--transparent", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p tcp --dport 853 -m conntrack --ctstate NEW -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p tcp --dport 853 -m socket --transparent -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
 
 	// UDP 443
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "udp", "--dport", "443", "-m", "conntrack", "--ctstate", "NEW", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "udp", "--dport", "443", "-m", "socket", "--transparent", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p udp --dport 443 -m conntrack --ctstate NEW -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p udp --dport 443 -m socket --transparent -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
 
 	// UDP 853
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "udp", "--dport", "853", "-m", "conntrack", "--ctstate", "NEW", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "udp", "--dport", "853", "-m", "socket", "--transparent", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPSPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p udp --dport 853 -m conntrack --ctstate NEW -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p udp --dport 853 -m socket --transparent -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPSPort, tproxyMark))
 
 	// TCP All
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "tcp", "-m", "conntrack", "--ctstate", "NEW", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "tcp", "-m", "socket", "--transparent", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p tcp -m conntrack --ctstate NEW -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPPort, tproxyMark))
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p tcp -m socket --transparent -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPPort, tproxyMark))
 
 	// UDP All
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "udp", "-m", "conntrack", "--ctstate", "NEW", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
-	}
-	if err := m.appendCustomRule(ctx, "-m", "set", "--match-set", ipsetName, "src", "-p", "udp", "-m", "socket", "--transparent", "-j", "TPROXY",
-		"--on-port", strconv.Itoa(m.cfg.ProxyHTTPPort), "--tproxy-mark", tproxyMark); err != nil {
-		return err
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p udp -m conntrack --ctstate NEW -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPPort, tproxyMark))
+	buf.WriteString(fmt.Sprintf("-A %s -m set --match-set %s src -p udp -m socket --transparent -j TPROXY --on-port %d --tproxy-mark %s\n",
+		chainName, ipsetName, m.cfg.ProxyHTTPPort, tproxyMark))
+
+	buf.WriteString("COMMIT\n")
+
+	// 3. Apply atomically
+	cmd := exec.CommandContext(ctx, "iptables-restore", "--noflush")
+	cmd.Stdin = &buf
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("iptables-restore failed: %s: %w", string(out), err)
 	}
 
 	m.logger.Info("Iptables sync complete")

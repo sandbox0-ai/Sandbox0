@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/sandbox0-ai/infra/manager/pkg/controller"
-	"github.com/sandbox0-ai/infra/netd/pkg/policy"
 	"github.com/sandbox0-ai/infra/netd/pkg/watcher"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,7 +25,7 @@ func NewPatcher(client kubernetes.Interface, logger *zap.Logger) *Patcher {
 	return &Patcher{client: client, logger: logger}
 }
 
-func (p *Patcher) SyncAppliedHashes(ctx context.Context, sandboxes []*watcher.SandboxInfo, store *policy.Store) error {
+func (p *Patcher) SyncAppliedHashes(ctx context.Context, sandboxes []*watcher.SandboxInfo) error {
 	if p.client == nil {
 		return fmt.Errorf("k8s client is nil")
 	}

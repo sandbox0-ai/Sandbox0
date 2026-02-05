@@ -200,7 +200,7 @@ func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyEx
 			case <-ticker.C:
 			case <-syncTrigger:
 			}
-			if err := d.syncRedirect(ctx, netdWatcher, redirectManager, patcher, policyStore); err != nil {
+			if err := d.syncRedirect(ctx, netdWatcher, redirectManager, patcher); err != nil {
 				d.logger.Error("Failed to sync redirect rules", zap.Error(err))
 				if d.cfg.FailClosed {
 					d.ready.Store(false)
@@ -228,9 +228,8 @@ func (d *Daemon) syncRedirect(
 	netdWatcher *watcher.Watcher,
 	redirectManager redirect.Manager,
 	patcher *apply.Patcher,
-	policyStore *policy.Store,
 ) error {
-	if netdWatcher == nil || redirectManager == nil || patcher == nil || policyStore == nil {
+	if netdWatcher == nil || redirectManager == nil || patcher == nil {
 		return fmt.Errorf("missing watcher or redirect manager or patcher or policy store")
 	}
 	sandboxes := netdWatcher.ListSandboxesByNode(d.cfg.NodeName)
@@ -261,7 +260,7 @@ func (d *Daemon) syncRedirect(
 		return err
 	}
 	patchedCount := 0
-	if err := patcher.SyncAppliedHashes(ctx, sandboxes, policyStore); err != nil {
+	if err := patcher.SyncAppliedHashes(ctx, sandboxes); err != nil {
 		d.logger.Warn("Failed to sync applied hashes", zap.Error(err))
 	} else {
 		for _, sandbox := range sandboxes {
