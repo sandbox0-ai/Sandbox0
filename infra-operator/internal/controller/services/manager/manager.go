@@ -19,6 +19,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -244,7 +245,7 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 		cfg.DatabaseURL = dsn
 	}
 
-	cfg.TemplateStoreEnabled = !infrav1alpha1.IsSchedulerEnabled(infra)
+	cfg.TemplateStoreEnabled = templateStoreEnabledByInternalGateway(infra)
 
 	if cfg.DefaultTemplate == nil {
 		cfg.DefaultTemplate = &apiconfig.DefaultTemplateConfig{}
@@ -378,4 +379,21 @@ func applyDefaultTemplatePool(pool apiconfig.DefaultTemplatePoolConfig) apiconfi
 	pool.MaxIdle = maxIdle
 	pool.AutoScale = autoScale
 	return pool
+}
+
+// Enable template store if internal-gateway is not in multi-cluster mode.
+func templateStoreEnabledByInternalGateway(infra *infrav1alpha1.Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.InternalGateway == nil {
+		return false
+	}
+	cfg := infra.Spec.Services.InternalGateway.Config
+	mode := ""
+	if cfg != nil {
+		mode = cfg.AuthMode
+	}
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	if mode == "" {
+		mode = "internal"
+	}
+	return mode != "internal"
 }

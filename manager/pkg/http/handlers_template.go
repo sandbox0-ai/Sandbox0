@@ -12,6 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// NOTE: In multi-cluster mode, scheduler syncs templates via manager's
+// /api/v1/templates endpoints. Keep legacy handlers for that path when
+// TemplateStoreEnabled is false.
+
 // listTemplates lists all templates.
 func (s *Server) listTemplates(c *gin.Context) {
 	if !s.templateStoreEnabled {
