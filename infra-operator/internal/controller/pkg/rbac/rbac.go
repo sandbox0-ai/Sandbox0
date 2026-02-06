@@ -106,6 +106,11 @@ func (r *Reconciler) ReconcileNetdRBAC(ctx context.Context, infra *infrav1alpha1
 			Resources: []string{"pods", "pods/status", "nodes", "services", "endpoints"},
 			Verbs:     []string{"get", "list", "watch", "patch"},
 		},
+		{
+			APIGroups: []string{"discovery.k8s.io"},
+			Resources: []string{"endpointslices"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
 	}
 
 	if err := r.reconcileClusterRole(ctx, name, labels, rules); err != nil {

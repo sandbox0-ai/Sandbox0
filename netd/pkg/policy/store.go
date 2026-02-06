@@ -123,24 +123,26 @@ func (s *Store) SetPlatformPolicy(policy *PlatformPolicy) {
 	s.platformMu.Unlock()
 }
 
+func (s *Store) AllowedPlatformCIDRs() []string {
+	s.platformMu.RLock()
+	defer s.platformMu.RUnlock()
+	if s.platform == nil || len(s.platform.AllowedCIDRs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.platform.AllowedCIDRs))
+	for _, cidr := range s.platform.AllowedCIDRs {
+		if cidr == nil {
+			continue
+		}
+		out = append(out, cidr.String())
+	}
+	return out
+}
+
 func (s *Store) getPlatformPolicy() *PlatformPolicy {
 	s.platformMu.RLock()
 	defer s.platformMu.RUnlock()
 	return s.platform
-}
-
-func (s *Store) HasPolicyHash(namespace, name, hash string) bool {
-	if hash == "" {
-		return false
-	}
-	key := namespace + "/" + name
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	entry := s.byKey[key]
-	if entry == nil {
-		return false
-	}
-	return entry.policyHash == hash
 }
 
 func cloneRuleSet(in CompiledRuleSet) CompiledRuleSet {

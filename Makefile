@@ -57,6 +57,11 @@ build: manifests proto apispec
 			out="$$dir/bin/$$bin"; \
 		fi; \
 		if [ "$$s" = "storage-proxy" ] || [ "$$s" = "infra-operator" ]; then \
+			host_os="$$(uname -s)"; \
+			if [ "$$host_os" != "Linux" ] && [ "$(GOOS)" = "linux" ]; then \
+				printf "$(YELLOW)Skipping $$s: requires Linux host and GOOS=linux$(RESET)\n"; \
+				continue; \
+			fi; \
 			CGO_ENABLED=1 GOOS=$(GOOS) go build -v -o $$out $$src; \
 		else \
 			CGO_ENABLED=0 GOOS=$(GOOS) go build -v -o $$out $$src; \
@@ -72,9 +77,8 @@ docker-push:
 	@printf "$(GREEN)Docker pushing unified infra image...$(RESET)\n"
 	docker push sandbox0ai/infra:$(TAG)
 
-# NOTE: storage-proxy and infra-operator cannot be cross-compiled, they only work on linux.
 build-local-all: manifests proto apispec
-	@for service in $(filter-out storage-proxy infra-operator,$(SERVICES)); do \
+	@for service in $(SERVICES); do \
 		$(MAKE) build SERVICE=$$service BIN_DIR=$(shell pwd)/bin GOOS=linux; \
 	done
 

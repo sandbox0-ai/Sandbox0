@@ -62,6 +62,8 @@ spec:
       replicas: 1
       config:
         defaultTemplate:
+          #name: alpine
+          #image: alpine:3.19
           name: default
           image: sandbox0ai/otemplates:default-v0.1.0
           pool:

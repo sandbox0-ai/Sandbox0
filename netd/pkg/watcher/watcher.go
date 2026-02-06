@@ -10,6 +10,7 @@ import (
 	"github.com/sandbox0-ai/infra/manager/pkg/controller"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -61,11 +62,12 @@ type Watcher struct {
 	informerFactory informers.SharedInformerFactory
 	logger          *zap.Logger
 
-	mu        sync.RWMutex
-	sandboxes map[string]*SandboxInfo
-	services  map[string]*ServiceInfo
-	endpoints map[string]*EndpointsInfo
-	nodes     map[string]*NodeInfo
+	mu             sync.RWMutex
+	sandboxes      map[string]*SandboxInfo
+	services       map[string]*ServiceInfo
+	endpoints      map[string]*EndpointsInfo
+	endpointSlices map[string]*endpointSliceEntry
+	nodes          map[string]*NodeInfo
 
 	onSandboxUpsert   func(*SandboxInfo)
 	onSandboxDelete   func(*SandboxInfo)
@@ -89,6 +91,7 @@ func NewWatcher(
 		sandboxes:       make(map[string]*SandboxInfo),
 		services:        make(map[string]*ServiceInfo),
 		endpoints:       make(map[string]*EndpointsInfo),
+		endpointSlices:  make(map[string]*endpointSliceEntry),
 		nodes:           make(map[string]*NodeInfo),
 	}
 }
@@ -131,7 +134,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 	}
 	podInformer := w.informerFactory.Core().V1().Pods().Informer()
 	serviceInformer := w.informerFactory.Core().V1().Services().Informer()
-	endpointsInformer := w.informerFactory.Core().V1().Endpoints().Informer()
+	endpointSliceInformer := w.informerFactory.Discovery().V1().EndpointSlices().Informer()
 	nodeInformer := w.informerFactory.Core().V1().Nodes().Informer()
 
 	podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -144,10 +147,10 @@ func (w *Watcher) Start(ctx context.Context) error {
 		UpdateFunc: func(_, obj any) { w.handleServiceUpsert(obj) },
 		DeleteFunc: w.handleServiceDelete,
 	})
-	endpointsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    w.handleEndpointsUpsert,
-		UpdateFunc: func(_, obj any) { w.handleEndpointsUpsert(obj) },
-		DeleteFunc: w.handleEndpointsDelete,
+	endpointSliceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    w.handleEndpointSliceUpsert,
+		UpdateFunc: func(_, obj any) { w.handleEndpointSliceUpsert(obj) },
+		DeleteFunc: w.handleEndpointSliceDelete,
 	})
 	nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    w.handleNodeUpsert,
@@ -162,7 +165,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 		ctx.Done(),
 		podInformer.HasSynced,
 		serviceInformer.HasSynced,
-		endpointsInformer.HasSynced,
+		endpointSliceInformer.HasSynced,
 		nodeInformer.HasSynced,
 	) {
 		return fmt.Errorf("failed to sync informer cache")
@@ -340,55 +343,103 @@ func (w *Watcher) handleServiceDelete(obj any) {
 	}
 }
 
-func (w *Watcher) handleEndpointsUpsert(obj any) {
-	endpoints := getEndpoints(obj)
-	if endpoints == nil {
+func (w *Watcher) handleEndpointSliceUpsert(obj any) {
+	slice := getEndpointSlice(obj)
+	if slice == nil {
 		return
 	}
-	info := endpointsInfoFromEndpoints(endpoints)
-	if info == nil {
+	entry := endpointSliceEntryFromSlice(slice)
+	if entry == nil || entry.ServiceName == "" {
 		return
 	}
 
-	key := endpoints.Namespace + "/" + endpoints.Name
+	key := slice.Namespace + "/" + slice.Name
 	w.mu.Lock()
-	if existing := w.endpoints[key]; existing != nil {
-		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+	if existing := w.endpointSlices[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, entry.ResourceVersion) {
 			w.mu.Unlock()
 			return
 		}
 	}
-	w.endpoints[key] = info
+	w.endpointSlices[key] = entry
+	w.mu.Unlock()
+
+	w.rebuildEndpointsForService(entry.Namespace, entry.ServiceName)
+}
+
+func (w *Watcher) handleEndpointSliceDelete(obj any) {
+	slice := getEndpointSlice(obj)
+	if slice == nil {
+		return
+	}
+	entry := endpointSliceEntryFromSlice(slice)
+	if entry == nil || entry.ServiceName == "" {
+		return
+	}
+
+	key := slice.Namespace + "/" + slice.Name
+	w.mu.Lock()
+	if existing := w.endpointSlices[key]; existing != nil {
+		if !isResourceVersionNewer(existing.ResourceVersion, entry.ResourceVersion) {
+			w.mu.Unlock()
+			return
+		}
+	}
+	delete(w.endpointSlices, key)
+	w.mu.Unlock()
+
+	w.rebuildEndpointsForService(entry.Namespace, entry.ServiceName)
+}
+
+func (w *Watcher) rebuildEndpointsForService(namespace, serviceName string) {
+	if namespace == "" || serviceName == "" {
+		return
+	}
+	serviceKey := namespace + "/" + serviceName
+	var addresses []string
+	var ports []corev1.EndpointPort
+	resourceVersion := ""
+
+	w.mu.RLock()
+	for _, entry := range w.endpointSlices {
+		if entry.Namespace != namespace || entry.ServiceName != serviceName {
+			continue
+		}
+		addresses = append(addresses, entry.Addresses...)
+		ports = append(ports, entry.Ports...)
+		if isResourceVersionNewer(resourceVersion, entry.ResourceVersion) {
+			resourceVersion = entry.ResourceVersion
+		}
+	}
+	w.mu.RUnlock()
+
+	info := &EndpointsInfo{
+		Namespace:       namespace,
+		Name:            serviceName,
+		ResourceVersion: resourceVersion,
+		Addresses:       addresses,
+		Ports:           ports,
+	}
+
+	w.mu.Lock()
+	existing := w.endpoints[serviceKey]
+	if len(addresses) == 0 && len(ports) == 0 {
+		delete(w.endpoints, serviceKey)
+		w.mu.Unlock()
+		if existing != nil && w.onEndpointsDelete != nil {
+			w.onEndpointsDelete(cloneEndpointsInfo(info))
+		}
+		return
+	}
+	if existing != nil && !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
+		w.mu.Unlock()
+		return
+	}
+	w.endpoints[serviceKey] = info
 	w.mu.Unlock()
 
 	if w.onEndpointsUpsert != nil {
 		w.onEndpointsUpsert(cloneEndpointsInfo(info))
-	}
-}
-
-func (w *Watcher) handleEndpointsDelete(obj any) {
-	endpoints := getEndpoints(obj)
-	if endpoints == nil {
-		return
-	}
-	info := endpointsInfoFromEndpoints(endpoints)
-	if info == nil {
-		return
-	}
-
-	key := endpoints.Namespace + "/" + endpoints.Name
-	w.mu.Lock()
-	if existing := w.endpoints[key]; existing != nil {
-		if !isResourceVersionNewer(existing.ResourceVersion, info.ResourceVersion) {
-			w.mu.Unlock()
-			return
-		}
-	}
-	delete(w.endpoints, key)
-	w.mu.Unlock()
-
-	if w.onEndpointsDelete != nil {
-		w.onEndpointsDelete(cloneEndpointsInfo(info))
 	}
 }
 
@@ -486,26 +537,42 @@ func serviceInfoFromService(service *corev1.Service) *ServiceInfo {
 	}
 }
 
-func endpointsInfoFromEndpoints(endpoints *corev1.Endpoints) *EndpointsInfo {
-	if endpoints == nil {
+type endpointSliceEntry struct {
+	Namespace       string
+	Name            string
+	ServiceName     string
+	ResourceVersion string
+	Addresses       []string
+	Ports           []corev1.EndpointPort
+}
+
+func endpointSliceEntryFromSlice(slice *discoveryv1.EndpointSlice) *endpointSliceEntry {
+	if slice == nil {
 		return nil
 	}
-	info := &EndpointsInfo{
-		Namespace:       endpoints.Namespace,
-		Name:            endpoints.Name,
-		ResourceVersion: endpoints.ResourceVersion,
-		Ports:           []corev1.EndpointPort{},
-		Addresses:       []string{},
+	serviceName := ""
+	if slice.Labels != nil {
+		serviceName = slice.Labels[discoveryv1.LabelServiceName]
 	}
-	for _, subset := range endpoints.Subsets {
-		info.Ports = append(info.Ports, subset.Ports...)
-		for _, address := range subset.Addresses {
-			if address.IP != "" {
-				info.Addresses = append(info.Addresses, address.IP)
+	entry := &endpointSliceEntry{
+		Namespace:       slice.Namespace,
+		Name:            slice.Name,
+		ServiceName:     serviceName,
+		ResourceVersion: slice.ResourceVersion,
+		Addresses:       []string{},
+		Ports:           []corev1.EndpointPort{},
+	}
+	for _, endpoint := range slice.Endpoints {
+		for _, address := range endpoint.Addresses {
+			if address != "" {
+				entry.Addresses = append(entry.Addresses, address)
 			}
 		}
 	}
-	return info
+	for _, port := range slice.Ports {
+		entry.Ports = append(entry.Ports, endpointPortFromSlicePort(port))
+	}
+	return entry
 }
 
 func nodeInfoFromNode(node *corev1.Node) *NodeInfo {
@@ -550,17 +617,17 @@ func getService(obj any) *corev1.Service {
 	return service
 }
 
-func getEndpoints(obj any) *corev1.Endpoints {
-	endpoints, ok := obj.(*corev1.Endpoints)
+func getEndpointSlice(obj any) *discoveryv1.EndpointSlice {
+	slice, ok := obj.(*discoveryv1.EndpointSlice)
 	if ok {
-		return endpoints
+		return slice
 	}
 	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 	if !ok {
 		return nil
 	}
-	endpoints, _ = tombstone.Obj.(*corev1.Endpoints)
-	return endpoints
+	slice, _ = tombstone.Obj.(*discoveryv1.EndpointSlice)
+	return slice
 }
 
 func getNode(obj any) *corev1.Node {
@@ -602,6 +669,21 @@ func cloneEndpointsInfo(info *EndpointsInfo) *EndpointsInfo {
 	clone.Addresses = append([]string(nil), info.Addresses...)
 	clone.Ports = append([]corev1.EndpointPort(nil), info.Ports...)
 	return &clone
+}
+
+func endpointPortFromSlicePort(port discoveryv1.EndpointPort) corev1.EndpointPort {
+	out := corev1.EndpointPort{}
+	if port.Name != nil {
+		out.Name = *port.Name
+	}
+	if port.Port != nil {
+		out.Port = *port.Port
+	}
+	if port.Protocol != nil {
+		out.Protocol = *port.Protocol
+	}
+	out.AppProtocol = port.AppProtocol
+	return out
 }
 
 func cloneNodeInfo(info *NodeInfo) *NodeInfo {

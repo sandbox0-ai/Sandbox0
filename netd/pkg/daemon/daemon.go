@@ -200,7 +200,7 @@ func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyEx
 			case <-ticker.C:
 			case <-syncTrigger:
 			}
-			if err := d.syncRedirect(ctx, netdWatcher, redirectManager, patcher); err != nil {
+			if err := d.syncRedirect(ctx, netdWatcher, policyStore, redirectManager, patcher); err != nil {
 				d.logger.Error("Failed to sync redirect rules", zap.Error(err))
 				if d.cfg.FailClosed {
 					d.ready.Store(false)
@@ -226,6 +226,7 @@ func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyEx
 func (d *Daemon) syncRedirect(
 	ctx context.Context,
 	netdWatcher *watcher.Watcher,
+	policyStore *policy.Store,
 	redirectManager redirect.Manager,
 	patcher *apply.Patcher,
 ) error {
@@ -247,6 +248,9 @@ func (d *Daemon) syncRedirect(
 	}
 	if len(d.cfg.PlatformAllowedCIDRs) > 0 {
 		bypassCIDRs = append(bypassCIDRs, d.cfg.PlatformAllowedCIDRs...)
+	}
+	if policyStore != nil {
+		bypassCIDRs = append(bypassCIDRs, policyStore.AllowedPlatformCIDRs()...)
 	}
 
 	d.logger.Info(
