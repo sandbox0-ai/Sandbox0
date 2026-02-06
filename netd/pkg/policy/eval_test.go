@@ -45,8 +45,8 @@ func TestAllowEgressL4BlockAllNoAllowList(t *testing.T) {
 	p := &CompiledPolicy{
 		Mode: v1alpha1.NetworkModeBlockAll,
 	}
-	if AllowEgressL4(p, net.ParseIP("8.8.8.8"), 443, "tcp") != false {
-		t.Fatalf("expected deny without allow list")
+	if AllowEgressL4(p, net.ParseIP("8.8.8.8"), 443, "tcp") != true {
+		t.Fatalf("expected allow without L4 allow list")
 	}
 }
 
@@ -61,9 +61,6 @@ func TestAllowEgressDomain(t *testing.T) {
 	if AllowEgressDomain(p, "example.com") != true {
 		t.Fatalf("expected allow")
 	}
-	if AllowEgressDomain(p, "blocked.example.com") != false {
-		t.Fatalf("expected deny")
-	}
 	if AllowEgressDomain(p, "other.com") != false {
 		t.Fatalf("expected deny due to allow list")
 	}
@@ -75,6 +72,21 @@ func TestAllowEgressDomainBlockAllNoAllowList(t *testing.T) {
 	}
 	if AllowEgressDomain(p, "example.com") != false {
 		t.Fatalf("expected deny without allow list")
+	}
+}
+
+func TestAllowEgressDomainAllowAllDeniedList(t *testing.T) {
+	p := &CompiledPolicy{
+		Mode: v1alpha1.NetworkModeAllowAll,
+		Egress: CompiledRuleSet{
+			DeniedDomains: []DomainRule{{Pattern: "blocked.example.com", Type: DomainMatchExact}},
+		},
+	}
+	if AllowEgressDomain(p, "blocked.example.com") != false {
+		t.Fatalf("expected deny due to deny list")
+	}
+	if AllowEgressDomain(p, "example.com") != true {
+		t.Fatalf("expected allow without deny match")
 	}
 }
 

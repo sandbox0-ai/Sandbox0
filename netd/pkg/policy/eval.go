@@ -23,26 +23,26 @@ func AllowEgressL4(policy *CompiledPolicy, destIP net.IP, destPort int, protocol
 			return true
 		}
 	}
-	if matchCIDR(destIP, policy.Egress.DeniedCIDRs) {
-		return false
-	}
-	if matchPort(destPort, protocol, policy.Egress.DeniedPorts) {
-		return false
-	}
-
-	if policy.Mode == v1alpha1.NetworkModeAllowAll {
+	switch policy.Mode {
+	case v1alpha1.NetworkModeAllowAll:
+		if matchCIDR(destIP, policy.Egress.DeniedCIDRs) {
+			return false
+		}
+		if matchPort(destPort, protocol, policy.Egress.DeniedPorts) {
+			return false
+		}
 		return true
-	}
-	if len(policy.Egress.AllowedCIDRs) == 0 && len(policy.Egress.AllowedPorts) == 0 {
+	case v1alpha1.NetworkModeBlockAll:
+		if len(policy.Egress.AllowedCIDRs) > 0 && !matchCIDR(destIP, policy.Egress.AllowedCIDRs) {
+			return false
+		}
+		if len(policy.Egress.AllowedPorts) > 0 && !matchPort(destPort, protocol, policy.Egress.AllowedPorts) {
+			return false
+		}
+		return true
+	default:
 		return false
 	}
-	if len(policy.Egress.AllowedCIDRs) > 0 && !matchCIDR(destIP, policy.Egress.AllowedCIDRs) {
-		return false
-	}
-	if len(policy.Egress.AllowedPorts) > 0 && !matchPort(destPort, protocol, policy.Egress.AllowedPorts) {
-		return false
-	}
-	return true
 }
 
 func AllowEgressDomain(policy *CompiledPolicy, host string) bool {
@@ -61,16 +61,20 @@ func AllowEgressDomain(policy *CompiledPolicy, host string) bool {
 			return true
 		}
 	}
-	if matchDomain(host, policy.Egress.DeniedDomains) {
-		return false
-	}
-	if policy.Mode == v1alpha1.NetworkModeAllowAll {
+	switch policy.Mode {
+	case v1alpha1.NetworkModeAllowAll:
+		if matchDomain(host, policy.Egress.DeniedDomains) {
+			return false
+		}
 		return true
-	}
-	if len(policy.Egress.AllowedDomains) == 0 {
+	case v1alpha1.NetworkModeBlockAll:
+		if len(policy.Egress.AllowedDomains) == 0 {
+			return false
+		}
+		return matchDomain(host, policy.Egress.AllowedDomains)
+	default:
 		return false
 	}
-	return matchDomain(host, policy.Egress.AllowedDomains)
 }
 
 func HasDomainRules(policy *CompiledPolicy) bool {
