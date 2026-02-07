@@ -19,11 +19,7 @@ type ManagerConfig struct {
 	// manager docker image, used to copy the procd binary to sandbox pod
 	ManagerImage string `yaml:"manager_image" json:"-"`
 
-	// builtin templates
-	// +optional
-	// +kubebuilder:default={}
-	BuiltinTemplates []BuiltinTemplateConfig `yaml:"builtin_templates" json:"builtinTemplates"`
-	DefaultClusterId string                  `yaml:"default_cluster_id" json:"-"`
+	DefaultClusterId string `yaml:"default_cluster_id" json:"-"`
 	// +optional
 	// +kubebuilder:default=true
 	TemplateStoreEnabled bool `yaml:"template_store_enabled" json:"-"`
@@ -115,28 +111,6 @@ type ManagerConfig struct {
 	// +optional
 	// +kubebuilder:default={}
 	ProcdConfig ProcdConfig `yaml:"procd_config" json:"procdConfig"`
-}
-
-// BuiltinTemplateConfig defines a system builtin template.
-type BuiltinTemplateConfig struct {
-	TemplateID  string                    `yaml:"template_id" json:"templateId"`
-	Image       string                    `yaml:"image" json:"image"`
-	DisplayName string                    `yaml:"display_name" json:"displayName"`
-	Description string                    `yaml:"description" json:"description"`
-	Pool        BuiltinTemplatePoolConfig `yaml:"pool" json:"pool"`
-}
-
-// BuiltinTemplatePoolConfig holds pool defaults for builtin templates.
-type BuiltinTemplatePoolConfig struct {
-	// +optional
-	// +kubebuilder:default=1
-	MinIdle int32 `yaml:"min_idle" json:"minIdle"`
-	// +optional
-	// +kubebuilder:default=5
-	MaxIdle int32 `yaml:"max_idle" json:"maxIdle"`
-	// +optional
-	// +kubebuilder:default=true
-	AutoScale bool `yaml:"auto_scale" json:"autoScale"`
 }
 
 // LoadManagerConfig returns the manager configuration.

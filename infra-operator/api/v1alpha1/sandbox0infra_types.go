@@ -97,6 +97,11 @@ type Sandbox0InfraSpec struct {
 	// InitUser configures the initial admin user
 	// +optional
 	InitUser *InitUserConfig `json:"initUser,omitempty"`
+
+	// BuiltinTemplates defines system builtin templates to seed the template store
+	// +optional
+	// +kubebuilder:default={}
+	BuiltinTemplates []BuiltinTemplateConfig `json:"builtinTemplates,omitempty"`
 }
 
 // DatabaseConfig defines database configuration
@@ -712,6 +717,28 @@ type InitUserConfig struct {
 	// Name is the admin user's display name
 	// +optional
 	Name string `json:"name,omitempty"`
+}
+
+// BuiltinTemplateConfig defines a system builtin template.
+type BuiltinTemplateConfig struct {
+	TemplateID  string                    `json:"templateId"`
+	Image       string                    `json:"image,omitempty"`
+	DisplayName string                    `json:"displayName,omitempty"`
+	Description string                    `json:"description,omitempty"`
+	Pool        BuiltinTemplatePoolConfig `json:"pool,omitempty"`
+}
+
+// BuiltinTemplatePoolConfig holds pool defaults for builtin templates.
+type BuiltinTemplatePoolConfig struct {
+	// +optional
+	// +kubebuilder:default=1
+	MinIdle int32 `json:"minIdle,omitempty"`
+	// +optional
+	// +kubebuilder:default=5
+	MaxIdle int32 `json:"maxIdle,omitempty"`
+	// +optional
+	// +kubebuilder:default=true
+	AutoScale bool `json:"autoScale,omitempty"`
 }
 
 // Sandbox0InfraStatus defines the observed state of Sandbox0Infra

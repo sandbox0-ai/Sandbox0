@@ -30,6 +30,15 @@ spec:
   #     passwordSecret:
   #       name: db-credentials
   #       key: password
+  builtinTemplates:
+    - templateId: default
+      image: sandbox0ai/otemplates:default-v0.1.0
+      displayName: Default
+      description: Builtin template installed by infra-operator.
+      pool:
+        minIdle: 1
+        maxIdle: 5
+        autoScale: true
   services:
     internalGateway:
       enabled: true
@@ -39,16 +48,6 @@ spec:
     manager:
       enabled: true
       replicas: 1
-      config:
-        builtinTemplates:
-          - templateId: default
-            image: sandbox0ai/otemplates:default-v0.1.0
-            displayName: Default
-            description: Builtin template installed by infra-operator.
-            pool:
-              minIdle: 1
-              maxIdle: 5
-              autoScale: true
   initUser:
     enabled: true
     email: "admin@example.com"

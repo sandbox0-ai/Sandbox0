@@ -137,12 +137,12 @@ func (s *Server) setupRoutes() {
 		// Template management (scheduler sync)
 		internalTemplates := internal.Group("/templates")
 		{
-			internalTemplates.GET("", s.listTemplatesInternal)
+			internalTemplates.GET("", s.listTemplatesLegacy)
 			internalTemplates.GET("/stats", s.getTemplateStats)
-			internalTemplates.GET("/:id", s.getTemplateInternal)
-			internalTemplates.POST("", s.createTemplateInternal)
-			internalTemplates.PUT("/:id", s.updateTemplateInternal)
-			internalTemplates.DELETE("/:id", s.deleteTemplateInternal)
+			internalTemplates.GET("/:id", s.getTemplateLegacy)
+			internalTemplates.POST("", s.createTemplateLegacy)
+			internalTemplates.PUT("/:id", s.updateTemplateLegacy)
+			internalTemplates.DELETE("/:id", s.deleteTemplateLegacy)
 		}
 
 		// Cluster management

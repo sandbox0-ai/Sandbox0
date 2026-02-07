@@ -59,6 +59,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if err != nil {
 		return err
 	}
+	if err := common.EnsureBuiltinTemplates(ctx, infra, common.BuiltinTemplateOptions{
+		DatabaseURL:          config.DatabaseURL,
+		DatabaseMaxConns:     config.DatabasePool.MaxConns,
+		DatabaseMinConns:     config.DatabasePool.MinConns,
+		TemplateStoreEnabled: true,
+		Owner:                "scheduler",
+	}); err != nil {
+		return err
+	}
 	if err := r.Resources.ReconcileServiceConfigMap(ctx, infra, deploymentName, labels, config); err != nil {
 		return err
 	}

@@ -57,27 +57,6 @@ func (s *Server) deleteTemplate(c *gin.Context) {
 	s.templateHandler.DeleteTemplate(c)
 }
 
-// Internal handlers: apply templates directly to K8s CRDs (scheduler-managed mode).
-func (s *Server) listTemplatesInternal(c *gin.Context) {
-	s.listTemplatesLegacy(c)
-}
-
-func (s *Server) getTemplateInternal(c *gin.Context) {
-	s.getTemplateLegacy(c)
-}
-
-func (s *Server) createTemplateInternal(c *gin.Context) {
-	s.createTemplateLegacy(c)
-}
-
-func (s *Server) updateTemplateInternal(c *gin.Context) {
-	s.updateTemplateLegacy(c)
-}
-
-func (s *Server) deleteTemplateInternal(c *gin.Context) {
-	s.deleteTemplateLegacy(c)
-}
-
 // Legacy handlers: apply templates directly to K8s CRDs (scheduler-managed mode).
 func (s *Server) listTemplatesLegacy(c *gin.Context) {
 	templates, err := s.templateService.ListTemplates(c.Request.Context())

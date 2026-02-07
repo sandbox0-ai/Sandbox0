@@ -22,12 +22,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	apiconfig "github.com/sandbox0-ai/infra/infra-operator/api/config"
@@ -35,10 +30,7 @@ import (
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/database"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/services/internalauth"
-	templatev1alpha1 "github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	pkginternalauth "github.com/sandbox0-ai/infra/pkg/internalauth"
-	"github.com/sandbox0-ai/infra/pkg/naming"
-	"github.com/sandbox0-ai/infra/pkg/template"
 )
 
 type Reconciler struct {
@@ -74,7 +66,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		return err
 	}
 
-	if err := r.ensureBuiltinTemplates(ctx, infra, config); err != nil {
+	if err := common.EnsureBuiltinTemplates(ctx, infra, common.BuiltinTemplateOptions{
+		DatabaseURL:          config.DatabaseURL,
+		DatabaseMaxConns:     config.DatabaseMaxConns,
+		DatabaseMinConns:     config.DatabaseMinConns,
+		TemplateStoreEnabled: config.TemplateStoreEnabled,
+		Owner:                "manager",
+	}); err != nil {
 		return err
 	}
 
@@ -262,116 +260,6 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 	}
 
 	return cfg, nil
-}
-
-func (r *Reconciler) ensureBuiltinTemplates(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, config *apiconfig.ManagerConfig) error {
-	logger := log.FromContext(ctx)
-	if config == nil || len(config.BuiltinTemplates) == 0 {
-		return nil
-	}
-
-	for _, builtin := range config.BuiltinTemplates {
-		templateID, err := naming.CanonicalTemplateID(builtin.TemplateID)
-		if err != nil {
-			return fmt.Errorf("builtin template_id is invalid: %w", err)
-		}
-
-		namespace, err := naming.TemplateNamespaceForBuiltin(templateID)
-		if err != nil {
-			return fmt.Errorf("resolve builtin template namespace for %s: %w", templateID, err)
-		}
-		if err := r.Resources.ReconcileNamespace(ctx, namespace); err != nil {
-			return fmt.Errorf("reconcile namespace %s: %w", namespace, err)
-		}
-
-		existing := &templatev1alpha1.SandboxTemplate{}
-		err = r.Resources.Client.Get(ctx, types.NamespacedName{Name: templateID, Namespace: namespace}, existing)
-		if err == nil {
-			continue
-		}
-		if !errors.IsNotFound(err) {
-			return err
-		}
-
-		image := strings.TrimSpace(builtin.Image)
-		if image == "" {
-			image = template.DefaultTemplateImage
-		}
-		pool := applyBuiltinTemplatePool(builtin.Pool)
-		displayName := strings.TrimSpace(builtin.DisplayName)
-		if displayName == "" {
-			displayName = templateID
-		}
-		description := strings.TrimSpace(builtin.Description)
-		if description == "" {
-			description = fmt.Sprintf("Builtin template %s installed by infra-operator.", templateID)
-		}
-
-		tpl := &templatev1alpha1.SandboxTemplate{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: templatev1alpha1.SchemeGroupVersion.String(),
-				Kind:       "SandboxTemplate",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      templateID,
-				Namespace: namespace,
-				Labels: map[string]string{
-					"app.kubernetes.io/managed-by": "sandbox0infra-operator",
-					"sandbox0.ai/template-role":    "builtin",
-					"sandbox0.ai/template-scope":   naming.ScopePublic,
-				},
-				Annotations: map[string]string{
-					"sandbox0.ai/infra-name":      infra.Name,
-					"sandbox0.ai/infra-namespace": infra.Namespace,
-				},
-			},
-			Spec: templatev1alpha1.SandboxTemplateSpec{
-				DisplayName: displayName,
-				Description: description,
-				MainContainer: templatev1alpha1.ContainerSpec{
-					Image: image,
-					Resources: templatev1alpha1.ResourceQuota{
-						CPU:    resource.MustParse(template.DefaultTemplateCPU),
-						Memory: resource.MustParse(template.DefaultTemplateMemory),
-					},
-				},
-				Pool: templatev1alpha1.PoolStrategy{
-					MinIdle:   pool.MinIdle,
-					MaxIdle:   pool.MaxIdle,
-					AutoScale: pool.AutoScale,
-				},
-				Network: &templatev1alpha1.TplSandboxNetworkPolicy{
-					Mode: templatev1alpha1.NetworkModeAllowAll,
-				},
-				Public: true,
-			},
-		}
-
-		if config.DefaultClusterId != "" {
-			tpl.Spec.ClusterId = &config.DefaultClusterId
-		}
-
-		if namespace == infra.Namespace {
-			if err := controllerutil.SetControllerReference(infra, tpl, r.Resources.Scheme); err != nil {
-				return err
-			}
-		}
-
-		if err := r.Resources.Client.Create(ctx, tpl); err != nil {
-			return err
-		}
-
-		logger.Info("Builtin template created", "template_id", templateID, "namespace", namespace)
-	}
-	return nil
-}
-
-func applyBuiltinTemplatePool(pool apiconfig.BuiltinTemplatePoolConfig) apiconfig.BuiltinTemplatePoolConfig {
-	minIdle, maxIdle, autoScale := template.ApplyDefaultPool(pool.MinIdle, pool.MaxIdle, pool.AutoScale)
-	pool.MinIdle = minIdle
-	pool.MaxIdle = maxIdle
-	pool.AutoScale = autoScale
-	return pool
 }
 
 // Enable template store if internal-gateway is not in multi-cluster mode.

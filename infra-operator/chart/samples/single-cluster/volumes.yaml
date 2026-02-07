@@ -49,6 +49,15 @@ spec:
   #       name: aws-credentials
   #       accessKeyKey: accessKeyId
   #       secretKeyKey: secretAccessKey
+  builtinTemplates:
+    - templateId: default
+      image: sandbox0ai/otemplates:default-v0.1.0
+      displayName: Default
+      description: Builtin template installed by infra-operator.
+      pool:
+        minIdle: 1
+        maxIdle: 5
+        autoScale: true
   services:
     internalGateway:
       enabled: true
@@ -58,16 +67,6 @@ spec:
     manager:
       enabled: true
       replicas: 1
-      config:
-        builtinTemplates:
-          - templateId: default
-            image: sandbox0ai/otemplates:default-v0.1.0
-            displayName: Default
-            description: Builtin template installed by infra-operator.
-            pool:
-              minIdle: 1
-              maxIdle: 5
-              autoScale: true
     storageProxy:
       enabled: true
       replicas: 1
