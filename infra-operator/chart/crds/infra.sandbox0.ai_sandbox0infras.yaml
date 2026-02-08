@@ -559,15 +559,24 @@ spec:
                   builtin:
                     description: Builtin configures the built-in registry.
                     properties:
-                      credentials:
-                        description: Credentials configures the registry username/password.
+                      credentialsSecret:
+                        description: |-
+                          CredentialsSecret references the secret containing registry credentials.
+                          If omitted, the operator will generate a secret named "<infra-name>-registry-credentials".
                         properties:
-                          password:
-                            description: Password is the registry password.
+                          name:
+                            description: Name is the name of the secret.
                             type: string
-                          username:
-                            description: Username is the registry username.
+                          passwordKey:
+                            default: password
+                            description: PasswordKey is the key for password.
                             type: string
+                          usernameKey:
+                            default: username
+                            description: UsernameKey is the key for username.
+                            type: string
+                        required:
+                        - name
                         type: object
                       enabled:
                         default: true

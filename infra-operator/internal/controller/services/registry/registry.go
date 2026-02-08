@@ -258,27 +258,19 @@ func (r *Reconciler) reconcileRegistryAuthSecret(ctx context.Context, infra *inf
 	if err != nil && !errors.IsNotFound(err) {
 		return "", "", err
 	}
+	authSecretMissing := errors.IsNotFound(err)
 
-	username := ""
-	password := ""
-	if builtin.Credentials != nil {
-		username = builtin.Credentials.Username
-		password = builtin.Credentials.Password
+	username, password, err := r.resolveRegistryCredentials(ctx, infra, builtin)
+	if err != nil {
+		return "", "", err
 	}
 
-	if errors.IsNotFound(err) {
-		if username == "" {
-			username = "sandbox0"
-		}
-		if password == "" {
-			password = common.GenerateRandomString(24)
-		}
+	htpasswd, err := buildHtpasswd(username, password)
+	if err != nil {
+		return "", "", err
+	}
 
-		htpasswd, err := buildHtpasswd(username, password)
-		if err != nil {
-			return "", "", err
-		}
-
+	if authSecretMissing {
 		secret = &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      secretName,
@@ -300,26 +292,6 @@ func (r *Reconciler) reconcileRegistryAuthSecret(ctx context.Context, infra *inf
 			return "", "", err
 		}
 		return username, password, nil
-	}
-
-	if secret.Data != nil {
-		if stored := string(secret.Data["username"]); stored != "" {
-			username = stored
-		}
-		if stored := string(secret.Data["password"]); stored != "" {
-			password = stored
-		}
-	}
-	if username == "" {
-		username = "sandbox0"
-	}
-	if password == "" {
-		password = common.GenerateRandomString(24)
-	}
-
-	htpasswd, err := buildHtpasswd(username, password)
-	if err != nil {
-		return "", "", err
 	}
 
 	updated := secret.DeepCopy()
@@ -516,7 +488,7 @@ func resolveBuiltinRegistryConfig(infra *infrav1alpha1.Sandbox0Infra) infrav1alp
 	cfg.Enabled = builtin.Enabled
 	cfg.Persistence = builtin.Persistence
 	cfg.Service = builtin.Service
-	cfg.Credentials = builtin.Credentials
+	cfg.CredentialsSecret = builtin.CredentialsSecret
 	if builtin.Image != "" {
 		cfg.Image = builtin.Image
 	}
@@ -524,6 +496,63 @@ func resolveBuiltinRegistryConfig(infra *infrav1alpha1.Sandbox0Infra) infrav1alp
 		cfg.Port = builtin.Port
 	}
 	return cfg
+}
+
+func (r *Reconciler) resolveRegistryCredentials(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, builtin infrav1alpha1.BuiltinRegistryConfig) (string, string, error) {
+	secretName := ""
+	usernameKey := "username"
+	passwordKey := "password"
+	if builtin.CredentialsSecret != nil {
+		secretName = builtin.CredentialsSecret.Name
+		if builtin.CredentialsSecret.UsernameKey != "" {
+			usernameKey = builtin.CredentialsSecret.UsernameKey
+		}
+		if builtin.CredentialsSecret.PasswordKey != "" {
+			passwordKey = builtin.CredentialsSecret.PasswordKey
+		}
+	}
+	if secretName == "" {
+		secretName = fmt.Sprintf("%s-registry-credentials", infra.Name)
+	}
+	secret := &corev1.Secret{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{
+		Name:      secretName,
+		Namespace: infra.Namespace,
+	}, secret); err != nil {
+		if !errors.IsNotFound(err) {
+			return "", "", fmt.Errorf("get registry credentials secret: %w", err)
+		}
+		username := "sandbox0"
+		password := common.GenerateRandomString(24)
+		secret = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: infra.Namespace,
+			},
+			Type: corev1.SecretTypeOpaque,
+			StringData: map[string]string{
+				usernameKey: username,
+				passwordKey: password,
+			},
+		}
+		if err := ctrl.SetControllerReference(infra, secret, r.Resources.Scheme); err != nil {
+			return "", "", err
+		}
+		if err := r.Resources.Client.Create(ctx, secret); err != nil {
+			return "", "", err
+		}
+		return username, password, nil
+	}
+	username := ""
+	password := ""
+	if secret.Data != nil {
+		username = string(secret.Data[usernameKey])
+		password = string(secret.Data[passwordKey])
+	}
+	if username == "" || password == "" {
+		return "", "", fmt.Errorf("registry credentials secret %q missing keys %q/%q", secretName, usernameKey, passwordKey)
+	}
+	return username, password, nil
 }
 
 func builtinRegistryHost(infra *infrav1alpha1.Sandbox0Infra, port int32) string {

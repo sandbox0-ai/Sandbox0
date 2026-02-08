@@ -49,6 +49,24 @@ spec:
   #       name: aws-credentials
   #       accessKeyKey: accessKeyId
   #       secretKeyKey: secretAccessKey
+  registry:
+    # Builtin registry is for quick start; external registries use provider config.
+    provider: builtin
+    builtin:
+      enabled: true
+  # Example external AWS registry:
+  # registry:
+  #   provider: aws
+  #   aws:
+  #     region: us-east-1
+  #     registryId: "123456789012"
+  #     pullSecret:
+  #       name: ecr-pull-secret
+  #       key: .dockerconfigjson
+  #     credentialsSecret:
+  #       name: aws-credentials
+  #       accessKeyKey: accessKeyId
+  #       secretKeyKey: secretAccessKey
   builtinTemplates:
     - templateId: default
       image: sandbox0ai/otemplates:default-v0.1.0

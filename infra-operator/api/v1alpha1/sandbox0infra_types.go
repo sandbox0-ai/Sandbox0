@@ -448,21 +448,26 @@ type BuiltinRegistryConfig struct {
 	// +optional
 	Service *ServiceNetworkConfig `json:"service,omitempty"`
 
-	// Credentials configures the registry username/password.
+	// CredentialsSecret references the secret containing registry credentials.
+	// If omitted, the operator will generate a secret named "<infra-name>-registry-credentials".
 	// +optional
-	Credentials *RegistryCredentials `json:"credentials,omitempty"`
+	CredentialsSecret *RegistryCredentialsSecret `json:"credentialsSecret,omitempty"`
 }
 
-// RegistryCredentials defines registry username/password.
-type RegistryCredentials struct {
-	// Username is the registry username.
-	// +optional
-	Username string `json:"username,omitempty"`
+// RegistryCredentialsSecret references registry credentials in a secret.
+type RegistryCredentialsSecret struct {
+	// Name is the name of the secret.
+	Name string `json:"name"`
 
-	// Password is the registry password.
-	// +optional
-	Password string `json:"password,omitempty"`
+	// UsernameKey is the key for username.
+	// +kubebuilder:default="username"
+	UsernameKey string `json:"usernameKey,omitempty"`
+
+	// PasswordKey is the key for password.
+	// +kubebuilder:default="password"
+	PasswordKey string `json:"passwordKey,omitempty"`
 }
+
 
 // DockerConfigSecretRef references a dockerconfigjson secret.
 type DockerConfigSecretRef struct {
