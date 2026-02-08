@@ -261,7 +261,7 @@ func main() {
 		logger,
 	)
 
-	registryProvider, err := registryprovider.NewProvider(cfg.Registry, k8sClient, logger)
+	registryProvider, err := registryprovider.NewProvider(cfg.Registry, secretLister, logger)
 	if err != nil {
 		logger.Warn("Registry provider disabled", zap.Error(err))
 	}

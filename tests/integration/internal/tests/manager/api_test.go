@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sandbox0-ai/infra/infra-operator/api/config"
 	"github.com/sandbox0-ai/infra/manager/pkg/apis/sandbox0/v1alpha1"
 	"github.com/sandbox0-ai/infra/manager/pkg/controller"
 	clientset "github.com/sandbox0-ai/infra/manager/pkg/generated/clientset/versioned"
@@ -72,6 +73,8 @@ func newManagerTestEnvWithProcd(t *testing.T) *managerTestEnv {
 			PauseMemoryBufferRatio: 1.1,
 			PauseMinCPU:            "10m",
 			ProcdPort:              49983,
+			ProcdClientTimeout:     5 * time.Second,
+			ProcdInitTimeout:       5 * time.Second,
 		},
 		internalTokenGenerator: service.NewInternalTokenGenerator(procdGen),
 		procdTokenGenerator:    service.NewProcdTokenGenerator(procdGen),
@@ -119,6 +122,7 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 
 	managerMetrics := obsmetrics.NewManager(obsProvider.MetricsRegistryOrNil())
 
+	managerCfg := config.LoadManagerConfig()
 	sandboxService := service.NewSandboxService(
 		k8sClient,
 		podLister,
@@ -138,7 +142,16 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 		sandboxService.SetProcdClient(opts.procdClient)
 	}
 
-	templateService := service.NewTemplateService(k8sClient, crdClient, templateLister, namespaceLister, nil, logger)
+	templateService := service.NewTemplateService(
+		k8sClient,
+		crdClient,
+		templateLister,
+		namespaceLister,
+		nil,
+		managerCfg.Registry,
+		logger,
+	)
+	registryService := service.NewRegistryService(nil, logger)
 	clusterService := service.NewClusterService(
 		k8sClient,
 		podLister,
@@ -161,6 +174,10 @@ func newManagerTestEnvWithOptions(t *testing.T, opts managerTestEnvOptions) *man
 	server := managerhttp.NewServer(
 		sandboxService,
 		templateService,
+		registryService,
+		nil,
+		nil,
+		false,
 		clusterService,
 		validator,
 		logger,
@@ -251,11 +268,10 @@ func doRequest(t *testing.T, client *http.Client, method, url, token string, bod
 
 func addSandboxPod(t *testing.T, env *managerTestEnv, name, teamID, userID string, phase corev1.PodPhase) {
 	t.Helper()
-	// Use empty namespace to match GetSandbox lookup (Pods("").Get(name)).
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: "",
+			Namespace: "default",
 			Labels: map[string]string{
 				controller.LabelSandboxID: name,
 			},

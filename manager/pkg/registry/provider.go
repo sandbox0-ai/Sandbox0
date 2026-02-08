@@ -9,8 +9,7 @@ import (
 
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
 	"go.uber.org/zap"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
 )
 
 // Credential contains registry login credentials.
@@ -28,7 +27,7 @@ type Provider interface {
 }
 
 // NewProvider creates a registry provider based on config.
-func NewProvider(cfg config.RegistryConfig, k8sClient kubernetes.Interface, logger *zap.Logger) (Provider, error) {
+func NewProvider(cfg config.RegistryConfig, secretLister corelisters.SecretLister, logger *zap.Logger) (Provider, error) {
 	provider := strings.TrimSpace(strings.ToLower(cfg.Provider))
 	if provider == "" {
 		return nil, nil
@@ -38,8 +37,8 @@ func NewProvider(cfg config.RegistryConfig, k8sClient kubernetes.Interface, logg
 	}
 	namespace := resolveNamespace(cfg.Namespace)
 	secretReader := secretReader{
-		client:    k8sClient,
-		namespace: namespace,
+		secretLister: secretLister,
+		namespace:    namespace,
 	}
 
 	switch provider {
@@ -71,25 +70,28 @@ func NewProvider(cfg config.RegistryConfig, k8sClient kubernetes.Interface, logg
 }
 
 type secretReader struct {
-	client    kubernetes.Interface
-	namespace string
+	secretLister corelisters.SecretLister
+	namespace    string
 }
 
 func (s secretReader) read(ctx context.Context, name, key string) (string, error) {
-	if s.client == nil {
-		return "", fmt.Errorf("k8s client is required for registry credentials")
-	}
 	if name == "" {
 		return "", fmt.Errorf("secret name is required")
 	}
-	secret, err := s.client.CoreV1().Secrets(s.namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return "", err
+	var secretData map[string][]byte
+	if s.secretLister != nil {
+		secret, err := s.secretLister.Secrets(s.namespace).Get(name)
+		if err != nil {
+			return "", err
+		}
+		secretData = secret.Data
+	} else {
+		return "", fmt.Errorf("secret lister is required for registry credentials")
 	}
-	if secret.Data == nil {
+	if secretData == nil {
 		return "", fmt.Errorf("secret %q has no data", name)
 	}
-	value, ok := secret.Data[key]
+	value, ok := secretData[key]
 	if !ok {
 		return "", fmt.Errorf("secret %q missing key %q", name, key)
 	}

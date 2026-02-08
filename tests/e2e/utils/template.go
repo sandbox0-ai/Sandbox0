@@ -9,7 +9,7 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/apispec"
 )
 
-func (s *Session) ListTemplates(ctx context.Context, t ContractT) ([]apispec.SandboxTemplate, error) {
+func (s *Session) ListTemplates(ctx context.Context, t ContractT) ([]apispec.Template, error) {
 	status, body, err := s.doJSONSpecRequest(t, ctx, http.MethodGet, "/api/v1/templates", "/api/v1/templates", nil, true)
 	if err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func (s *Session) ListTemplates(ctx context.Context, t ContractT) ([]apispec.San
 	return *resp.Data.Templates, nil
 }
 
-func (s *Session) CreateTemplate(ctx context.Context, t ContractT, template apispec.SandboxTemplate) (*apispec.SandboxTemplate, error) {
+func (s *Session) CreateTemplate(ctx context.Context, t ContractT, template apispec.TemplateCreateRequest) (*apispec.Template, error) {
 	status, body, err := s.doJSONSpecRequest(t, ctx, http.MethodPost, "/api/v1/templates", "/api/v1/templates", template, true)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (s *Session) CreateTemplate(ctx context.Context, t ContractT, template apis
 	return resp.Data, nil
 }
 
-func (s *Session) UpdateTemplate(ctx context.Context, t ContractT, templateID string, template apispec.SandboxTemplate) (*apispec.SandboxTemplate, error) {
+func (s *Session) UpdateTemplate(ctx context.Context, t ContractT, templateID string, template apispec.TemplateUpdateRequest) (*apispec.Template, error) {
 	if templateID == "" {
 		return nil, fmt.Errorf("template id is required")
 	}
@@ -84,66 +84,14 @@ func (s *Session) DeleteTemplate(ctx context.Context, t ContractT, templateID st
 	return nil
 }
 
-func CloneTemplateForCreate(base apispec.SandboxTemplate, name string) apispec.SandboxTemplate {
-	template := apispec.SandboxTemplate{
-		ApiVersion: cloneStringPtr(base.ApiVersion),
-		Kind:       cloneStringPtr(base.Kind),
-		Metadata:   cloneObjectMeta(base.Metadata, name),
+func CloneTemplateForCreate(base apispec.Template, name string) apispec.TemplateCreateRequest {
+	return apispec.TemplateCreateRequest{
+		TemplateId: name,
 		Spec:       cloneSandboxTemplateSpec(base.Spec),
 	}
-	return template
 }
 
-func cloneObjectMeta(base *apispec.ObjectMeta, name string) *apispec.ObjectMeta {
-	if base == nil && name == "" {
-		return nil
-	}
-	meta := &apispec.ObjectMeta{
-		Name:        cloneStringPtr(&name),
-		Namespace:   cloneStringPtr(ptrValue(base, func(v *apispec.ObjectMeta) *string { return v.Namespace })),
-		Labels:      cloneStringMapPtr(ptrValueMap(base, func(v *apispec.ObjectMeta) *map[string]string { return v.Labels })),
-		Annotations: cloneStringMapPtr(ptrValueMap(base, func(v *apispec.ObjectMeta) *map[string]string { return v.Annotations })),
-	}
-	return meta
-}
-
-func cloneSandboxTemplateSpec(base *apispec.SandboxTemplateSpec) *apispec.SandboxTemplateSpec {
-	if base == nil {
-		return nil
-	}
-	spec := *base
-	return &spec
-}
-
-func cloneStringPtr(value *string) *string {
-	if value == nil {
-		return nil
-	}
-	copied := *value
-	return &copied
-}
-
-func cloneStringMapPtr(value *map[string]string) *map[string]string {
-	if value == nil {
-		return nil
-	}
-	copied := make(map[string]string, len(*value))
-	for k, v := range *value {
-		copied[k] = v
-	}
-	return &copied
-}
-
-func ptrValue[T any](value *T, getter func(*T) *string) *string {
-	if value == nil {
-		return nil
-	}
-	return getter(value)
-}
-
-func ptrValueMap[T any](value *T, getter func(*T) *map[string]string) *map[string]string {
-	if value == nil {
-		return nil
-	}
-	return getter(value)
+func cloneSandboxTemplateSpec(base apispec.SandboxTemplateSpec) apispec.SandboxTemplateSpec {
+	spec := base
+	return spec
 }

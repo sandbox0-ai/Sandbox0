@@ -356,6 +356,13 @@ func (s *Server) setupRoutes() {
 			templates.DELETE("/:id", s.authMiddleware.RequirePermission(auth.PermTemplateDelete), s.deleteTemplate)
 		}
 
+		// === Registry Credentials (→ Manager) ===
+		registry := v1.Group("/registry")
+		registry.Use(s.managerUpstreamMiddleware())
+		{
+			registry.POST("/credentials", s.getRegistryCredentials)
+		}
+
 		// === SandboxVolume Management (→ Storage Proxy) ===
 		sandboxvolumes := v1.Group("/sandboxvolumes")
 		sandboxvolumes.Use(s.storageProxyUpstreamMiddleware())

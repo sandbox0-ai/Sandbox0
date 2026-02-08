@@ -75,12 +75,9 @@ func registerApiVolumesSuite(envProvider func() *framework.ScenarioEnv) {
 				created, err := session.CreateTemplate(env.TestCtx.Context, GinkgoT(), newTemplate)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(created).NotTo(BeNil())
-				Expect(created.Metadata).NotTo(BeNil())
-				Expect(created.Metadata.Name).NotTo(BeNil())
-				Expect(*created.Metadata.Name).To(Equal(name))
+				Expect(created.TemplateId).To(Equal(name))
 
 				updated := *created
-				Expect(updated.Spec).NotTo(BeNil())
 				Expect(updated.Spec.Pool).NotTo(BeNil())
 				desc := "e2e update"
 				updated.Spec.Description = &desc
@@ -89,10 +86,11 @@ func registerApiVolumesSuite(envProvider func() *framework.ScenarioEnv) {
 					updated.Spec.Pool.MaxIdle = updated.Spec.Pool.MinIdle + 1
 				}
 
-				updatedResp, err := session.UpdateTemplate(env.TestCtx.Context, GinkgoT(), name, updated)
+				updatedResp, err := session.UpdateTemplate(env.TestCtx.Context, GinkgoT(), name, apispec.TemplateUpdateRequest{
+					Spec: updated.Spec,
+				})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(updatedResp).NotTo(BeNil())
-				Expect(updatedResp.Spec).NotTo(BeNil())
 				Expect(updatedResp.Spec.Description).NotTo(BeNil())
 				Expect(*updatedResp.Spec.Description).To(Equal("e2e update"))
 
