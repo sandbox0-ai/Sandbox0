@@ -342,7 +342,6 @@ func (s *Server) setupRoutes() {
 				files.POST("/move", s.handleFileMove)
 				files.GET("/stat", s.handleFileStat)
 				files.GET("/list", s.handleFileList)
-				files.GET("/binary", s.handleFileBinary)
 			}
 		}
 

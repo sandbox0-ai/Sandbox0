@@ -120,25 +120,3 @@ func (s *Server) handleFileList(c *gin.Context) {
 	c.Request.URL.Path = "/api/v1/files/list"
 	s.proxyToProcd(c, procdURL)
 }
-
-// handleFileBinary handles base64 file reads.
-// Route: /api/v1/sandboxes/:id/files/binary
-func (s *Server) handleFileBinary(c *gin.Context) {
-	sandboxID := c.Param("id")
-	if sandboxID == "" {
-		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "sandbox_id is required")
-		return
-	}
-	if c.Query("path") == "" {
-		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "path is required")
-		return
-	}
-
-	procdURL, err := s.getProcdURL(c, sandboxID)
-	if err != nil {
-		return
-	}
-
-	c.Request.URL.Path = "/api/v1/files/binary"
-	s.proxyToProcd(c, procdURL)
-}

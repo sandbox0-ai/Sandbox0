@@ -169,7 +169,6 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/files", fileHandler.Handle).Methods("GET", "POST", "DELETE")
 	api.HandleFunc("/files/stat", fileHandler.Stat).Methods("GET")
 	api.HandleFunc("/files/list", fileHandler.List).Methods("GET")
-	api.HandleFunc("/files/binary", fileHandler.Binary).Methods("GET")
 }
 
 // Start starts the HTTP server.

@@ -110,11 +110,6 @@ const (
 	SuccessEnvelopeSuccessTrue SuccessEnvelopeSuccess = true
 )
 
-// Defines values for SuccessFileBinaryResponseSuccess.
-const (
-	SuccessFileBinaryResponseSuccessTrue SuccessFileBinaryResponseSuccess = true
-)
-
 // Defines values for SuccessFileListResponseSuccess.
 const (
 	SuccessFileListResponseSuccessTrue SuccessFileListResponseSuccess = true
@@ -272,7 +267,7 @@ const (
 
 // Defines values for SuccessWrittenResponseSuccess.
 const (
-	SuccessWrittenResponseSuccessTrue SuccessWrittenResponseSuccess = true
+	True SuccessWrittenResponseSuccess = true
 )
 
 // Defines values for TplSandboxNetworkPolicyMode.
@@ -1023,15 +1018,6 @@ type SuccessEnvelope struct {
 // SuccessEnvelopeSuccess defines model for SuccessEnvelope.Success.
 type SuccessEnvelopeSuccess bool
 
-// SuccessFileBinaryResponse defines model for SuccessFileBinaryResponse.
-type SuccessFileBinaryResponse struct {
-	Data    *FileContentResponse             `json:"data,omitempty"`
-	Success SuccessFileBinaryResponseSuccess `json:"success"`
-}
-
-// SuccessFileBinaryResponseSuccess defines model for SuccessFileBinaryResponse.Success.
-type SuccessFileBinaryResponseSuccess bool
-
 // SuccessFileListResponse defines model for SuccessFileListResponse.
 type SuccessFileListResponse struct {
 	Data *struct {
@@ -1530,11 +1516,6 @@ type PostApiV1SandboxesIdFilesParams struct {
 	Path      FilePath        `form:"path" json:"path"`
 	Mkdir     *QueryMkdir     `form:"mkdir,omitempty" json:"mkdir,omitempty"`
 	Recursive *QueryRecursive `form:"recursive,omitempty" json:"recursive,omitempty"`
-}
-
-// GetApiV1SandboxesIdFilesBinaryParams defines parameters for GetApiV1SandboxesIdFilesBinary.
-type GetApiV1SandboxesIdFilesBinaryParams struct {
-	Path FilePath `form:"path" json:"path"`
 }
 
 // GetApiV1SandboxesIdFilesListParams defines parameters for GetApiV1SandboxesIdFilesList.

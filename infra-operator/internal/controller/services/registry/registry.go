@@ -429,8 +429,7 @@ func (r *Reconciler) reconcileRegistryDeployment(ctx context.Context, infra *inf
 		Volumes:      volumes,
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/v2/",
+				TCPSocket: &corev1.TCPSocketAction{
 					Port: intstr.FromInt(int(builtin.Port)),
 				},
 			},
@@ -439,8 +438,7 @@ func (r *Reconciler) reconcileRegistryDeployment(ctx context.Context, infra *inf
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{
-					Path: "/v2/",
+				TCPSocket: &corev1.TCPSocketAction{
 					Port: intstr.FromInt(int(builtin.Port)),
 				},
 			},

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/websocket"
 	"github.com/sandbox0-ai/infra/manager/procd/pkg/file"
@@ -64,8 +65,16 @@ func (h *FileHandler) handleGet(w http.ResponseWriter, r *http.Request, path str
 		return
 	}
 
-	if query.Has("stat") || query.Has("list") || query.Has("binary") {
-		writeError(w, http.StatusBadRequest, "invalid_request", "stat/list/binary queries are not supported")
+	if query.Has("stat") || query.Has("list") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "stat/list queries are not supported")
+		return
+	}
+
+	if acceptsJSON(r) {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"content":  base64.StdEncoding.EncodeToString(data),
+			"encoding": "base64",
+		})
 		return
 	}
 
@@ -105,22 +114,13 @@ func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *FileHandler) Binary(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "path is required")
-		return
+func acceptsJSON(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "application/json") {
+		return true
 	}
-
-	data, err := h.manager.ReadFile(path)
-	if err != nil {
-		h.handleFileError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"content":  base64.StdEncoding.EncodeToString(data),
-		"encoding": "base64",
-	})
+	contentType := r.Header.Get("Content-Type")
+	return strings.Contains(contentType, "application/json")
 }
 
 func (h *FileHandler) handlePost(w http.ResponseWriter, r *http.Request, path string) {

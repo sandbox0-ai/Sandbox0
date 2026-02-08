@@ -1360,6 +1360,7 @@ paths:
       description: |
         Use query params:
         - path=/tmp/a.txt: target file path
+        When `Accept` or `Content-Type` is `application/json`, returns a base64 JSON payload.
       security:
         - bearerAuth: []
       x-upstream-service: procd
@@ -1375,6 +1376,14 @@ paths:
               schema:
                 type: string
                 format: binary
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/FileContentResponse"
     post:
       tags: [files]
       summary: Write file or create directory
@@ -1467,27 +1476,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessFileListResponse"
-  /api/v1/sandboxes/{id}/files/binary:
-    get:
-      tags: [files]
-      summary: Read file content as base64
-      description: |
-        Use query params:
-        - path=/tmp/a.txt: target file path
-      security:
-        - bearerAuth: []
-      x-upstream-service: procd
-      x-upstream-path: /api/v1/files/binary
-      parameters:
-        - $ref: "#/components/parameters/SandboxID"
-        - $ref: "#/components/parameters/FilePath"
-      responses:
-        "200":
-          description: Base64 file content
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SuccessFileBinaryResponse"
   /api/v1/templates:
     get:
       tags: [templates]
@@ -2933,13 +2921,6 @@ components:
                   type: array
                   items:
                     $ref: "#/components/schemas/FileInfo"
-    SuccessFileBinaryResponse:
-      allOf:
-        - $ref: "#/components/schemas/SuccessEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/FileContentResponse"
     MoveFileRequest:
       type: object
       properties:

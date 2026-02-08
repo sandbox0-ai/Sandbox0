@@ -468,7 +468,6 @@ type RegistryCredentialsSecret struct {
 	PasswordKey string `json:"passwordKey,omitempty"`
 }
 
-
 // DockerConfigSecretRef references a dockerconfigjson secret.
 type DockerConfigSecretRef struct {
 	// Name is the name of the secret.
