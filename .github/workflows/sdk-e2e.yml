@@ -87,6 +87,9 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+
       - name: Build Docker Image (local binaries)
         env:
           DOCKER_BUILDKIT: "1"
