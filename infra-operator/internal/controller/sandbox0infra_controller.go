@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -276,6 +277,11 @@ func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, in
 	rbacReconciler := rbac.NewReconciler(resources)
 
 	steps := []reconcileStep{}
+	builtinTemplatesRequired := shouldTrackBuiltinTemplatesCondition(infra, plan)
+	builtinTemplatesConditionType := ""
+	if builtinTemplatesRequired {
+		builtinTemplatesConditionType = infrav1alpha1.ConditionTypeBuiltinTemplatesReady
+	}
 	if plan.RequireControlPlaneConfig {
 		steps = append(steps, reconcileStep{
 			Name: "control-plane-config",
@@ -374,12 +380,16 @@ func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, in
 				SkipSuccessCondition: true,
 			},
 			reconcileStep{
-				Name:           "scheduler",
-				Run:            func(ctx context.Context) error { return schedulerReconciler.Reconcile(ctx, infra, imageRepo) },
-				ConditionType:  infrav1alpha1.ConditionTypeSchedulerReady,
-				SuccessReason:  "SchedulerReady",
-				SuccessMessage: "Scheduler is ready",
-				ErrorReason:    "SchedulerFailed",
+				Name:                  "scheduler",
+				Run:                   func(ctx context.Context) error { return schedulerReconciler.Reconcile(ctx, infra, imageRepo) },
+				ConditionType:         infrav1alpha1.ConditionTypeSchedulerReady,
+				AdditionalCondition:   builtinTemplatesConditionType,
+				SuccessReason:         "SchedulerReady",
+				SuccessMessage:        "Scheduler is ready",
+				AdditionalReason:      "BuiltinTemplatesReady",
+				AdditionalMessage:     "Builtin templates are synchronized",
+				ErrorReason:           "SchedulerFailed",
+				AdditionalErrorReason: "BuiltinTemplateSyncFailed",
 			},
 		)
 	}
@@ -430,12 +440,16 @@ func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, in
 				SkipSuccessCondition: true,
 			},
 			reconcileStep{
-				Name:           "manager",
-				Run:            func(ctx context.Context) error { return managerReconciler.Reconcile(ctx, infra, imageRepo) },
-				ConditionType:  infrav1alpha1.ConditionTypeManagerReady,
-				SuccessReason:  "ManagerReady",
-				SuccessMessage: "Manager is ready",
-				ErrorReason:    "ManagerFailed",
+				Name:                  "manager",
+				Run:                   func(ctx context.Context) error { return managerReconciler.Reconcile(ctx, infra, imageRepo) },
+				ConditionType:         infrav1alpha1.ConditionTypeManagerReady,
+				AdditionalCondition:   builtinTemplatesConditionType,
+				SuccessReason:         "ManagerReady",
+				SuccessMessage:        "Manager is ready",
+				AdditionalReason:      "BuiltinTemplatesReady",
+				AdditionalMessage:     "Builtin templates are synchronized",
+				ErrorReason:           "ManagerFailed",
+				AdditionalErrorReason: "BuiltinTemplateSyncFailed",
 			},
 		)
 	}
@@ -626,7 +640,36 @@ func (r *Sandbox0InfraReconciler) expectedConditionTypes(infra *infrav1alpha1.Sa
 	if plan.EnableClusterRegistration {
 		conditions = append(conditions, infrav1alpha1.ConditionTypeClusterRegistered)
 	}
+	if shouldTrackBuiltinTemplatesCondition(infra, plan) {
+		conditions = append(conditions, infrav1alpha1.ConditionTypeBuiltinTemplatesReady)
+	}
 	return conditions
+}
+
+func shouldTrackBuiltinTemplatesCondition(infra *infrav1alpha1.Sandbox0Infra, plan componentPlan) bool {
+	if infra == nil || len(infra.Spec.BuiltinTemplates) == 0 {
+		return false
+	}
+	if plan.EnableScheduler {
+		return true
+	}
+	return plan.EnableManager && managerTemplateStoreEnabled(infra)
+}
+
+func managerTemplateStoreEnabled(infra *infrav1alpha1.Sandbox0Infra) bool {
+	if infra == nil || infra.Spec.Services == nil || infra.Spec.Services.InternalGateway == nil {
+		return false
+	}
+	cfg := infra.Spec.Services.InternalGateway.Config
+	mode := ""
+	if cfg != nil {
+		mode = cfg.AuthMode
+	}
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	if mode == "" {
+		mode = "internal"
+	}
+	return mode != "internal"
 }
 
 // setCondition sets or updates a condition

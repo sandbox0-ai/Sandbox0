@@ -101,3 +101,71 @@ func TestRunStepsErrorStopsAndSetsCondition(t *testing.T) {
 		t.Fatalf("expected condition status false, got %v", condition.Status)
 	}
 }
+
+func TestRunStepsSetsAdditionalCondition(t *testing.T) {
+	ctx := context.Background()
+	reconciler := &Sandbox0InfraReconciler{}
+	infra := &infrav1alpha1.Sandbox0Infra{}
+
+	steps := []reconcileStep{
+		{
+			Name:                "scheduler",
+			Run:                 func(context.Context) error { return nil },
+			ConditionType:       infrav1alpha1.ConditionTypeSchedulerReady,
+			AdditionalCondition: infrav1alpha1.ConditionTypeBuiltinTemplatesReady,
+			SuccessReason:       "SchedulerReady",
+			SuccessMessage:      "Scheduler is ready",
+			AdditionalReason:    "BuiltinTemplatesReady",
+			AdditionalMessage:   "Builtin templates are synchronized",
+			ErrorReason:         "SchedulerFailed",
+		},
+	}
+
+	_, err := reconciler.runSteps(ctx, infra, steps)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	additionalCondition := meta.FindStatusCondition(infra.Status.Conditions, infrav1alpha1.ConditionTypeBuiltinTemplatesReady)
+	if additionalCondition == nil {
+		t.Fatalf("expected builtin templates condition to be set")
+	}
+	if additionalCondition.Status != metav1.ConditionTrue {
+		t.Fatalf("expected builtin templates condition status true, got %v", additionalCondition.Status)
+	}
+}
+
+func TestRunStepsErrorSetsAdditionalCondition(t *testing.T) {
+	ctx := context.Background()
+	reconciler := &Sandbox0InfraReconciler{}
+	infra := &infrav1alpha1.Sandbox0Infra{}
+	stepErr := errors.New("sync builtin templates failed")
+
+	steps := []reconcileStep{
+		{
+			Name:                  "manager",
+			Run:                   func(context.Context) error { return stepErr },
+			ConditionType:         infrav1alpha1.ConditionTypeManagerReady,
+			AdditionalCondition:   infrav1alpha1.ConditionTypeBuiltinTemplatesReady,
+			ErrorReason:           "ManagerFailed",
+			AdditionalErrorReason: "BuiltinTemplateSyncFailed",
+			ErrorResult:           &ctrl.Result{},
+		},
+	}
+
+	_, err := reconciler.runSteps(ctx, infra, steps)
+	if !errors.Is(err, stepErr) {
+		t.Fatalf("expected error %v, got %v", stepErr, err)
+	}
+
+	additionalCondition := meta.FindStatusCondition(infra.Status.Conditions, infrav1alpha1.ConditionTypeBuiltinTemplatesReady)
+	if additionalCondition == nil {
+		t.Fatalf("expected builtin templates condition to be set")
+	}
+	if additionalCondition.Status != metav1.ConditionFalse {
+		t.Fatalf("expected builtin templates condition status false, got %v", additionalCondition.Status)
+	}
+	if additionalCondition.Reason != "BuiltinTemplateSyncFailed" {
+		t.Fatalf("expected additional condition reason BuiltinTemplateSyncFailed, got %s", additionalCondition.Reason)
+	}
+}

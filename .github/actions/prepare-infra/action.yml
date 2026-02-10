@@ -65,7 +65,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: /tmp/infra-deps.tar
-        key: infra-deps-${{ runner.os }}-${{ inputs.cache-key-suffix }}-postgres16-rustfs-1.0.0-alpha.79-registry-2.8.3
+        key: infra-deps-${{ runner.os }}-${{ inputs.cache-key-suffix }}-postgres16-rustfs-1.0.0-alpha.79-registry-2.8.3-otemplates-default-v0.1.0
 
     - name: Pull or load dependency images
       shell: bash
@@ -78,7 +78,8 @@ runs:
           docker pull postgres:16-alpine
           docker pull rustfs/rustfs:1.0.0-alpha.79
           docker pull registry:2.8.3
-          docker save -o /tmp/infra-deps.tar postgres:16-alpine rustfs/rustfs:1.0.0-alpha.79 registry:2.8.3
+          docker pull sandbox0ai/otemplates:default-v0.1.0
+          docker save -o /tmp/infra-deps.tar postgres:16-alpine rustfs/rustfs:1.0.0-alpha.79 registry:2.8.3 sandbox0ai/otemplates:default-v0.1.0
         fi
 
     - name: Load Image to Kind
@@ -91,6 +92,7 @@ runs:
         kind load docker-image postgres:16-alpine --name ${{ inputs.kind-cluster-name }}
         kind load docker-image rustfs/rustfs:1.0.0-alpha.79 --name ${{ inputs.kind-cluster-name }}
         kind load docker-image registry:2.8.3 --name ${{ inputs.kind-cluster-name }}
+        kind load docker-image sandbox0ai/otemplates:default-v0.1.0 --name ${{ inputs.kind-cluster-name }}
 
     - name: Save Go build, module, and local outputs
       if: steps.go-build-cache.outputs.cache-hit != 'true'
@@ -107,4 +109,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: /tmp/infra-deps.tar
-        key: infra-deps-${{ runner.os }}-${{ inputs.cache-key-suffix }}-postgres16-rustfs-1.0.0-alpha.79-registry-2.8.3
+        key: infra-deps-${{ runner.os }}-${{ inputs.cache-key-suffix }}-postgres16-rustfs-1.0.0-alpha.79-registry-2.8.3-otemplates-default-v0.1.0
