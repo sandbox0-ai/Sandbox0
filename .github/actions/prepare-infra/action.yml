@@ -45,9 +45,9 @@ runs:
           ~/.cache/go-build
           ~/go/pkg/mod
           ${{ inputs.infra-dir }}/bin
-        key: infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}-${{ hashFiles(format('{0}/go.mod', inputs.infra-dir), format('{0}/**/*.go', inputs.infra-dir), format('{0}/Makefile', inputs.infra-dir)) }}
+        key: infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}
         restore-keys: |
-          infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}-
+          infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}
 
     - uses: helm/kind-action@v1
       with:
@@ -159,7 +159,7 @@ runs:
           ~/.cache/go-build
           ~/go/pkg/mod
           ${{ inputs.infra-dir }}/bin
-        key: infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}-${{ hashFiles(format('{0}/go.mod', inputs.infra-dir), format('{0}/**/*.go', inputs.infra-dir), format('{0}/Makefile', inputs.infra-dir)) }}
+        key: infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}
 
     - name: Save postgres image cache
       if: steps.infra-postgres-cache.outputs.cache-hit != 'true'
