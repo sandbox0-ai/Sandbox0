@@ -229,7 +229,7 @@ func (r *Sandbox0InfraReconciler) buildComponentPlan(infra *infrav1alpha1.Sandbo
 		EnableInternalGateway:     enableInternalGateway,
 		EnableManager:             enableManager,
 		EnableStorageProxy:        enableStorageProxy,
-		EnableFusePlugin:          enableStorageProxy,
+		EnableFusePlugin:          enableManager,
 		EnableNetd:                infrav1alpha1.IsNetdEnabled(infra),
 		EnableInternalAuth:        hasControlPlane || hasDataPlane,
 		EnableDatabase:            infrav1alpha1.IsDatabaseEnabled(infra),
