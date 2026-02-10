@@ -82,7 +82,7 @@ jobs:
 
       - name: Wait for Sandbox0Infra ready
         run: |
-          if kubectl -n "${INFRA_NAMESPACE}" wait --for=condition=Ready "sandbox0infra/${INFRA_NAME}" --timeout=5m; then
+          if kubectl -n "${INFRA_NAMESPACE}" wait --for=condition=Ready "sandbox0infra/${INFRA_NAME}" --timeout=9m; then
             exit 0
           fi
           echo "Sandbox0Infra not ready"
