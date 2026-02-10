@@ -19,9 +19,19 @@ inputs:
     description: Suffix for cache keys (e.g. arch).
     required: false
     default: "default"
+  free-disk-space:
+    description: Run aggressive disk cleanup on GitHub-hosted Linux runners.
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
+    - name: Free disk space (GitHub-hosted Linux)
+      if: runner.os == 'Linux' && inputs.free-disk-space == 'true'
+      shell: bash
+      run: |
+        bash "${{ github.action_path }}/free_disk_space.sh"
+
     - uses: actions/setup-go@v5
       with:
         go-version: ${{ inputs.go-version }}
