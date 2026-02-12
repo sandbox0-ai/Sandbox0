@@ -3,20 +3,16 @@ package http
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/internal-gateway/pkg/middleware"
-	service "github.com/sandbox0-ai/infra/manager/pkg/service"
 	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
-	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/pkg/proxy"
 	"go.uber.org/zap"
 )
@@ -35,48 +31,6 @@ func (s *Server) createContext(c *gin.Context) {
 	if err != nil {
 		spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
 		return
-	}
-
-	var req createContextRequestPayload
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &req); err != nil {
-			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid request body")
-			return
-		}
-	}
-
-	authCtx := middleware.GetAuthContext(c)
-	if authCtx == nil {
-		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
-		return
-	}
-
-	var (
-		exposurePort *int
-		publicURL    string
-	)
-	if req.Type == "cmd" && req.Cmd != nil && req.Cmd.ExposePort != nil {
-		if *req.Cmd.ExposePort <= 0 || *req.Cmd.ExposePort > 65535 {
-			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid expose_port")
-			return
-		}
-		procdURL, err := s.getProcdURL(c, sandboxID)
-		if err != nil {
-			return
-		}
-		if portStr := procdURL.Port(); portStr != "" {
-			if p, convErr := strconv.Atoi(portStr); convErr == nil && p == *req.Cmd.ExposePort {
-				spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "expose_port conflicts with reserved procd port")
-				return
-			}
-		}
-		label, err := naming.BuildExposureHostLabel(sandboxID, *req.Cmd.ExposePort)
-		if err != nil {
-			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, err.Error())
-			return
-		}
-		publicURL = s.buildPublicExposureURL(label)
-		exposurePort = req.Cmd.ExposePort
 	}
 
 	procdURL, err := s.getProcdURL(c, sandboxID)
@@ -110,93 +64,12 @@ func (s *Server) createContext(c *gin.Context) {
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode < 300 && exposurePort != nil {
-		resume := true
-		if req.Cmd != nil && req.Cmd.ExposeResume != nil {
-			resume = *req.Cmd.ExposeResume
-		}
-		// Runtime precedence:
-		// 1) sandbox.auto_resume (global gate, default false)
-		// 2) cmd.expose_resume / exposed_ports[].resume (per-port gate)
-		if err := s.upsertExposePortPolicy(c, sandboxID, *exposurePort, resume); err != nil {
-			s.logger.Warn("Failed to update exposed port policy",
-				zap.String("sandbox_id", sandboxID),
-				zap.Int("port", *exposurePort),
-				zap.Bool("resume", resume),
-				zap.Error(err),
-			)
-		}
-	}
-
-	if publicURL != "" && len(respBody) > 0 {
-		var payload map[string]any
-		if json.Unmarshal(respBody, &payload) == nil {
-			if data, ok := payload["data"].(map[string]any); ok {
-				data["public_url"] = publicURL
-				if exposurePort != nil {
-					data["exposed_port"] = *exposurePort
-				}
-				if newBody, mErr := json.Marshal(payload); mErr == nil {
-					respBody = newBody
-				}
-			}
-		}
-	}
-
 	for k, vs := range resp.Header {
 		for _, v := range vs {
 			c.Writer.Header().Add(k, v)
 		}
 	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
-}
-
-type createContextRequestPayload struct {
-	Type string `json:"type"`
-	Cmd  *struct {
-		Command      []string `json:"command,omitempty"`
-		ExposePort   *int     `json:"expose_port,omitempty"`
-		ExposeResume *bool    `json:"expose_resume,omitempty"`
-	} `json:"cmd,omitempty"`
-}
-
-func (s *Server) buildPublicExposureURL(label string) string {
-	rootDomain := s.cfg.PublicRootDomain
-	if rootDomain == "" {
-		rootDomain = "sandbox0.app"
-	}
-	regionID := s.cfg.PublicRegionID
-	if regionID == "" {
-		return ""
-	}
-	return "https://" + label + "." + regionID + "." + rootDomain
-}
-
-func (s *Server) upsertExposePortPolicy(c *gin.Context, sandboxID string, port int, resume bool) error {
-	authCtx := middleware.GetAuthContext(c)
-	if authCtx == nil {
-		return errors.New("missing auth context")
-	}
-	sandbox, err := s.managerClient.GetSandbox(c.Request.Context(), sandboxID, authCtx.UserID, authCtx.TeamID)
-	if err != nil {
-		return err
-	}
-	ports := make([]service.ExposedPortConfig, 0, len(sandbox.ExposedPorts)+1)
-	updated := false
-	for _, item := range sandbox.ExposedPorts {
-		if item.Port == port {
-			item.Resume = resume
-			updated = true
-		}
-		ports = append(ports, item)
-	}
-	if !updated {
-		ports = append(ports, service.ExposedPortConfig{
-			Port:   port,
-			Resume: resume,
-		})
-	}
-	return s.managerClient.UpdateSandboxExposedPorts(c.Request.Context(), sandboxID, authCtx.UserID, authCtx.TeamID, ports)
 }
 
 // listContexts lists all contexts in a sandbox

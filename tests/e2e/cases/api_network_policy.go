@@ -152,7 +152,7 @@ func registerApiNetworkPolicySuite(envProvider func() *framework.ScenarioEnv) {
 				ctxReq := apispec.CreateContextRequest{
 					Type: &processType,
 					Cmd: &apispec.CreateCMDContextRequest{
-						Command: &command,
+						Command: command,
 					},
 				}
 				ctxResp, status, err := session.CreateContext(env.TestCtx.Context, GinkgoT(), sandboxID, ctxReq)

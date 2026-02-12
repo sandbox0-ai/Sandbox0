@@ -110,6 +110,11 @@ const (
 	SuccessEnvelopeSuccessTrue SuccessEnvelopeSuccess = true
 )
 
+// Defines values for SuccessExposedPortsResponseSuccess.
+const (
+	SuccessExposedPortsResponseSuccessTrue SuccessExposedPortsResponseSuccess = true
+)
+
 // Defines values for SuccessFileListResponseSuccess.
 const (
 	SuccessFileListResponseSuccessTrue SuccessFileListResponseSuccess = true
@@ -267,7 +272,7 @@ const (
 
 // Defines values for SuccessWrittenResponseSuccess.
 const (
-	True SuccessWrittenResponseSuccess = true
+	SuccessWrittenResponseSuccessTrue SuccessWrittenResponseSuccess = true
 )
 
 // Defines values for TplSandboxNetworkPolicyMode.
@@ -436,13 +441,7 @@ type CreateAPIKeyResponse struct {
 
 // CreateCMDContextRequest defines model for CreateCMDContextRequest.
 type CreateCMDContextRequest struct {
-	Command    *[]string `json:"command,omitempty"`
-	ExposePort *int32    `json:"expose_port,omitempty"`
-
-	// ExposeResume Port-level resume policy used when expose_port is set. Stored as
-	// exposed_ports[].resume for this sandbox. Priority at runtime:
-	// sandbox.auto_resume (global gate) > cmd.expose_resume (per-port gate).
-	ExposeResume *bool `json:"expose_resume,omitempty"`
+	Command []string `json:"command"`
 }
 
 // CreateContextRequest defines model for CreateContextRequest.
@@ -1043,6 +1042,18 @@ type SuccessEnvelope struct {
 // SuccessEnvelopeSuccess defines model for SuccessEnvelope.Success.
 type SuccessEnvelopeSuccess bool
 
+// SuccessExposedPortsResponse defines model for SuccessExposedPortsResponse.
+type SuccessExposedPortsResponse struct {
+	Data *struct {
+		ExposedPorts []ExposedPortConfig `json:"exposed_ports"`
+		SandboxId    string              `json:"sandbox_id"`
+	} `json:"data,omitempty"`
+	Success SuccessExposedPortsResponseSuccess `json:"success"`
+}
+
+// SuccessExposedPortsResponseSuccess defines model for SuccessExposedPortsResponse.Success.
+type SuccessExposedPortsResponseSuccess bool
+
 // SuccessFileListResponse defines model for SuccessFileListResponse.
 type SuccessFileListResponse struct {
 	Data *struct {
@@ -1424,6 +1435,11 @@ type UnmountRequest struct {
 	SandboxvolumeId string `json:"sandboxvolume_id"`
 }
 
+// UpdateExposedPortsRequest defines model for UpdateExposedPortsRequest.
+type UpdateExposedPortsRequest struct {
+	Ports []ExposedPortConfig `json:"ports"`
+}
+
 // UpdateTeamMemberRequest defines model for UpdateTeamMemberRequest.
 type UpdateTeamMemberRequest struct {
 	Role UpdateTeamMemberRequestRole `json:"role"`
@@ -1587,6 +1603,9 @@ type PostApiV1SandboxesIdContextsCtxIdResizeJSONRequestBody = ResizeContextReque
 
 // PostApiV1SandboxesIdContextsCtxIdSignalJSONRequestBody defines body for PostApiV1SandboxesIdContextsCtxIdSignal for application/json ContentType.
 type PostApiV1SandboxesIdContextsCtxIdSignalJSONRequestBody = SignalContextRequest
+
+// PutApiV1SandboxesIdExposedPortsJSONRequestBody defines body for PutApiV1SandboxesIdExposedPorts for application/json ContentType.
+type PutApiV1SandboxesIdExposedPortsJSONRequestBody = UpdateExposedPortsRequest
 
 // PostApiV1SandboxesIdFilesMoveJSONRequestBody defines body for PostApiV1SandboxesIdFilesMove for application/json ContentType.
 type PostApiV1SandboxesIdFilesMoveJSONRequestBody = MoveFileRequest

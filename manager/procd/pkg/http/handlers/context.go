@@ -68,24 +68,20 @@ type CreateREPLContextRequest struct {
 
 // CreateCMDContextRequest is the request body for creating a CMD context.
 type CreateCMDContextRequest struct {
-	Command      []string `json:"command"`                 // command path and args, e.g., ["/bin/ls", "-la"]
-	ExposePort   *int     `json:"expose_port,omitempty"`   // optional public exposure port, handled by gateway layer
-	ExposeResume *bool    `json:"expose_resume,omitempty"` // optional resume policy, handled by gateway layer
+	Command []string `json:"command"` // command path and args, e.g., ["/bin/ls", "-la"]
 }
 
 // ContextResponse is the response body for a context.
 type ContextResponse struct {
-	ID          string              `json:"id"`
-	Type        process.ProcessType `json:"type"`
-	Language    string              `json:"language"`
-	CWD         string              `json:"cwd"`
-	EnvVars     map[string]string   `json:"env_vars"`
-	Running     bool                `json:"running"`
-	Paused      bool                `json:"paused"`
-	CreatedAt   string              `json:"created_at"`
-	Output      string              `json:"output,omitempty"`
-	PublicURL   string              `json:"public_url,omitempty"`
-	ExposedPort *int                `json:"exposed_port,omitempty"`
+	ID        string              `json:"id"`
+	Type      process.ProcessType `json:"type"`
+	Language  string              `json:"language"`
+	CWD       string              `json:"cwd"`
+	EnvVars   map[string]string   `json:"env_vars"`
+	Running   bool                `json:"running"`
+	Paused    bool                `json:"paused"`
+	CreatedAt string              `json:"created_at"`
+	Output    string              `json:"output,omitempty"`
 }
 
 // ContextStatsResponse is the response body for context resource stats.
