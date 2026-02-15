@@ -30,9 +30,12 @@ spec:
     edgeGateway:
       enabled: true
       replicas: 1
+      # service:
+      #   type: ClusterIP
+      #   port: 80
       service:
         type: NodePort
-        port: 80
+        port: 30080
       config:
         schedulerEnabled: true
     scheduler:

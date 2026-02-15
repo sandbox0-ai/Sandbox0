@@ -299,9 +299,10 @@ func ResolveServicePort(config *infrav1alpha1.ServiceNetworkConfig, fallback int
 }
 
 // ReconcileService creates or updates a service.
+// For NodePort type, the port is also used as NodePort.
 func (r *ResourceManager) ReconcileService(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, name string, labels map[string]string, serviceType corev1.ServiceType, port, targetPort int32) error {
 	return r.ReconcileServicePorts(ctx, infra, name, labels, serviceType, []corev1.ServicePort{
-		BuildServicePort("http", port, targetPort),
+		BuildServicePort("http", port, targetPort, serviceType),
 	})
 }
 
@@ -345,12 +346,17 @@ func (r *ResourceManager) ReconcileServicePorts(ctx context.Context, infra *infr
 }
 
 // BuildServicePort returns a ServicePort with a target port.
-func BuildServicePort(name string, port, targetPort int32) corev1.ServicePort {
-	return corev1.ServicePort{
+// For NodePort type, the port is also used as NodePort.
+func BuildServicePort(name string, port, targetPort int32, serviceType corev1.ServiceType) corev1.ServicePort {
+	sp := corev1.ServicePort{
 		Name:       name,
 		Port:       port,
 		TargetPort: intstr.FromInt(int(targetPort)),
 	}
+	if serviceType == corev1.ServiceTypeNodePort {
+		sp.NodePort = port
+	}
+	return sp
 }
 
 // EnsureManagedLabels merges standard managed labels without overriding existing values.

@@ -47,6 +47,9 @@ spec:
     internalGateway:
       enabled: true
       replicas: 1
+      service:
+        type: NodePort
+        port: 30080
       config:
         authMode: public
     netd:

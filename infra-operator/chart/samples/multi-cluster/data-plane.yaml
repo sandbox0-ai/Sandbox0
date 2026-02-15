@@ -69,6 +69,12 @@ spec:
     internalGateway:
       enabled: true
       replicas: 1
+      # service:
+      #   type: ClusterIP
+      #   port: 80
+      service:
+        type: NodePort
+        port: 30080
       config:
         authMode: internal
     manager:

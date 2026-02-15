@@ -240,9 +240,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	serviceType := common.ResolveServiceType(serviceConfig)
 	servicePort := common.ResolveServicePort(serviceConfig, httpPort)
 	if err := r.Resources.ReconcileServicePorts(ctx, infra, deploymentName, labels, serviceType, []corev1.ServicePort{
-		common.BuildServicePort("http", servicePort, httpPort),
-		common.BuildServicePort("metrics", metricsPort, metricsPort),
-		common.BuildServicePort("webhook", webhookPort, webhookPort),
+		common.BuildServicePort("http", servicePort, httpPort, serviceType),
+		common.BuildServicePort("metrics", metricsPort, metricsPort, serviceType),
+		common.BuildServicePort("webhook", webhookPort, webhookPort, serviceType),
 	}); err != nil {
 		return err
 	}

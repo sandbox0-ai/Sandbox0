@@ -98,13 +98,15 @@ jobs:
           kubectl -n "${INFRA_NAMESPACE}" get events --sort-by=.lastTimestamp || true
           exit 1
 
-      - name: Start API port-forward
+      - name: Set API base URL (NodePort)
         run: |
           service_name="${INFRA_NAME}-internal-gateway"
-          service_port=$(kubectl -n "${INFRA_NAMESPACE}" get svc "${service_name}" -o jsonpath='{.spec.ports[0].port}')
-          kubectl -n "${INFRA_NAMESPACE}" port-forward "svc/${service_name}" 18080:"${service_port}" >/tmp/port-forward.log 2>&1 &
-          sleep 3
-          echo "S0_E2E_BASE_URL=http://127.0.0.1:18080" >> "$GITHUB_ENV"
+          node_port=$(kubectl -n "${INFRA_NAMESPACE}" get svc "${service_name}" -o jsonpath='{.spec.ports[0].nodePort}')
+          # For Kind with extraPortMappings, use localhost
+          # For real clusters, set S0_E2E_NODE_IP to the node's reachable IP
+          node_ip="${S0_E2E_NODE_IP:-127.0.0.1}"
+          echo "S0_E2E_BASE_URL=http://${node_ip}:${node_port}" >> "$GITHUB_ENV"
+          echo "Using API URL: http://${node_ip}:${node_port}"
 
       - name: Export admin credentials
         run: |
