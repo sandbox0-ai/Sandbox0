@@ -117,6 +117,7 @@ func (s *Server) setupRoutes() {
 		// Sandbox management
 		sandboxes := v1.Group("/sandboxes")
 		{
+			sandboxes.GET("", s.listSandboxes)
 			sandboxes.POST("", s.claimSandbox)
 			sandboxes.GET("/:id", s.getSandbox)
 			sandboxes.PUT("/:id", s.updateSandbox)

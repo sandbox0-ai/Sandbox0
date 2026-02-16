@@ -63,16 +63,27 @@ type ResolvedRegistryConfig struct {
 }
 
 // ResolveRegistryConfig resolves registry configuration for dependent services.
+// If registry is not configured, it defaults to builtin provider.
 func ResolveRegistryConfig(infra *infrav1alpha1.Sandbox0Infra) *ResolvedRegistryConfig {
-	if infra == nil || infra.Spec.Registry == nil {
+	if infra == nil {
 		return nil
 	}
+
 	cfg := infra.Spec.Registry
-	targetSecretName := cfg.ImagePullSecretName
-	if targetSecretName == "" {
-		targetSecretName = "sandbox0-registry-pull"
+	// Default to builtin provider if registry is not configured
+	provider := infrav1alpha1.RegistryProviderBuiltin
+	targetSecretName := "sandbox0-registry-pull"
+
+	if cfg != nil {
+		if cfg.Provider != "" {
+			provider = cfg.Provider
+		}
+		if cfg.ImagePullSecretName != "" {
+			targetSecretName = cfg.ImagePullSecretName
+		}
 	}
-	switch cfg.Provider {
+
+	switch provider {
 	case infrav1alpha1.RegistryProviderBuiltin:
 		builtin := resolveBuiltinRegistryConfig(infra)
 		if !builtin.Enabled {
@@ -80,34 +91,48 @@ func ResolveRegistryConfig(infra *infrav1alpha1.Sandbox0Infra) *ResolvedRegistry
 		}
 		registryHost := builtinRegistryHost(infra, builtin.Port)
 		return &ResolvedRegistryConfig{
-			Provider:         cfg.Provider,
+			Provider:         provider,
 			Registry:         registryHost,
 			SourceSecretName: fmt.Sprintf("%s-%s", infra.Name, registryPullSecretSuffix),
 			SourceSecretKey:  ".dockerconfigjson",
 			TargetSecretName: targetSecretName,
 		}
 	case infrav1alpha1.RegistryProviderAWS:
-		return resolveExternalRegistry(cfg.Provider, cfg.AWS, targetSecretName)
+		if cfg == nil || cfg.AWS == nil {
+			return nil
+		}
+		return resolveExternalRegistry(provider, cfg.AWS, targetSecretName)
 	case infrav1alpha1.RegistryProviderGCP:
-		return resolveExternalRegistry(cfg.Provider, cfg.GCP, targetSecretName)
+		if cfg == nil || cfg.GCP == nil {
+			return nil
+		}
+		return resolveExternalRegistry(provider, cfg.GCP, targetSecretName)
 	case infrav1alpha1.RegistryProviderAzure:
-		return resolveExternalRegistry(cfg.Provider, cfg.Azure, targetSecretName)
+		if cfg == nil || cfg.Azure == nil {
+			return nil
+		}
+		return resolveExternalRegistry(provider, cfg.Azure, targetSecretName)
 	case infrav1alpha1.RegistryProviderAliyun:
-		return resolveExternalRegistry(cfg.Provider, cfg.Aliyun, targetSecretName)
+		if cfg == nil || cfg.Aliyun == nil {
+			return nil
+		}
+		return resolveExternalRegistry(provider, cfg.Aliyun, targetSecretName)
 	default:
 		return nil
 	}
 }
 
 // Reconcile reconciles the registry component.
+// If registry is not configured, it defaults to builtin provider.
 func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	logger := log.FromContext(ctx)
 
-	if infra.Spec.Registry == nil {
-		return nil
+	provider := infrav1alpha1.RegistryProviderBuiltin
+	if infra.Spec.Registry != nil && infra.Spec.Registry.Provider != "" {
+		provider = infra.Spec.Registry.Provider
 	}
 
-	switch infra.Spec.Registry.Provider {
+	switch provider {
 	case infrav1alpha1.RegistryProviderBuiltin:
 		logger.Info("Reconciling builtin registry")
 		return r.reconcileBuiltinRegistry(ctx, infra)

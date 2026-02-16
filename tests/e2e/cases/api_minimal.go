@@ -115,6 +115,38 @@ func registerApiMinimalSuite(envProvider func() *framework.ScenarioEnv) {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).To(Equal(http.StatusOK))
 			})
+
+			It("lists sandboxes", func() {
+				listResp, status, err := session.ListSandboxes(env.TestCtx.Context, GinkgoT(), nil)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status).To(Equal(http.StatusOK))
+				Expect(listResp).NotTo(BeNil())
+				Expect(listResp.Count).To(BeNumerically(">=", 1))
+
+				// Find our sandbox in the list
+				found := false
+				for _, sb := range listResp.Sandboxes {
+					if sb.Id == sandboxID {
+						found = true
+						Expect(sb.TemplateId).NotTo(BeEmpty())
+						Expect(sb.Status).NotTo(BeEmpty())
+						break
+					}
+				}
+				Expect(found).To(BeTrue(), "created sandbox should be in the list")
+			})
+
+			It("lists sandboxes with filters", func() {
+				// Test with limit
+				limit := 10
+				listResp, status, err := session.ListSandboxes(env.TestCtx.Context, GinkgoT(), &e2eutils.ListSandboxesOptions{
+					Limit: &limit,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status).To(Equal(http.StatusOK))
+				Expect(listResp).NotTo(BeNil())
+				Expect(len(listResp.Sandboxes)).To(BeNumerically("<=", limit))
+			})
 		})
 
 		Context("filesystem and process capabilities", func() {

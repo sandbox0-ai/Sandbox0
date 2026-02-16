@@ -293,3 +293,74 @@ func (c *InternalGatewayClient) DeleteTemplate(ctx context.Context, baseURL stri
 
 	return nil
 }
+
+// SandboxSummary represents a summary of a sandbox for listing
+type SandboxSummary struct {
+	ID         string `json:"id"`
+	TemplateID string `json:"template_id"`
+	Status     string `json:"status"`
+	Paused     bool   `json:"paused"`
+	ClusterID  string `json:"cluster_id,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+// ListSandboxesResponse represents the response from listing sandboxes
+type ListSandboxesResponse struct {
+	Sandboxes []SandboxSummary `json:"sandboxes"`
+	Count     int              `json:"count"`
+	HasMore   bool             `json:"has_more"`
+}
+
+// ListSandboxes lists sandboxes from internal-gateway with the given query parameters
+func (c *InternalGatewayClient) ListSandboxes(ctx context.Context, baseURL, teamID, query string) (*ListSandboxesResponse, error) {
+	// Generate system token for internal-gateway
+	token, err := c.internalAuthGen.GenerateSystem("internal-gateway", internalauth.GenerateOptions{
+		Permissions: []string{"*:*"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("generate system token: %w", err)
+	}
+
+	// Build request URL with query parameters
+	url := fmt.Sprintf("%s/api/v1/sandboxes?%s", baseURL, query)
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set(internalauth.DefaultTokenHeader, token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(internalauth.TeamIDHeader, teamID)
+
+	// Execute request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		_, apiErr, err := spec.DecodeResponse[map[string]any](bytes.NewReader(body))
+		if err == nil && apiErr != nil {
+			return nil, fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+		}
+		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	result, apiErr, err := spec.DecodeResponse[ListSandboxesResponse](resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	if apiErr != nil {
+		return nil, fmt.Errorf("internal-gateway error: %s", apiErr.Message)
+	}
+
+	return result, nil
+}

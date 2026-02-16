@@ -140,6 +140,7 @@ func (s *Server) setupRoutes() {
 		// Sandbox routing (edge-gateway)
 		sandboxes := v1.Group("/sandboxes")
 		{
+			sandboxes.GET("", s.listSandboxes)
 			sandboxes.POST("", s.createSandbox)
 			sandboxes.Any("/:id", s.proxySandbox)
 			sandboxes.Any("/:id/*path", s.proxySandbox)

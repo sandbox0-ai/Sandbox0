@@ -5,9 +5,78 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/sandbox0-ai/infra/pkg/apispec"
 )
+
+// ListSandboxesResponse represents the response from listing sandboxes
+type ListSandboxesResponse struct {
+	Sandboxes []apispec.SandboxSummary `json:"sandboxes"`
+	Count     int                      `json:"count"`
+	HasMore   bool                     `json:"has_more"`
+}
+
+// ListSandboxesOptions represents options for listing sandboxes
+type ListSandboxesOptions struct {
+	Status     string
+	TemplateID string
+	Paused     *bool
+	Limit      *int
+	Offset     *int
+}
+
+func (s *Session) ListSandboxes(ctx context.Context, t ContractT, opts *ListSandboxesOptions) (*ListSandboxesResponse, int, error) {
+	specPath := "/api/v1/sandboxes"
+	requestPath := "/api/v1/sandboxes"
+
+	// Build query parameters
+	if opts != nil {
+		query := url.Values{}
+		if opts.Status != "" {
+			query.Set("status", opts.Status)
+		}
+		if opts.TemplateID != "" {
+			query.Set("template_id", opts.TemplateID)
+		}
+		if opts.Paused != nil {
+			if *opts.Paused {
+				query.Set("paused", "true")
+			} else {
+				query.Set("paused", "false")
+			}
+		}
+		if opts.Limit != nil {
+			query.Set("limit", fmt.Sprintf("%d", *opts.Limit))
+		}
+		if opts.Offset != nil {
+			query.Set("offset", fmt.Sprintf("%d", *opts.Offset))
+		}
+		if len(query) > 0 {
+			requestPath = requestPath + "?" + query.Encode()
+		}
+	}
+
+	status, body, err := s.doJSONSpecRequest(t, ctx, http.MethodGet, specPath, requestPath, nil, true)
+	if err != nil {
+		return nil, status, err
+	}
+	if status != http.StatusOK {
+		return nil, status, fmt.Errorf("list sandboxes failed with status %d: %s", status, formatAPIError(body))
+	}
+	var resp apispec.SuccessSandboxListResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, status, err
+	}
+	if !resp.Success {
+		return nil, status, fmt.Errorf("list sandboxes response indicates failure")
+	}
+	return &ListSandboxesResponse{
+		Sandboxes: resp.Data.Sandboxes,
+		Count:     resp.Data.Count,
+		HasMore:   resp.Data.HasMore,
+	}, status, nil
+}
 
 func (s *Session) ClaimSandbox(ctx context.Context, t ContractT, template string) (*apispec.ClaimResponse, error) {
 	if s.teamID == "" || s.userID == "" {

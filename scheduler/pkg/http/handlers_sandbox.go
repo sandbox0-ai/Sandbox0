@@ -3,9 +3,13 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +17,7 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
 	"github.com/sandbox0-ai/infra/pkg/naming"
 	"github.com/sandbox0-ai/infra/pkg/template"
+	"github.com/sandbox0-ai/infra/scheduler/pkg/client"
 	"go.uber.org/zap"
 )
 
@@ -299,4 +304,153 @@ func (s *Server) selectClusterByWeightWithAllocations(allocations []*template.Te
 	}
 
 	return nil, nil
+}
+
+// listSandboxes lists all sandboxes across all enabled clusters
+func (s *Server) listSandboxes(c *gin.Context) {
+	claims := internalauth.ClaimsFromContext(c.Request.Context())
+	if claims == nil {
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
+		return
+	}
+
+	// Get all enabled clusters
+	clusters, err := s.repo.ListEnabledClusters(c.Request.Context())
+	if err != nil {
+		s.logger.Error("Failed to list enabled clusters", zap.Error(err))
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to list clusters")
+		return
+	}
+
+	if len(clusters) == 0 {
+		spec.JSONSuccess(c, http.StatusOK, gin.H{
+			"sandboxes": []client.SandboxSummary{},
+			"count":     0,
+			"has_more":  false,
+		})
+		return
+	}
+
+	// Build query string from request parameters
+	queryParams := url.Values{}
+	if status := c.Query("status"); status != "" {
+		queryParams.Set("status", status)
+	}
+	if templateID := c.Query("template_id"); templateID != "" {
+		queryParams.Set("template_id", templateID)
+	}
+	if paused := c.Query("paused"); paused != "" {
+		queryParams.Set("paused", paused)
+	}
+	// For fan-out, we get all results and paginate after aggregation
+	queryParams.Set("limit", "200")
+	queryParams.Set("offset", "0")
+
+	queryString := queryParams.Encode()
+
+	// Fan-out to all clusters in parallel
+	type clusterResult struct {
+		clusterID string
+		response  *client.ListSandboxesResponse
+		err       error
+	}
+
+	results := make(chan clusterResult, len(clusters))
+	var wg sync.WaitGroup
+
+	igClient := client.NewInternalGatewayClient(s.internalAuthGen, s.logger, s.obsProvider)
+
+	for _, cluster := range clusters {
+		wg.Add(1)
+		go func(clusterID, internalGatewayURL string) {
+			defer wg.Done()
+			resp, err := igClient.ListSandboxes(c.Request.Context(), internalGatewayURL, claims.TeamID, queryString)
+			results <- clusterResult{
+				clusterID: clusterID,
+				response:  resp,
+				err:       err,
+			}
+		}(cluster.ClusterID, cluster.InternalGatewayURL)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect and aggregate results
+	var allSandboxes []client.SandboxSummary
+	for result := range results {
+		if result.err != nil {
+			s.logger.Warn("Failed to list sandboxes from cluster",
+				zap.String("cluster_id", result.clusterID),
+				zap.Error(result.err),
+			)
+			continue
+		}
+		// Add cluster_id to each sandbox
+		for i := range result.response.Sandboxes {
+			result.response.Sandboxes[i].ClusterID = result.clusterID
+		}
+		allSandboxes = append(allSandboxes, result.response.Sandboxes...)
+	}
+
+	// Sort by created_at descending (newest first)
+	sort.Slice(allSandboxes, func(i, j int) bool {
+		return allSandboxes[i].CreatedAt > allSandboxes[j].CreatedAt
+	})
+
+	// Parse pagination parameters
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := parsePositiveInt(l, 50); err == nil && parsed > 0 && parsed <= 200 {
+			limit = parsed
+		}
+	}
+
+	offset := 0
+	if o := c.Query("offset"); o != "" {
+		if parsed, err := parsePositiveInt(o, 0); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	// Get total count before pagination
+	totalCount := len(allSandboxes)
+
+	// Apply pagination
+	hasMore := false
+	if offset >= totalCount {
+		allSandboxes = []client.SandboxSummary{}
+	} else {
+		end := offset + limit
+		if end > totalCount {
+			end = totalCount
+		} else {
+			hasMore = true
+		}
+		allSandboxes = allSandboxes[offset:end]
+	}
+
+	s.logger.Info("Listed sandboxes across clusters",
+		zap.String("team_id", claims.TeamID),
+		zap.Int("cluster_count", len(clusters)),
+		zap.Int("total_count", totalCount),
+		zap.Int("returned", len(allSandboxes)),
+	)
+
+	spec.JSONSuccess(c, http.StatusOK, gin.H{
+		"sandboxes": allSandboxes,
+		"count":     totalCount,
+		"has_more":  hasMore,
+	})
+}
+
+func parsePositiveInt(s string, defaultVal int) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	if err != nil {
+		return defaultVal, err
+	}
+	return result, nil
 }

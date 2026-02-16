@@ -3,6 +3,7 @@ package http
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/infra/manager/pkg/service"
@@ -49,6 +50,64 @@ func (s *Server) claimSandbox(c *gin.Context) {
 	}
 
 	spec.JSONSuccess(c, http.StatusCreated, resp)
+}
+
+// listSandboxes lists all sandboxes for the authenticated team
+func (s *Server) listSandboxes(c *gin.Context) {
+	claims := internalauth.ClaimsFromContext(c.Request.Context())
+	if claims == nil {
+		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "missing authentication")
+		return
+	}
+
+	// Parse query parameters
+	req := &service.ListSandboxesRequest{
+		TeamID:     claims.TeamID,
+		Status:     c.Query("status"),
+		TemplateID: c.Query("template_id"),
+	}
+
+	// Parse paused filter
+	if pausedStr := c.Query("paused"); pausedStr != "" {
+		paused, err := strconv.ParseBool(pausedStr)
+		if err != nil {
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid paused parameter")
+			return
+		}
+		req.Paused = &paused
+	}
+
+	// Parse limit
+	if limitStr := c.Query("limit"); limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid limit parameter")
+			return
+		}
+		req.Limit = limit
+	}
+
+	// Parse offset
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil {
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "invalid offset parameter")
+			return
+		}
+		req.Offset = offset
+	}
+
+	resp, err := s.sandboxService.ListSandboxes(c.Request.Context(), req)
+	if err != nil {
+		s.logger.Error("Failed to list sandboxes",
+			zap.String("teamID", claims.TeamID),
+			zap.Error(err),
+		)
+		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, fmt.Sprintf("failed to list sandboxes: %v", err))
+		return
+	}
+
+	spec.JSONSuccess(c, http.StatusOK, resp)
 }
 
 // getSandbox gets a sandbox

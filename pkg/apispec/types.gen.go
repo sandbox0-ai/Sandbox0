@@ -55,6 +55,14 @@ const (
 	StartupDelay REPLReadyMode = "startup_delay"
 )
 
+// Defines values for SandboxSummaryStatus.
+const (
+	SandboxSummaryStatusCompleted SandboxSummaryStatus = "completed"
+	SandboxSummaryStatusFailed    SandboxSummaryStatus = "failed"
+	SandboxSummaryStatusRunning   SandboxSummaryStatus = "running"
+	SandboxSummaryStatusStarting  SandboxSummaryStatus = "starting"
+)
+
 // Defines values for SuccessAPIKeyListResponseSuccess.
 const (
 	SuccessAPIKeyListResponseSuccessTrue SuccessAPIKeyListResponseSuccess = true
@@ -190,6 +198,11 @@ const (
 	SuccessResumeSandboxResponseSuccessTrue SuccessResumeSandboxResponseSuccess = true
 )
 
+// Defines values for SuccessSandboxListResponseSuccess.
+const (
+	SuccessSandboxListResponseSuccessTrue SuccessSandboxListResponseSuccess = true
+)
+
 // Defines values for SuccessSandboxNetworkPolicyResponseSuccess.
 const (
 	SuccessSandboxNetworkPolicyResponseSuccessTrue SuccessSandboxNetworkPolicyResponseSuccess = true
@@ -272,7 +285,7 @@ const (
 
 // Defines values for SuccessWrittenResponseSuccess.
 const (
-	SuccessWrittenResponseSuccessTrue SuccessWrittenResponseSuccess = true
+	True SuccessWrittenResponseSuccess = true
 )
 
 // Defines values for TplSandboxNetworkPolicyMode.
@@ -293,6 +306,14 @@ const (
 	ROX VolumeAccessMode = "ROX"
 	RWO VolumeAccessMode = "RWO"
 	RWX VolumeAccessMode = "RWX"
+)
+
+// Defines values for GetApiV1SandboxesParamsStatus.
+const (
+	GetApiV1SandboxesParamsStatusCompleted GetApiV1SandboxesParamsStatus = "completed"
+	GetApiV1SandboxesParamsStatusFailed    GetApiV1SandboxesParamsStatus = "failed"
+	GetApiV1SandboxesParamsStatusRunning   GetApiV1SandboxesParamsStatus = "running"
+	GetApiV1SandboxesParamsStatusStarting  GetApiV1SandboxesParamsStatus = "starting"
 )
 
 // APIKey defines model for APIKey.
@@ -879,6 +900,21 @@ type SandboxStatus struct {
 	UserId     *string `json:"user_id,omitempty"`
 }
 
+// SandboxSummary defines model for SandboxSummary.
+type SandboxSummary struct {
+	// ClusterId Cluster where sandbox runs (multi-cluster only)
+	ClusterId  *string              `json:"cluster_id"`
+	CreatedAt  time.Time            `json:"created_at"`
+	ExpiresAt  time.Time            `json:"expires_at"`
+	Id         string               `json:"id"`
+	Paused     bool                 `json:"paused"`
+	Status     SandboxSummaryStatus `json:"status"`
+	TemplateId string               `json:"template_id"`
+}
+
+// SandboxSummaryStatus defines model for SandboxSummary.Status.
+type SandboxSummaryStatus string
+
 // SandboxTemplateSpec defines model for SandboxTemplateSpec.
 type SandboxTemplateSpec struct {
 	AllowedTeams     *[]string                `json:"allowedTeams,omitempty"`
@@ -1217,6 +1253,22 @@ type SuccessResumeSandboxResponse struct {
 // SuccessResumeSandboxResponseSuccess defines model for SuccessResumeSandboxResponse.Success.
 type SuccessResumeSandboxResponseSuccess bool
 
+// SuccessSandboxListResponse defines model for SuccessSandboxListResponse.
+type SuccessSandboxListResponse struct {
+	Data *struct {
+		// Count Total matching sandboxes
+		Count int `json:"count"`
+
+		// HasMore More results available
+		HasMore   bool             `json:"has_more"`
+		Sandboxes []SandboxSummary `json:"sandboxes"`
+	} `json:"data,omitempty"`
+	Success SuccessSandboxListResponseSuccess `json:"success"`
+}
+
+// SuccessSandboxListResponseSuccess defines model for SuccessSandboxListResponse.Success.
+type SuccessSandboxListResponseSuccess bool
+
 // SuccessSandboxNetworkPolicyResponse defines model for SuccessSandboxNetworkPolicyResponse.
 type SuccessSandboxNetworkPolicyResponse struct {
 	Data    *TplSandboxNetworkPolicy                   `json:"data,omitempty"`
@@ -1553,6 +1605,27 @@ type TemplateID = string
 
 // UserID defines model for UserID.
 type UserID = string
+
+// GetApiV1SandboxesParams defines parameters for GetApiV1Sandboxes.
+type GetApiV1SandboxesParams struct {
+	// Status Filter by sandbox status
+	Status *GetApiV1SandboxesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// TemplateId Filter by template ID
+	TemplateId *string `form:"template_id,omitempty" json:"template_id,omitempty"`
+
+	// Paused Filter by paused state
+	Paused *bool `form:"paused,omitempty" json:"paused,omitempty"`
+
+	// Limit Maximum number of results per page
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Pagination offset
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetApiV1SandboxesParamsStatus defines parameters for GetApiV1Sandboxes.
+type GetApiV1SandboxesParamsStatus string
 
 // DeleteApiV1SandboxesIdFilesParams defines parameters for DeleteApiV1SandboxesIdFiles.
 type DeleteApiV1SandboxesIdFilesParams struct {

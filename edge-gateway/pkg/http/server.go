@@ -213,8 +213,9 @@ func (s *Server) setupRoutes() {
 			clusters.Any("", s.schedulerRouter.ProxyToTarget)
 			clusters.Any("/*path", s.schedulerRouter.ProxyToTarget)
 
-			// Sandbox creation goes to scheduler, others route to internal-gateway
+			// Sandbox creation and listing go to scheduler, others route to internal-gateway
 			sandboxes := api.Group("/v1/sandboxes")
+			sandboxes.GET("", s.injectInternalTokenForTarget("scheduler"), s.schedulerRouter.ProxyToTarget)
 			sandboxes.POST("", s.injectInternalTokenForTarget("scheduler"), s.schedulerRouter.ProxyToTarget)
 			sandboxes.Any("/:id", s.proxySandbox)
 			sandboxes.Any("/:id/*path", s.proxySandbox)
