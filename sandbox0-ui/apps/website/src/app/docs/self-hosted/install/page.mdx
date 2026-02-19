@@ -1,1 +1,239 @@
 # Install Infra Operator
+
+This guide walks you through installing the sandbox0 infra-operator and deploying your first instance.
+
+## Prerequisites
+
+Before installing, ensure you have:
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Kubernetes | 1.23+ | Tested on 1.28+ |
+| Helm | 3.8+ | For chart installation |
+| kubectl | 1.23+ | For cluster interaction |
+| StorageClass | - | Default storage class for PVCs |
+
+### Kubernetes Requirements
+
+<Callout variant="info">
+For production deployments, you'll also need:
+- **PostgreSQL**: External managed database (RDS, Cloud SQL, etc.)
+- **Object Storage**: S3-compatible storage or Aliyun OSS
+- **Container Registry**: ECR, GCR, ACR, or built-in registry
+</Callout>
+
+### Verify Prerequisites
+
+```bash
+# Check Kubernetes version
+kubectl version
+
+# Check Helm version
+helm version
+
+# Verify default storage class
+kubectl get storageclass
+```
+
+## Install the Operator
+
+### Step 1: Add the Helm Repository
+
+```bash
+helm repo add sandbox0 https://charts.sandbox0.ai
+helm repo update
+```
+
+### Step 2: Install the Operator
+
+Install the infra-operator in the `sandbox0-system` namespace:
+
+```bash
+helm install infra-operator sandbox0/infra-operator \
+  --namespace sandbox0-system \
+  --create-namespace
+```
+
+### Step 3: Verify Installation
+
+```bash
+# Check operator pod status
+kubectl get pods -n sandbox0-system
+
+# Check CRD installation
+kubectl get crd sandbox0infras.infra.sandbox0.io
+```
+
+Expected output:
+
+```
+NAME                        READY   STATUS    RESTARTS   AGE
+infra-operator-xxx-xxx      1/1     Running   0          30s
+```
+
+## Deploy Your First Instance
+
+### Quick Start: Minimal Mode
+
+Create a file named `sandbox0infra-minimal.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox0-system
+---
+apiVersion: infra.sandbox0.ai/v1alpha1
+kind: Sandbox0Infra
+metadata:
+  name: minimal
+  namespace: sandbox0-system
+spec:
+  version: "latest"
+  database:
+    type: builtin
+    builtin:
+      enabled: true
+      persistence:
+        enabled: true
+        size: "20Gi"
+  publicExposure:
+    enabled: true
+    rootDomain: sandbox0.app
+    regionId: aws-us-east-1
+  builtinTemplates:
+    - templateId: default
+      image: sandbox0ai/otemplates:default-v0.1.0
+      displayName: Default
+      description: Builtin template installed by infra-operator.
+      pool:
+        minIdle: 1
+        maxIdle: 5
+        autoScale: true
+  services:
+    internalGateway:
+      enabled: true
+      replicas: 1
+      service:
+        type: NodePort
+        port: 30080
+      config:
+        authMode: public
+    manager:
+      enabled: true
+      replicas: 1
+  initUser:
+    email: "admin@example.com"
+```
+
+Apply the configuration:
+
+```bash
+kubectl apply -f sandbox0infra-minimal.yaml
+```
+
+### Monitor Installation Progress
+
+```bash
+# Watch the Sandbox0Infra status
+kubectl get sandbox0infra -n sandbox0-system -w
+
+# Check detailed status
+kubectl describe sandbox0infra minimal -n sandbox0-system
+```
+
+The `Phase` field will transition through:
+
+1. `Installing` - Components are being deployed
+2. `Ready` - All components are healthy
+3. `Degraded` - Some components are unhealthy
+4. `Failed` - Installation failed
+
+### Verify Deployment
+
+Once `Phase` is `Ready`:
+
+```bash
+# Check all pods
+kubectl get pods -n sandbox0-system
+
+# Check services
+kubectl get svc -n sandbox0-system
+
+# Get the API endpoint (NodePort)
+kubectl get svc -n sandbox0-system -l app.kubernetes.io/component=internal-gateway
+```
+
+## Access the API
+
+### Get the Endpoint
+
+For NodePort service:
+
+```bash
+# Get node IP
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
+
+# Get node port
+NODE_PORT=$(kubectl get svc -n sandbox0-system -l app.kubernetes.io/component=internal-gateway -o jsonpath='{.items[0].spec.ports[0].nodePort}')
+
+echo "API endpoint: http://${'$'}{NODE_IP}:${'$'}{NODE_PORT}"
+```
+
+### Test the Connection
+
+```bash
+# Health check
+curl http://${'$'}{NODE_IP}:${'$'}{NODE_PORT}/health
+
+# List templates
+curl http://${'$'}{NODE_IP}:${'$'}{NODE_PORT}/api/v1/templates
+```
+
+## Initial User
+
+The `initUser` configuration creates an initial admin user:
+
+```yaml
+initUser:
+  email: "admin@example.com"
+  # Optional: reference a secret for password
+  # passwordSecret:
+  #   name: admin-password
+  #   key: password
+```
+
+If `passwordSecret` is not specified, a random password is generated and stored in a secret:
+
+```bash
+# Get the generated password
+kubectl get secret -n sandbox0-system -l app.kubernetes.io/component=init-user -o jsonpath='{.items[0].data.password}' | base64 -d
+```
+
+## Next Steps
+
+<CardGrid>
+  <LinkCard
+    title="Deploy Scenarios"
+    href="/docs/self-hosted/deploy-scenarios"
+    cta="Explore Modes"
+  >
+    Learn about different deployment modes for various use cases
+  </LinkCard>
+
+  <LinkCard
+    title="Configuration"
+    href="/docs/self-hosted/configuration"
+    cta="View Options"
+  >
+    Explore all configuration options for Sandbox0Infra
+  </LinkCard>
+
+  <LinkCard
+    title="Troubleshooting"
+    href="/docs/self-hosted/troubleshooting"
+    cta="Get Help"
+  >
+    Common issues and solutions
+  </LinkCard>
+</CardGrid>

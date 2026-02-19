@@ -49,7 +49,6 @@ export const docsNavigation: PixelSidebarItem[] = [
       { label: "Install", href: "/docs/self-hosted/install" },
       { label: "Deploy Scenarios", href: "/docs/self-hosted/deploy-scenarios" },
       { label: "Configuration", href: "/docs/self-hosted/configuration" },
-      { label: "Upgrade and Day-2", href: "/docs/self-hosted/upgrade" },
       { label: "Troubleshooting", href: "/docs/self-hosted/troubleshooting" },
     ],
   },

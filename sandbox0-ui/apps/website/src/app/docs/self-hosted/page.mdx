@@ -1,1 +1,73 @@
-# Self-hosted
+# Self-hosted Overview
+
+Sandbox0 can be deployed in your own infrastructure using the `infra-operator`, a Kubernetes operator that manages all sandbox0 components.
+
+## What is infra-operator?
+
+The `infra-operator` is a Kubernetes operator that simplifies sandbox0 deployment and management. It handles:
+
+- **Component Lifecycle**: Deploys and manages all sandbox0 services
+- **Configuration Management**: Centralizes configuration through the `Sandbox0Infra` CRD
+- **Dependency Setup**: Automatically provisions databases, storage, and registries when using built-in options
+- **Status Monitoring**: Provides real-time status and health information
+
+## Operator-First Workflow
+
+As a self-hosted user, your primary interaction is with the `infra-operator`:
+
+1. Install the operator via Helm
+2. Create a `Sandbox0Infra` custom resource with your configuration
+3. The operator reconciles and deploys all necessary components
+4. Monitor status through the CRD's status field
+
+## Deployment Modes
+
+Sandbox0 supports multiple deployment modes:
+
+| Mode | Components | Use Case |
+|------|------------|----------|
+| **Minimal** | internal-gateway + manager | Quick start, basic sandbox functionality |
+| **Volumes** | minimal + storage-proxy | Persistent volume management |
+| **Network Policy** | minimal + netd | Network isolation and egress control |
+| **Full** | all data plane services | Complete feature set |
+| **Multi-cluster** | control plane + data planes | Horizontal scaling across clusters |
+
+## Key Concepts
+
+### Control Plane vs Data Plane
+
+- **Control Plane**: Entry point for external traffic, handles authentication, routing, and template distribution. Components: `edge-gateway`, `scheduler`
+- **Data Plane**: Runs sandbox workloads, manages storage and networking. Components: `internal-gateway`, `manager`, `storage-proxy`, `netd`
+
+### Single-Cluster vs Multi-Cluster
+
+- **Single-Cluster**: Control plane and data plane services in one cluster. Simplest setup.
+- **Multi-Cluster**: One control plane cluster manages multiple data plane clusters. Enables horizontal scaling.
+
+## Next Steps
+
+<CardGrid>
+  <LinkCard
+    title="Architecture"
+    href="/docs/self-hosted/architecture"
+    cta="Learn More"
+  >
+    Understand the system architecture and component responsibilities
+  </LinkCard>
+
+  <LinkCard
+    title="Installation"
+    href="/docs/self-hosted/install"
+    cta="Get Started"
+  >
+    Install the infra-operator and deploy your first instance
+  </LinkCard>
+
+  <LinkCard
+    title="Deploy Scenarios"
+    href="/docs/self-hosted/deploy-scenarios"
+    cta="Explore"
+  >
+    Choose the right deployment mode for your needs
+  </LinkCard>
+</CardGrid>
