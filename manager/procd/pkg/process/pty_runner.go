@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,6 +18,10 @@ type PTYRunner struct {
 	outputFilter func([]byte) ([]byte, bool)
 	onStop       func()
 	exitResolver func(error) (int, bool)
+
+	mu              sync.RWMutex
+	readerDone      chan struct{}
+	closeOutputOnce sync.Once
 }
 
 // NewPTYRunner creates a PTY runner for a process.
@@ -56,6 +61,10 @@ func (r *PTYRunner) Start(cmd *exec.Cmd, size *PTYSize) error {
 	}
 
 	r.cmd = cmd
+	r.mu.Lock()
+	r.readerDone = make(chan struct{})
+	r.closeOutputOnce = sync.Once{}
+	r.mu.Unlock()
 	r.base.SetPTY(ptmx)
 	r.base.SetPID(cmd.Process.Pid)
 	r.base.SetStartTime(time.Now())
@@ -97,13 +106,15 @@ func (r *PTYRunner) Stop() error {
 		ptyFile.Close()
 	}
 
+	r.waitReaderDone()
 	r.base.SetState(ProcessStateStopped)
-	r.base.CloseOutput()
+	r.closeOutput()
 
 	return nil
 }
 
 func (r *PTYRunner) readOutput(ptmx *os.File) {
+	defer r.markReaderDone()
 	buf := make([]byte, 4096)
 	for {
 		n, err := ptmx.Read(buf)
@@ -179,5 +190,30 @@ func (r *PTYRunner) monitorProcess() {
 	})
 
 	r.base.stopInputWriter()
-	r.base.CloseOutput()
+	r.waitReaderDone()
+	r.closeOutput()
+}
+
+func (r *PTYRunner) markReaderDone() {
+	r.mu.RLock()
+	done := r.readerDone
+	r.mu.RUnlock()
+	if done != nil {
+		close(done)
+	}
+}
+
+func (r *PTYRunner) waitReaderDone() {
+	r.mu.RLock()
+	done := r.readerDone
+	r.mu.RUnlock()
+	if done != nil {
+		<-done
+	}
+}
+
+func (r *PTYRunner) closeOutput() {
+	r.closeOutputOnce.Do(func() {
+		r.base.CloseOutput()
+	})
 }
