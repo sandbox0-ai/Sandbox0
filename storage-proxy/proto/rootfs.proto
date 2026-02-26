@@ -1,0 +1,256 @@
+// pkg/proto/rootfs.proto
+// Rootfs Management Service for overlay-based container rootfs
+
+syntax = "proto3";
+
+package sandbox0.fs;
+
+option go_package = "github.com/sandbox0-ai/infra/storage-proxy/proto/fs";
+
+import "layer.proto";
+
+// RootfsService manages sandbox rootfs overlay filesystems
+// Each sandbox rootfs consists of:
+// - lowerdir: base layer (read-only, shared)
+// - upperdir: sandbox writable layer (per-sandbox)
+// - workdir: overlay working directory
+service RootfsService {
+  // CreateRootfs creates a new rootfs overlay for a sandbox.
+  // This creates the upperdir volume and prepares the overlay structure.
+  rpc CreateRootfs(CreateRootfsRequest) returns (CreateRootfsResponse);
+
+  // DeleteRootfs removes a sandbox's rootfs overlay and optionally its upper volume.
+  rpc DeleteRootfs(DeleteRootfsRequest) returns (DeleteRootfsResponse);
+
+  // GetRootfs retrieves rootfs information for a sandbox.
+  rpc GetRootfs(GetRootfsRequest) returns (GetRootfsResponse);
+
+  // CreateRootfsSnapshot creates a point-in-time snapshot of the rootfs upper layer.
+  rpc CreateRootfsSnapshot(CreateRootfsSnapshotRequest) returns (CreateRootfsSnapshotResponse);
+
+  // RestoreRootfsSnapshot restores a sandbox's rootfs from a snapshot.
+  // The current upperdir is replaced with the snapshot content.
+  rpc RestoreRootfsSnapshot(RestoreRootfsSnapshotRequest) returns (RestoreRootfsSnapshotResponse);
+
+  // ForkRootfs creates a new sandbox rootfs by forking from an existing one.
+  // The new sandbox gets a COW copy of the upper layer.
+  rpc ForkRootfs(ForkRootfsRequest) returns (ForkRootfsResponse);
+
+  // ListRootfsSnapshots lists all snapshots for a sandbox's rootfs.
+  rpc ListRootfsSnapshots(ListRootfsSnapshotsRequest) returns (ListRootfsSnapshotsResponse);
+
+  // DeleteRootfsSnapshot deletes a specific rootfs snapshot.
+  rpc DeleteRootfsSnapshot(DeleteRootfsSnapshotRequest) returns (DeleteRootfsSnapshotResponse);
+
+  // SaveAsLayer saves the current rootfs state (upperdir) as a new base layer.
+  // This allows creating custom base images from a sandbox's modified filesystem.
+  rpc SaveAsLayer(SaveAsLayerRequest) returns (SaveAsLayerResponse);
+
+  // PrepareOverlay prepares the overlay mount point for a sandbox.
+  // Called by procd to set up the overlay before chroot.
+  rpc PrepareOverlay(PrepareOverlayRequest) returns (PrepareOverlayResponse);
+
+  // FlushRootfs flushes all cached data to persistent storage.
+  rpc FlushRootfs(FlushRootfsRequest) returns (FlushRootfsResponse);
+}
+
+// RootfsInfo contains information about a sandbox's rootfs
+message RootfsInfo {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string base_layer_id = 3;
+  string upper_volume_id = 4;
+  string upper_path = 5;      // Path to upperdir
+  string work_path = 6;       // Path to workdir
+  string mount_path = 7;      // Where overlay is mounted (if mounted)
+  bool mounted = 8;
+  int64 size_bytes = 9;
+  int32 snapshot_count = 10;
+  string current_snapshot_id = 11;
+  int64 created_at = 12;
+  int64 updated_at = 13;
+}
+
+// RootfsSnapshot represents a snapshot of a sandbox's rootfs
+message RootfsSnapshot {
+  string id = 1;
+  string sandbox_id = 2;
+  string team_id = 3;
+  string base_layer_id = 4;
+  string upper_volume_id = 5;
+  string name = 6;
+  string description = 7;
+  int64 size_bytes = 8;
+  int64 root_inode = 9;
+  int64 source_inode = 10;
+  map<string, string> metadata = 11;
+  int64 created_at = 12;
+  int64 expires_at = 13;
+}
+
+// CreateRootfsRequest
+message CreateRootfsRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string base_layer_id = 3;   // Required: reference to base layer
+
+  // Volume configuration for upperdir
+  string cache_size = 4;
+  int32 prefetch = 5;
+  string buffer_size = 6;
+  bool writeback = 7;
+
+  // Optional: restore from snapshot
+  string from_snapshot_id = 8;
+}
+
+// CreateRootfsResponse
+message CreateRootfsResponse {
+  RootfsInfo rootfs = 1;
+}
+
+// DeleteRootfsRequest
+message DeleteRootfsRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  bool delete_volume = 3;     // Also delete the upper volume
+  bool save_snapshot = 4;     // Create a final snapshot before deletion
+  string snapshot_name = 5;   // Name for final snapshot (if save_snapshot)
+}
+
+// DeleteRootfsResponse
+message DeleteRootfsResponse {
+  bool success = 1;
+  string final_snapshot_id = 2;  // ID of final snapshot if created
+}
+
+// GetRootfsRequest
+message GetRootfsRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+}
+
+// GetRootfsResponse
+message GetRootfsResponse {
+  RootfsInfo rootfs = 1;
+}
+
+// CreateRootfsSnapshotRequest
+message CreateRootfsSnapshotRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string name = 3;
+  string description = 4;
+  map<string, string> metadata = 5;
+  int32 retention_seconds = 6;  // Auto-expiry time
+}
+
+// CreateRootfsSnapshotResponse
+message CreateRootfsSnapshotResponse {
+  RootfsSnapshot snapshot = 1;
+}
+
+// RestoreRootfsSnapshotRequest
+message RestoreRootfsSnapshotRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string snapshot_id = 3;
+  bool create_backup = 4;     // Create a backup snapshot of current state
+  string backup_name = 5;     // Name for backup snapshot
+}
+
+// RestoreRootfsSnapshotResponse
+message RestoreRootfsSnapshotResponse {
+  bool success = 1;
+  string backup_snapshot_id = 2;  // ID of backup if created
+}
+
+// ForkRootfsRequest
+message ForkRootfsRequest {
+  string source_sandbox_id = 1;
+  string target_sandbox_id = 2;
+  string team_id = 3;
+
+  // Volume configuration for new sandbox's upperdir
+  string cache_size = 4;
+  int32 prefetch = 5;
+  string buffer_size = 6;
+  bool writeback = 7;
+}
+
+// ForkRootfsResponse
+message ForkRootfsResponse {
+  RootfsInfo rootfs = 1;  // The new sandbox's rootfs info
+}
+
+// ListRootfsSnapshotsRequest
+message ListRootfsSnapshotsRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+// ListRootfsSnapshotsResponse
+message ListRootfsSnapshotsResponse {
+  repeated RootfsSnapshot snapshots = 1;
+  int32 total = 2;
+}
+
+// DeleteRootfsSnapshotRequest
+message DeleteRootfsSnapshotRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string snapshot_id = 3;
+}
+
+// DeleteRootfsSnapshotResponse
+message DeleteRootfsSnapshotResponse {
+  bool success = 1;
+}
+
+// SaveAsLayerRequest
+message SaveAsLayerRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string layer_name = 3;     // Name/ID for the new layer
+  string description = 4;    // Optional description
+
+  // Optional: specify a snapshot to save instead of current state
+  string snapshot_id = 5;
+}
+
+// SaveAsLayerResponse
+message SaveAsLayerResponse {
+  BaseLayer layer = 1;       // The newly created base layer
+}
+
+// PrepareOverlayRequest - called by procd to prepare overlay mount
+message PrepareOverlayRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+  string mount_path = 3;     // Where to mount the overlay
+}
+
+// PrepareOverlayResponse
+message PrepareOverlayResponse {
+  string mount_path = 1;
+  string lower_path = 2;     // Path to base layer (lowerdir)
+  string upper_path = 3;     // Path to upperdir
+  string work_path = 4;      // Path to workdir
+  bool success = 5;
+  string error_message = 6;
+}
+
+// FlushRootfsRequest
+message FlushRootfsRequest {
+  string sandbox_id = 1;
+  string team_id = 2;
+}
+
+// FlushRootfsResponse
+message FlushRootfsResponse {
+  bool success = 1;
+  int64 flushed_bytes = 2;
+  string error_message = 3;
+}

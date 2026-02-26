@@ -198,7 +198,8 @@ proto: protoc
 	@mkdir -p storage-proxy/proto/fs
 	@PATH="$(LOCALBIN):$(PATH)" $(PROTOC) --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		storage-proxy/proto/filesystem.proto
+		storage-proxy/proto/filesystem.proto \
+		storage-proxy/proto/layer.proto
 	@mv storage-proxy/proto/*.pb.go storage-proxy/proto/fs/
 
 .PHONY: apispec oapi-codegen

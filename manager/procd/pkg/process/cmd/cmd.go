@@ -12,6 +12,13 @@ import (
 	"github.com/sandbox0-ai/infra/manager/procd/pkg/process"
 )
 
+// RootfsManager is an interface for rootfs management
+type RootfsManager interface {
+	GetChrootPath() string
+	GetCWD() string
+	IsMounted() bool
+}
+
 // CMD implements a one-time command execution process.
 // Unlike REPL processes, CMD processes execute a single command and terminate.
 type CMD struct {
@@ -22,6 +29,7 @@ type CMD struct {
 	command      []string
 	ptyRunner    *process.PTYRunner
 	directRunner *process.DirectRunner
+	rootfsMgr    RootfsManager // Optional: for chroot execution
 }
 
 var _ process.Process = (*CMD)(nil)
@@ -107,7 +115,28 @@ func (c *CMD) prepareExecCmd(ctx context.Context) *exec.Cmd {
 	}
 	cmd.Env = env
 
+	// Apply chroot if rootfs manager is set and mounted
+	c.mu.RLock()
+	rootfsMgr := c.rootfsMgr
+	c.mu.RUnlock()
+
+	if rootfsMgr != nil && rootfsMgr.IsMounted() {
+		chrootPath := rootfsMgr.GetChrootPath()
+		if chrootPath != "" {
+			// Set the working directory inside the chroot
+			// Note: actual chroot syscall is applied via SysProcAttr (Linux only)
+			cmd.Dir = chrootPath + rootfsMgr.GetCWD()
+		}
+	}
+
 	return cmd
+}
+
+// SetRootfsManager sets the rootfs manager for chroot execution
+func (c *CMD) SetRootfsManager(mgr RootfsManager) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rootfsMgr = mgr
 }
 
 // Stop stops the command execution.

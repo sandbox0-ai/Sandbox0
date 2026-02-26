@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/juicedata/juicefs/pkg/meta"
 	"github.com/sandbox0-ai/infra/infra-operator/api/config"
 	"github.com/sandbox0-ai/infra/pkg/dbpool"
 	"github.com/sandbox0-ai/infra/pkg/internalauth"
@@ -23,10 +24,14 @@ import (
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/auth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/coordinator"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
+	snapshotgc "github.com/sandbox0-ai/infra/storage-proxy/pkg/gc"
 	grpcserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/grpc"
 	httpserver "github.com/sandbox0-ai/infra/storage-proxy/pkg/http"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/juicefs"
+	_ "github.com/sandbox0-ai/infra/storage-proxy/pkg/layer" // Imported for LayerServer (requires proto regeneration)
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/notify"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/overlay"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/rootfs"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/volume"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/watcher"
@@ -230,6 +235,35 @@ func main() {
 	fsServer := grpcserver.NewFileSystemServer(volMgr, repo, eventHub, eventBroadcaster, logrusLogger)
 	pb.RegisterFileSystemServer(grpcServer, fsServer)
 
+	// Create layer extractor and manager
+	// TODO: After proto regeneration, uncomment the following code
+	// to enable LayerService for automatic baselayer management
+	/*
+		var layerMgr *layer.Manager
+		if cfg.MetaURL != "" && cfg.S3Bucket != "" {
+			s3Config := &layer.S3Config{
+				Endpoint:  cfg.S3Endpoint,
+				Region:    cfg.S3Region,
+				Bucket:    cfg.S3Bucket,
+				AccessKey: cfg.S3AccessKey,
+				SecretKey: cfg.S3SecretKey,
+				Token:     cfg.S3SessionToken,
+			}
+			layerExtractor, err := layer.NewExtractor(cfg.MetaURL, cfg.CacheDir, s3Config, logrusLogger)
+			if err != nil {
+				zapLogger.Fatal("Failed to create layer extractor", zap.Error(err))
+			}
+			layerMgr = layer.NewManager(repo, layerExtractor, logrusLogger)
+			zapLogger.Info("Layer manager initialized")
+
+			// Register LayerService
+			layerServer := grpcserver.NewLayerServer(layerMgr, repo, logrusLogger)
+			pb.RegisterLayerServiceServer(grpcServer, layerServer)
+		} else {
+			zapLogger.Warn("Layer service disabled: JuiceFS/S3 config incomplete")
+		}
+	*/
+
 	// Register health service
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
@@ -266,8 +300,56 @@ func main() {
 		snapshotMgr.SetFlushCoordinator(coord)
 	}
 
+	// Create shared meta client for rootfs operations
+	var sharedMetaClient meta.Meta
+	if cfg.MetaURL != "" {
+		metaConf := meta.DefaultConf()
+		metaConf.Retries = cfg.JuiceFSMetaRetries
+		if metaConf.Retries == 0 {
+			metaConf.Retries = 10
+		}
+		metaConf.ReadOnly = false
+		sharedMetaClient = meta.NewClient(cfg.MetaURL, metaConf)
+		if _, err := sharedMetaClient.Load(true); err != nil {
+			zapLogger.Fatal("Failed to load juicefs format for rootfs operations", zap.Error(err))
+		}
+		if err := sharedMetaClient.NewSession(false); err != nil {
+			zapLogger.Fatal("Failed to create meta session for rootfs operations", zap.Error(err))
+		}
+		zapLogger.Info("Shared meta client initialized for rootfs operations")
+	}
+
+	// Create overlay manager
+	var overlayMgr *overlay.Manager
+	if sharedMetaClient != nil && repo != nil {
+		overlayMgr = overlay.NewManager(repo, volMgr, sharedMetaClient, logrusLogger)
+		zapLogger.Info("Overlay manager initialized")
+	}
+
+	// Create rootfs snapshot service
+	var rootfsSnapshotSvc *rootfs.SnapshotService
+	if overlayMgr != nil && sharedMetaClient != nil {
+		rootfsSnapshotSvc = rootfs.NewSnapshotService(repo, overlayMgr, nil, sharedMetaClient, logrusLogger)
+		zapLogger.Info("Rootfs snapshot service initialized")
+	}
+
+	// Create and start snapshot garbage collector
+	var gcService *snapshotgc.SnapshotGC
+	if repo != nil && rootfsSnapshotSvc != nil && snapshotMgr != nil && sharedMetaClient != nil {
+		gcConfig := snapshotgc.DefaultConfig()
+		// TODO: Make GC config configurable via config file
+		gcService = snapshotgc.NewSnapshotGC(repo, rootfsSnapshotSvc, snapshotMgr, sharedMetaClient, gcConfig, logrusLogger)
+		if err := gcService.Start(context.Background()); err != nil {
+			zapLogger.Fatal("Failed to start snapshot GC", zap.Error(err))
+		}
+		defer gcService.Stop()
+		zapLogger.Info("Snapshot garbage collector started")
+	} else {
+		zapLogger.Warn("Snapshot GC disabled: required services not initialized")
+	}
+
 	// Create HTTP server
-	httpSrv := httpserver.NewServer(logrusLogger, repo, httpAuthenticator, snapshotMgr)
+	httpSrv := httpserver.NewServer(logrusLogger, repo, httpAuthenticator, snapshotMgr, overlayMgr, rootfsSnapshotSvc)
 	httpAddr := fmt.Sprintf("%s:%d", cfg.HTTPAddr, cfg.HTTPPort)
 
 	readTimeout, _ := time.ParseDuration(cfg.HTTPReadTimeout)

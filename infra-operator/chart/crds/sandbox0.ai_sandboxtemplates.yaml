@@ -96,6 +96,11 @@ spec:
                       type: object
                     type: array
                   image:
+                    description: |-
+                      Image is the container image reference.
+                      When spec.baseLayerId is specified, this field is ignored as the base layer
+                      provides the rootfs. When baseLayerId is not specified, this image is used
+                      for on-demand extraction (fallback mode).
                     type: string
                   imagePullPolicy:
                     type: string
@@ -115,6 +120,11 @@ spec:
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object
+                  rootfsCwd:
+                    description: |-
+                      RootfsCwd specifies the working directory relative to the rootfs overlay.
+                      Only used when rootfs is enabled. Overrides any WORKDIR from the image.
+                    type: string
                   securityContext:
                     description: SecurityContext defines security context for containers
                     properties:
@@ -136,7 +146,6 @@ spec:
                         type: integer
                     type: object
                 required:
-                - image
                 - resources
                 type: object
               network:
@@ -456,6 +465,44 @@ spec:
               public:
                 description: Access control
                 type: boolean
+              rootfs:
+                description: |-
+                  Rootfs configuration for overlay-based container rootfs
+                  When enabled, the sandbox uses a FUSE overlay filesystem with:
+                  - lowerdir: base layer (from BaseLayerID, extracted to JuiceFS)
+                  - upperdir: sandbox writable layer (each sandbox has its own)
+                  This enables rootfs-level snapshot/restore/fork capabilities.
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled enables rootfs overlay for this template
+                    type: boolean
+                  persistentRW:
+                    description: |-
+                      PersistentRW enables persistent writable layer across sandbox lifecycles.
+                      When true, the upperdir is preserved between sandbox restarts.
+                      When false (default), upperdir is created fresh for each sandbox instance.
+                    type: boolean
+                  snapshotPolicy:
+                    description: SnapshotPolicy configures automatic snapshot behavior
+                    properties:
+                      enabled:
+                        description: Enabled enables automatic snapshots
+                        type: boolean
+                      maxCount:
+                        description: MaxCount limits the number of automatic snapshots
+                          to retain
+                        type: integer
+                      retention:
+                        description: Retention defines how long to keep snapshots
+                          (e.g., "24h")
+                        type: string
+                    required:
+                    - enabled
+                    type: object
+                required:
+                - enabled
+                type: object
               runtimeClassName:
                 description: Environment configuration
                 type: string
@@ -1996,6 +2043,19 @@ spec:
               activeCount:
                 format: int32
                 type: integer
+              baseLayerError:
+                description: BaseLayerError contains the error message if baselayer
+                  extraction failed
+                type: string
+              baseLayerId:
+                description: |-
+                  Baselayer status (read-only, visible to users)
+                  BaseLayerID is the system-managed base layer ID (read-only)
+                type: string
+              baseLayerStatus:
+                description: 'BaseLayerStatus indicates the baselayer extraction status:
+                  pending, extracting, ready, failed'
+                type: string
               conditions:
                 description: Conditions
                 items:

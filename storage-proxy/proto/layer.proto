@@ -1,0 +1,163 @@
+// pkg/proto/layer.proto
+// Base Layer Management Service
+
+syntax = "proto3";
+
+package sandbox0.fs;
+
+option go_package = "github.com/sandbox0-ai/infra/storage-proxy/proto/fs";
+
+// LayerService manages base layers - shared, read-only image layers extracted to JuiceFS
+service LayerService {
+  // ExtractBaseLayer extracts a container image to JuiceFS as a base layer.
+  // This is an asynchronous operation - check status with GetBaseLayer.
+  rpc ExtractBaseLayer(ExtractBaseLayerRequest) returns (ExtractBaseLayerResponse);
+
+  // GetBaseLayer retrieves base layer information and extraction status.
+  rpc GetBaseLayer(GetBaseLayerRequest) returns (GetBaseLayerResponse);
+
+  // GetBaseLayerByImageRef retrieves base layer by team and image reference.
+  rpc GetBaseLayerByImageRef(GetBaseLayerByImageRefRequest) returns (GetBaseLayerByImageRefResponse);
+
+  // ListBaseLayers lists all base layers for a team.
+  rpc ListBaseLayers(ListBaseLayersRequest) returns (ListBaseLayersResponse);
+
+  // DeleteBaseLayer deletes a base layer. Only allowed when ref_count is 0.
+  rpc DeleteBaseLayer(DeleteBaseLayerRequest) returns (DeleteBaseLayerResponse);
+
+  // GarbageCollectLayers removes unused base layers based on age and reference count.
+  rpc GarbageCollectLayers(GarbageCollectLayersRequest) returns (GarbageCollectLayersResponse);
+
+  // IncrementRefCount increases the reference count for a base layer.
+  rpc IncrementRefCount(IncrementRefCountRequest) returns (IncrementRefCountResponse);
+
+  // DecrementRefCount decreases the reference count for a base layer.
+  rpc DecrementRefCount(DecrementRefCountRequest) returns (DecrementRefCountResponse);
+}
+
+// BaseLayer represents a shared image layer
+message BaseLayer {
+  string id = 1;
+  string team_id = 2;
+  string image_ref = 3;       // Original image reference
+  string image_digest = 4;    // Image digest after extraction
+  string layer_path = 5;      // JuiceFS path for the extracted layer
+  int64 size_bytes = 6;
+  string status = 7;          // pending, extracting, ready, failed
+  int64 extracted_at = 8;     // Unix timestamp
+  string last_error = 9;
+  int64 last_accessed_at = 10;
+  int32 ref_count = 11;
+  int64 created_at = 12;
+  int64 updated_at = 13;
+}
+
+// RegistryCredentials for private image registries
+message RegistryCredentials {
+  string username = 1;
+  string password = 2;
+  string server_address = 3;  // e.g., "ghcr.io"
+  string auth = 4;            // Base64 encoded auth
+  string identity_token = 5;  // Identity token for Bearer auth
+  string registry_token = 6;  // Registry token
+}
+
+// ExtractBaseLayerRequest
+message ExtractBaseLayerRequest {
+  string id = 1;              // Optional: client-specified ID
+  string team_id = 2;
+  string image_ref = 3;       // Image reference (e.g., "python:3.11", "ghcr.io/...")
+  RegistryCredentials credentials = 4;
+  string layer_name = 5;      // Optional: friendly name for the layer
+}
+
+// ExtractBaseLayerResponse
+message ExtractBaseLayerResponse {
+  BaseLayer layer = 1;
+}
+
+// GetBaseLayerRequest
+message GetBaseLayerRequest {
+  string id = 1;
+  string team_id = 2;
+}
+
+// GetBaseLayerResponse
+message GetBaseLayerResponse {
+  BaseLayer layer = 1;
+}
+
+// GetBaseLayerByImageRefRequest
+message GetBaseLayerByImageRefRequest {
+  string team_id = 1;
+  string image_ref = 2;
+}
+
+// GetBaseLayerByImageRefResponse
+message GetBaseLayerByImageRefResponse {
+  BaseLayer layer = 1;
+}
+
+// ListBaseLayersRequest
+message ListBaseLayersRequest {
+  string team_id = 1;
+  string status = 2;          // Filter by status (optional)
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+// ListBaseLayersResponse
+message ListBaseLayersResponse {
+  repeated BaseLayer layers = 1;
+  int32 total = 2;
+}
+
+// DeleteBaseLayerRequest
+message DeleteBaseLayerRequest {
+  string id = 1;
+  string team_id = 2;
+  bool force = 3;             // Force delete even with refs (dangerous)
+}
+
+// DeleteBaseLayerResponse
+message DeleteBaseLayerResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// GarbageCollectLayersRequest
+message GarbageCollectLayersRequest {
+  string team_id = 1;         // Empty for all teams
+  int32 min_age_seconds = 2;  // Minimum age for unused layers
+  int32 max_count = 3;        // Maximum number of layers to delete
+  bool dry_run = 4;           // Only report what would be deleted
+}
+
+// GarbageCollectLayersResponse
+message GarbageCollectLayersResponse {
+  repeated string deleted_ids = 1;
+  int64 freed_bytes = 2;
+  repeated string errors = 3;
+}
+
+// IncrementRefCountRequest
+message IncrementRefCountRequest {
+  string id = 1;
+  string team_id = 2;
+}
+
+// IncrementRefCountResponse
+message IncrementRefCountResponse {
+  int32 new_count = 1;
+}
+
+// DecrementRefCountRequest
+message DecrementRefCountRequest {
+  string id = 1;
+  string team_id = 2;
+}
+
+// DecrementRefCountResponse
+message DecrementRefCountResponse {
+  int32 new_count = 1;
+}

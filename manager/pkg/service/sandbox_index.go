@@ -57,19 +57,19 @@ func (s *SandboxIndex) ListSandboxIDs(namespace string) []string {
 	return ids
 }
 
-func (s *SandboxIndex) handleAdd(obj interface{}) {
+func (s *SandboxIndex) handleAdd(obj any) {
 	if pod := extractPod(obj); pod != nil {
 		s.upsertPod(pod)
 	}
 }
 
-func (s *SandboxIndex) handleUpdate(oldObj, newObj interface{}) {
+func (s *SandboxIndex) handleUpdate(oldObj, newObj any) {
 	oldPod := extractPod(oldObj)
 	newPod := extractPod(newObj)
 	s.refreshPodIndex(oldPod, newPod)
 }
 
-func (s *SandboxIndex) handleDelete(obj interface{}) {
+func (s *SandboxIndex) handleDelete(obj any) {
 	if pod := extractPod(obj); pod != nil {
 		s.deletePod(pod)
 	}
@@ -152,7 +152,7 @@ func sandboxIDFromPod(pod *corev1.Pod) string {
 	return pod.Name
 }
 
-func extractPod(obj interface{}) *corev1.Pod {
+func extractPod(obj any) *corev1.Pod {
 	switch pod := obj.(type) {
 	case *corev1.Pod:
 		return pod

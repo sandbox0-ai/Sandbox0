@@ -589,7 +589,7 @@ type registryProviderConfig struct {
 	RegistryID string
 }
 
-func resolveExternalRegistry(provider infrav1alpha1.RegistryProvider, cfg interface{}, targetSecretName string) *ResolvedRegistryConfig {
+func resolveExternalRegistry(provider infrav1alpha1.RegistryProvider, cfg any, targetSecretName string) *ResolvedRegistryConfig {
 	var resolved registryProviderConfig
 	switch typed := cfg.(type) {
 	case *infrav1alpha1.AWSRegistryConfig:

@@ -198,6 +198,26 @@ const (
 	SuccessResumeSandboxResponseSuccessTrue SuccessResumeSandboxResponseSuccess = true
 )
 
+// Defines values for SuccessRootfsInfoResponseSuccess.
+const (
+	SuccessRootfsInfoResponseSuccessTrue SuccessRootfsInfoResponseSuccess = true
+)
+
+// Defines values for SuccessRootfsRestoreResponseSuccess.
+const (
+	SuccessRootfsRestoreResponseSuccessTrue SuccessRootfsRestoreResponseSuccess = true
+)
+
+// Defines values for SuccessRootfsSnapshotListResponseSuccess.
+const (
+	SuccessRootfsSnapshotListResponseSuccessTrue SuccessRootfsSnapshotListResponseSuccess = true
+)
+
+// Defines values for SuccessRootfsSnapshotResponseSuccess.
+const (
+	SuccessRootfsSnapshotResponseSuccessTrue SuccessRootfsSnapshotResponseSuccess = true
+)
+
 // Defines values for SuccessSandboxListResponseSuccess.
 const (
 	SuccessSandboxListResponseSuccessTrue SuccessSandboxListResponseSuccess = true
@@ -490,6 +510,16 @@ type CreateREPLContextRequest struct {
 	ReplConfig *REPLConfig `json:"repl_config,omitempty"`
 }
 
+// CreateRootfsSnapshotRequest defines model for CreateRootfsSnapshotRequest.
+type CreateRootfsSnapshotRequest struct {
+	Description *string            `json:"description,omitempty"`
+	Metadata    *map[string]string `json:"metadata,omitempty"`
+	Name        *string            `json:"name,omitempty"`
+
+	// RetentionSeconds Auto-expiry time in seconds
+	RetentionSeconds *int `json:"retention_seconds,omitempty"`
+}
+
 // CreateSandboxVolumeRequest defines model for CreateSandboxVolumeRequest.
 type CreateSandboxVolumeRequest struct {
 	// AccessMode Access mode for sandbox volumes. Enforcement is scoped to storage-proxy instances. RWO allows read-write mounts on a single instance; ROX allows read-only mounts across instances; RWX allows read-write mounts across instances.
@@ -577,6 +607,12 @@ type FileInfo struct {
 
 // FileInfoType defines model for FileInfo.Type.
 type FileInfoType string
+
+// ForkRootfsRequest defines model for ForkRootfsRequest.
+type ForkRootfsRequest struct {
+	// NewSandboxId ID for the new sandbox
+	NewSandboxId string `json:"new_sandbox_id"`
+}
 
 // ForkVolumeRequest defines model for ForkVolumeRequest.
 type ForkVolumeRequest struct {
@@ -848,11 +884,60 @@ type ResourceUsage struct {
 	ThreadCount               *int     `json:"thread_count,omitempty"`
 }
 
+// RestoreRootfsSnapshotRequest defines model for RestoreRootfsSnapshotRequest.
+type RestoreRootfsSnapshotRequest struct {
+	// BackupName Name for backup snapshot
+	BackupName *string `json:"backup_name,omitempty"`
+
+	// CreateBackup Create a backup snapshot of current state
+	CreateBackup *bool `json:"create_backup,omitempty"`
+}
+
 // ResumeSandboxResponse defines model for ResumeSandboxResponse.
 type ResumeSandboxResponse struct {
 	RestoredMemory *string `json:"restored_memory,omitempty"`
 	Resumed        bool    `json:"resumed"`
 	SandboxId      string  `json:"sandbox_id"`
+}
+
+// RootfsInfo defines model for RootfsInfo.
+type RootfsInfo struct {
+	BaseLayerId       *string    `json:"base_layer_id,omitempty"`
+	CreatedAt         *time.Time `json:"created_at,omitempty"`
+	CurrentSnapshotId *string    `json:"current_snapshot_id,omitempty"`
+
+	// MountPath Where overlay is mounted (if mounted)
+	MountPath     *string    `json:"mount_path,omitempty"`
+	Mounted       *bool      `json:"mounted,omitempty"`
+	SandboxId     *string    `json:"sandbox_id,omitempty"`
+	SizeBytes     *int64     `json:"size_bytes,omitempty"`
+	SnapshotCount *int       `json:"snapshot_count,omitempty"`
+	TeamId        *string    `json:"team_id,omitempty"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+
+	// UpperPath Path to upperdir
+	UpperPath     *string `json:"upper_path,omitempty"`
+	UpperVolumeId *string `json:"upper_volume_id,omitempty"`
+
+	// WorkPath Path to workdir
+	WorkPath *string `json:"work_path,omitempty"`
+}
+
+// RootfsSnapshot defines model for RootfsSnapshot.
+type RootfsSnapshot struct {
+	BaseLayerId   *string            `json:"base_layer_id,omitempty"`
+	CreatedAt     *time.Time         `json:"created_at,omitempty"`
+	Description   *string            `json:"description,omitempty"`
+	ExpiresAt     *time.Time         `json:"expires_at,omitempty"`
+	Id            *string            `json:"id,omitempty"`
+	Metadata      *map[string]string `json:"metadata,omitempty"`
+	Name          *string            `json:"name,omitempty"`
+	RootInode     *int64             `json:"root_inode,omitempty"`
+	SandboxId     *string            `json:"sandbox_id,omitempty"`
+	SizeBytes     *int64             `json:"size_bytes,omitempty"`
+	SourceInode   *int64             `json:"source_inode,omitempty"`
+	TeamId        *string            `json:"team_id,omitempty"`
+	UpperVolumeId *string            `json:"upper_volume_id,omitempty"`
 }
 
 // Sandbox defines model for Sandbox.
@@ -1268,6 +1353,49 @@ type SuccessResumeSandboxResponse struct {
 // SuccessResumeSandboxResponseSuccess defines model for SuccessResumeSandboxResponse.Success.
 type SuccessResumeSandboxResponseSuccess bool
 
+// SuccessRootfsInfoResponse defines model for SuccessRootfsInfoResponse.
+type SuccessRootfsInfoResponse struct {
+	Data    *RootfsInfo                      `json:"data,omitempty"`
+	Success SuccessRootfsInfoResponseSuccess `json:"success"`
+}
+
+// SuccessRootfsInfoResponseSuccess defines model for SuccessRootfsInfoResponse.Success.
+type SuccessRootfsInfoResponseSuccess bool
+
+// SuccessRootfsRestoreResponse defines model for SuccessRootfsRestoreResponse.
+type SuccessRootfsRestoreResponse struct {
+	Data *struct {
+		// BackupSnapshotId ID of backup if created
+		BackupSnapshotId *string `json:"backup_snapshot_id,omitempty"`
+		Success          *bool   `json:"success,omitempty"`
+	} `json:"data,omitempty"`
+	Success SuccessRootfsRestoreResponseSuccess `json:"success"`
+}
+
+// SuccessRootfsRestoreResponseSuccess defines model for SuccessRootfsRestoreResponse.Success.
+type SuccessRootfsRestoreResponseSuccess bool
+
+// SuccessRootfsSnapshotListResponse defines model for SuccessRootfsSnapshotListResponse.
+type SuccessRootfsSnapshotListResponse struct {
+	Data *struct {
+		Items *[]RootfsSnapshot `json:"items,omitempty"`
+		Total *int              `json:"total,omitempty"`
+	} `json:"data,omitempty"`
+	Success SuccessRootfsSnapshotListResponseSuccess `json:"success"`
+}
+
+// SuccessRootfsSnapshotListResponseSuccess defines model for SuccessRootfsSnapshotListResponse.Success.
+type SuccessRootfsSnapshotListResponseSuccess bool
+
+// SuccessRootfsSnapshotResponse defines model for SuccessRootfsSnapshotResponse.
+type SuccessRootfsSnapshotResponse struct {
+	Data    *RootfsSnapshot                      `json:"data,omitempty"`
+	Success SuccessRootfsSnapshotResponseSuccess `json:"success"`
+}
+
+// SuccessRootfsSnapshotResponseSuccess defines model for SuccessRootfsSnapshotResponse.Success.
+type SuccessRootfsSnapshotResponseSuccess bool
+
 // SuccessSandboxListResponse defines model for SuccessSandboxListResponse.
 type SuccessSandboxListResponse struct {
 	Data *struct {
@@ -1603,6 +1731,9 @@ type QueryMkdir = bool
 // QueryRecursive defines model for QueryRecursive.
 type QueryRecursive = bool
 
+// RootfsSnapshotID defines model for RootfsSnapshotID.
+type RootfsSnapshotID = string
+
 // SandboxID defines model for SandboxID.
 type SandboxID = string
 
@@ -1715,6 +1846,15 @@ type PutApiV1SandboxesIdNetworkJSONRequestBody = TplSandboxNetworkPolicy
 
 // PostApiV1SandboxesIdRefreshJSONRequestBody defines body for PostApiV1SandboxesIdRefresh for application/json ContentType.
 type PostApiV1SandboxesIdRefreshJSONRequestBody = RefreshRequest
+
+// PostApiV1SandboxesIdRootfsForkJSONRequestBody defines body for PostApiV1SandboxesIdRootfsFork for application/json ContentType.
+type PostApiV1SandboxesIdRootfsForkJSONRequestBody = ForkRootfsRequest
+
+// PostApiV1SandboxesIdRootfsSnapshotsJSONRequestBody defines body for PostApiV1SandboxesIdRootfsSnapshots for application/json ContentType.
+type PostApiV1SandboxesIdRootfsSnapshotsJSONRequestBody = CreateRootfsSnapshotRequest
+
+// PostApiV1SandboxesIdRootfsSnapshotsSnapshotIdRestoreJSONRequestBody defines body for PostApiV1SandboxesIdRootfsSnapshotsSnapshotIdRestore for application/json ContentType.
+type PostApiV1SandboxesIdRootfsSnapshotsSnapshotIdRestoreJSONRequestBody = RestoreRootfsSnapshotRequest
 
 // PostApiV1SandboxesIdSandboxvolumesMountJSONRequestBody defines body for PostApiV1SandboxesIdSandboxvolumesMount for application/json ContentType.
 type PostApiV1SandboxesIdSandboxvolumesMountJSONRequestBody = MountRequest

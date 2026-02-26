@@ -62,14 +62,67 @@ type SandboxTemplateSpec struct {
 	// Environment configuration
 	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
 	ClusterId        *string `json:"clusterId,omitempty"`
+
+	// Rootfs configuration for overlay-based container rootfs
+	// When enabled, the sandbox uses a FUSE overlay filesystem with:
+	// - lowerdir: base layer (from BaseLayerID, extracted to JuiceFS)
+	// - upperdir: sandbox writable layer (each sandbox has its own)
+	// This enables rootfs-level snapshot/restore/fork capabilities.
+	Rootfs *RootfsConfig `json:"rootfs,omitempty"`
+
+	// BaseLayerID is managed by the system. Users should not set this field.
+	// The base layer contains the container image filesystem extracted to JuiceFS
+	// and is shared across sandboxes. This field is automatically populated based
+	// on spec.mainContainer.image when spec.rootfs.enabled is true.
+	// +kubebuilder:validation:Optional
+	BaseLayerID string `json:"-"`
+}
+
+// SystemTeamID is the team ID used for public template baselayers
+const SystemTeamID = "_system_"
+
+// RootfsConfig defines the rootfs overlay configuration
+type RootfsConfig struct {
+	// Enabled enables rootfs overlay for this template
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
+
+	// SnapshotPolicy configures automatic snapshot behavior
+	SnapshotPolicy *RootfsSnapshotPolicy `json:"snapshotPolicy,omitempty"`
+
+	// PersistentRW enables persistent writable layer across sandbox lifecycles.
+	// When true, the upperdir is preserved between sandbox restarts.
+	// When false (default), upperdir is created fresh for each sandbox instance.
+	PersistentRW bool `json:"persistentRW,omitempty"`
+}
+
+// RootfsSnapshotPolicy defines automatic snapshot behavior
+type RootfsSnapshotPolicy struct {
+	// Enabled enables automatic snapshots
+	Enabled bool `json:"enabled"`
+
+	// MaxCount limits the number of automatic snapshots to retain
+	MaxCount int `json:"maxCount,omitempty"`
+
+	// Retention defines how long to keep snapshots (e.g., "24h")
+	Retention string `json:"retention,omitempty"`
 }
 
 type ContainerSpec struct {
-	Image           string           `json:"image"`
+	// Image is the container image reference.
+	// When spec.baseLayerId is specified, this field is ignored as the base layer
+	// provides the rootfs. When baseLayerId is not specified, this image is used
+	// for on-demand extraction (fallback mode).
+	Image string `json:"image,omitempty"`
+
 	ImagePullPolicy string           `json:"imagePullPolicy,omitempty"`
 	Env             []EnvVar         `json:"env,omitempty"`
 	Resources       ResourceQuota    `json:"resources"`
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
+
+	// RootfsCwd specifies the working directory relative to the rootfs overlay.
+	// Only used when rootfs is enabled. Overrides any WORKDIR from the image.
+	RootfsCwd string `json:"rootfsCwd,omitempty"`
 }
 
 // EnvVar represents an environment variable
@@ -239,6 +292,14 @@ type SandboxTemplateStatus struct {
 	IdleCount   int32 `json:"idleCount"`
 	ActiveCount int32 `json:"activeCount"`
 
+	// Baselayer status (read-only, visible to users)
+	// BaseLayerID is the system-managed base layer ID (read-only)
+	BaseLayerID string `json:"baseLayerId,omitempty"`
+	// BaseLayerStatus indicates the baselayer extraction status: pending, extracting, ready, failed
+	BaseLayerStatus string `json:"baseLayerStatus,omitempty"`
+	// BaseLayerError contains the error message if baselayer extraction failed
+	BaseLayerError string `json:"baseLayerError,omitempty"`
+
 	// Conditions
 	Conditions []SandboxTemplateCondition `json:"conditions,omitempty"`
 
@@ -259,8 +320,20 @@ type SandboxTemplateCondition struct {
 type SandboxTemplateConditionType string
 
 const (
-	SandboxTemplateReady       SandboxTemplateConditionType = "Ready"
-	SandboxTemplatePoolHealthy SandboxTemplateConditionType = "PoolHealthy"
+	SandboxTemplateReady          SandboxTemplateConditionType = "Ready"
+	SandboxTemplatePoolHealthy    SandboxTemplateConditionType = "PoolHealthy"
+	SandboxTemplateBaseLayerReady SandboxTemplateConditionType = "BaseLayerReady"
+
+	// TemplateFinalizer is used to clean up baselayer references on deletion
+	TemplateFinalizer = "sandbox0.ai/baselayer-cleanup"
+)
+
+// BaseLayer status constants
+const (
+	BaseLayerStatusPending    = "pending"
+	BaseLayerStatusExtracting = "extracting"
+	BaseLayerStatusReady      = "ready"
+	BaseLayerStatusFailed     = "failed"
 )
 
 // ConditionStatus defines condition status

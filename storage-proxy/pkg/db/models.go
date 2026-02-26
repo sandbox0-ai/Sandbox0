@@ -94,3 +94,77 @@ type FlushResponse struct {
 	FlushedAt    *time.Time `json:"flushed_at,omitempty"`
 	ErrorMessage string     `json:"error_message,omitempty"`
 }
+
+// BaseLayer represents a shared, read-only image layer extracted to JuiceFS
+type BaseLayer struct {
+	ID          string  `json:"id"`
+	TeamID      string  `json:"team_id"`
+	ImageRef    string  `json:"image_ref"`              // Original image reference (e.g., "python:3.11")
+	ImageDigest *string `json:"image_digest,omitempty"` // Image digest after extraction
+	LayerPath   string  `json:"layer_path"`             // JuiceFS path for the extracted layer
+	SizeBytes   int64   `json:"size_bytes"`
+
+	// Extraction status
+	Status      string     `json:"status"` // pending, extracting, ready, failed
+	ExtractedAt *time.Time `json:"extracted_at,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+
+	// Access tracking
+	LastAccessedAt *time.Time `json:"last_accessed_at,omitempty"`
+	RefCount       int        `json:"ref_count"` // Number of sandboxes using this layer
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BaseLayer status constants
+const (
+	BaseLayerStatusPending    = "pending"
+	BaseLayerStatusExtracting = "extracting"
+	BaseLayerStatusReady      = "ready"
+	BaseLayerStatusFailed     = "failed"
+)
+
+// RootfsSnapshot represents a point-in-time snapshot of a sandbox's rootfs upper layer
+type RootfsSnapshot struct {
+	ID        string `json:"id"`
+	SandboxID string `json:"sandbox_id"`
+	TeamID    string `json:"team_id"`
+
+	// Layer references
+	BaseLayerID   string `json:"base_layer_id"`   // Base layer this snapshot is based on
+	UpperVolumeID string `json:"upper_volume_id"` // Volume ID containing the upperdir snapshot
+
+	// JuiceFS metadata
+	RootInode   int64 `json:"root_inode"`   // Snapshot root directory inode
+	SourceInode int64 `json:"source_inode"` // Source upperdir root inode at snapshot time
+
+	// Metadata
+	Name        string           `json:"name,omitempty"`
+	Description string           `json:"description,omitempty"`
+	SizeBytes   int64            `json:"size_bytes"`
+	Metadata    *json.RawMessage `json:"metadata,omitempty"`
+
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// SandboxRootfs represents the rootfs configuration for a sandbox
+type SandboxRootfs struct {
+	SandboxID string `json:"sandbox_id"`
+	TeamID    string `json:"team_id"`
+
+	// Layer configuration
+	BaseLayerID   string `json:"base_layer_id"`   // Base layer for lowerdir
+	UpperVolumeID string `json:"upper_volume_id"` // Volume for upperdir
+
+	// Overlay paths (relative to JuiceFS root)
+	UpperPath string `json:"upper_path"` // Path to upperdir
+	WorkPath  string `json:"work_path"`  // Path to overlay workdir
+
+	// Snapshot tracking
+	CurrentSnapshotID *string `json:"current_snapshot_id,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

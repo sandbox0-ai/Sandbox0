@@ -64,3 +64,57 @@ func JuiceFSSnapshotPath(volumeID, snapshotID string) (string, error) {
 	}
 	return fmt.Sprintf("/snapshots/%s/%s", volumeID, snapshotID), nil
 }
+
+// JuiceFSBaseLayerPath returns the internal JuiceFS path for a base layer.
+// Base layers are read-only and shared across sandboxes.
+// Example: /layers/<teamID>/<layerID>
+func JuiceFSBaseLayerPath(teamID, layerID string) (string, error) {
+	if err := validatePathID("teamID", teamID); err != nil {
+		return "", err
+	}
+	if err := validatePathID("layerID", layerID); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("/layers/%s/%s", teamID, layerID), nil
+}
+
+// JuiceFSRootfsPath returns the internal JuiceFS path for a sandbox's rootfs.
+// Example: /rootfs/<sandboxID>
+func JuiceFSRootfsPath(sandboxID string) (string, error) {
+	if err := validatePathID("sandboxID", sandboxID); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("/rootfs/%s", sandboxID), nil
+}
+
+// JuiceFSRootfsUpperPath returns the path for a sandbox's upperdir (writable layer).
+// Example: /rootfs/<sandboxID>/upper
+func JuiceFSRootfsUpperPath(sandboxID string) (string, error) {
+	base, err := JuiceFSRootfsPath(sandboxID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/upper", base), nil
+}
+
+// JuiceFSRootfsWorkPath returns the path for a sandbox's overlay workdir.
+// Example: /rootfs/<sandboxID>/work
+func JuiceFSRootfsWorkPath(sandboxID string) (string, error) {
+	base, err := JuiceFSRootfsPath(sandboxID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s/work", base), nil
+}
+
+// JuiceFSRootfsSnapshotPath returns the path for a rootfs snapshot.
+// Example: /rootfs-snapshots/<sandboxID>/<snapshotID>
+func JuiceFSRootfsSnapshotPath(sandboxID, snapshotID string) (string, error) {
+	if err := validatePathID("sandboxID", sandboxID); err != nil {
+		return "", err
+	}
+	if err := validatePathID("snapshotID", snapshotID); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("/rootfs-snapshots/%s/%s", sandboxID, snapshotID), nil
+}

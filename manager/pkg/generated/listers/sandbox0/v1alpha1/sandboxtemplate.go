@@ -37,7 +37,7 @@ func NewSandboxTemplateLister(indexer cache.Indexer) SandboxTemplateLister {
 
 // List lists all SandboxTemplates in the indexer.
 func (s *sandboxTemplateLister) List(selector labels.Selector) (ret []*v1alpha1.SandboxTemplate, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
+	err = cache.ListAll(s.indexer, selector, func(m any) {
 		ret = append(ret, m.(*v1alpha1.SandboxTemplate))
 	})
 	return ret, err
@@ -69,7 +69,7 @@ type sandboxTemplateNamespaceLister struct {
 
 // List lists all SandboxTemplates in the indexer for a given namespace.
 func (s sandboxTemplateNamespaceLister) List(selector labels.Selector) (ret []*v1alpha1.SandboxTemplate, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m any) {
 		ret = append(ret, m.(*v1alpha1.SandboxTemplate))
 	})
 	return ret, err

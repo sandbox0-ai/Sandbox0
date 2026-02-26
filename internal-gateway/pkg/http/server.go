@@ -352,6 +352,19 @@ func (s *Server) setupRoutes() {
 				files.GET("/stat", s.handleFileStat)
 				files.GET("/list", s.handleFileList)
 			}
+
+			// === Rootfs Management (→ Storage Proxy) ===
+			rootfs := sandboxes.Group("/:id/rootfs")
+			rootfs.Use(s.storageProxyUpstreamMiddleware())
+			{
+				rootfs.GET("", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.getRootfs)
+				rootfs.POST("/snapshots", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.createRootfsSnapshot)
+				rootfs.GET("/snapshots", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.listRootfsSnapshots)
+				rootfs.GET("/snapshots/:snapshot_id", s.authMiddleware.RequirePermission(auth.PermSandboxRead), s.getRootfsSnapshot)
+				rootfs.POST("/snapshots/:snapshot_id/restore", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.restoreRootfsSnapshot)
+				rootfs.DELETE("/snapshots/:snapshot_id", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.deleteRootfsSnapshot)
+				rootfs.POST("/fork", s.authMiddleware.RequirePermission(auth.PermSandboxWrite), s.forkRootfs)
+			}
 		}
 
 		// === Template Management (→ Manager) ===

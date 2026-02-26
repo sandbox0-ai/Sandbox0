@@ -8,6 +8,8 @@ import (
 	"github.com/sandbox0-ai/infra/pkg/gateway/spec"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/auth"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/db"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/overlay"
+	"github.com/sandbox0-ai/infra/storage-proxy/pkg/rootfs"
 	"github.com/sandbox0-ai/infra/storage-proxy/pkg/snapshot"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel/trace"
@@ -15,21 +17,32 @@ import (
 
 // Server provides HTTP management API for health checks and metrics
 type Server struct {
-	logger        *logrus.Logger
-	mux           *http.ServeMux
-	repo          *db.Repository
-	authenticator *auth.HTTPAuthenticator
-	snapshotMgr   *snapshot.Manager
+	logger            *logrus.Logger
+	mux               *http.ServeMux
+	repo              *db.Repository
+	authenticator     *auth.HTTPAuthenticator
+	snapshotMgr       *snapshot.Manager
+	overlayMgr        *overlay.Manager
+	rootfsSnapshotSvc *rootfs.SnapshotService
 }
 
 // NewServer creates a new HTTP server
-func NewServer(logger *logrus.Logger, repo *db.Repository, authenticator *auth.HTTPAuthenticator, snapshotMgr *snapshot.Manager) *Server {
+func NewServer(
+	logger *logrus.Logger,
+	repo *db.Repository,
+	authenticator *auth.HTTPAuthenticator,
+	snapshotMgr *snapshot.Manager,
+	overlayMgr *overlay.Manager,
+	rootfsSnapshotSvc *rootfs.SnapshotService,
+) *Server {
 	s := &Server{
-		logger:        logger,
-		mux:           http.NewServeMux(),
-		repo:          repo,
-		authenticator: authenticator,
-		snapshotMgr:   snapshotMgr,
+		logger:            logger,
+		mux:               http.NewServeMux(),
+		repo:              repo,
+		authenticator:     authenticator,
+		snapshotMgr:       snapshotMgr,
+		overlayMgr:        overlayMgr,
+		rootfsSnapshotSvc: rootfsSnapshotSvc,
 	}
 
 	// Register handlers
@@ -50,6 +63,15 @@ func NewServer(logger *logrus.Logger, repo *db.Repository, authenticator *auth.H
 	s.mux.HandleFunc("GET /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}", s.getSnapshot)
 	s.mux.HandleFunc("POST /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}/restore", s.restoreSnapshot)
 	s.mux.HandleFunc("DELETE /sandboxvolumes/{volume_id}/snapshots/{snapshot_id}", s.deleteSnapshot)
+
+	// Rootfs handlers
+	s.mux.HandleFunc("GET /sandboxes/{sandbox_id}/rootfs", s.getRootfs)
+	s.mux.HandleFunc("POST /sandboxes/{sandbox_id}/rootfs/snapshots", s.createRootfsSnapshot)
+	s.mux.HandleFunc("GET /sandboxes/{sandbox_id}/rootfs/snapshots", s.listRootfsSnapshots)
+	s.mux.HandleFunc("GET /sandboxes/{sandbox_id}/rootfs/snapshots/{snapshot_id}", s.getRootfsSnapshot)
+	s.mux.HandleFunc("POST /sandboxes/{sandbox_id}/rootfs/snapshots/{snapshot_id}/restore", s.restoreRootfsSnapshot)
+	s.mux.HandleFunc("DELETE /sandboxes/{sandbox_id}/rootfs/snapshots/{snapshot_id}", s.deleteRootfsSnapshot)
+	s.mux.HandleFunc("POST /sandboxes/{sandbox_id}/rootfs/fork", s.forkRootfs)
 
 	return s
 }

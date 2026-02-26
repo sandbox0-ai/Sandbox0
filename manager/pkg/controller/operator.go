@@ -48,8 +48,26 @@ type Operator struct {
 	templateInformer cache.SharedIndexInformer
 	templateLister   TemplateListerImpl
 
+	// LayerClient for baselayer management
+	layerClient LayerClient
+
 	statsMu   sync.Mutex
 	lastStats map[string]TemplateCounts
+}
+
+// LayerClient defines the interface for layer service operations
+type LayerClient interface {
+	EnsureBaseLayer(ctx context.Context, teamID, imageRef string) (*BaseLayerInfo, error)
+	IncrementRefCount(ctx context.Context, teamID, layerID string) (int32, error)
+	DecrementRefCount(ctx context.Context, teamID, layerID string) (int32, error)
+}
+
+// BaseLayerInfo contains base layer information
+type BaseLayerInfo struct {
+	ID       string
+	Status   string
+	Error    string
+	ImageRef string
 }
 
 // TemplateListerImpl implements TemplateLister
@@ -230,6 +248,13 @@ func (op *Operator) syncHandler(ctx context.Context, key string) error {
 	}
 
 	op.logger.Debug("Reconciling template", zap.String("name", name))
+
+	// Reconcile baselayer if rootfs is enabled
+	if template.Spec.Rootfs != nil && template.Spec.Rootfs.Enabled {
+		if err := op.reconcileBaseLayer(ctx, template); err != nil {
+			return fmt.Errorf("reconcile baselayer: %w", err)
+		}
+	}
 
 	// Reconcile the pool (ReplicaSet)
 	if err := op.poolManager.ReconcilePool(ctx, template); err != nil {
@@ -420,6 +445,10 @@ func (op *Operator) handleTemplateDelete(obj any) {
 	}
 
 	op.logger.Info("Template deleted", zap.String("name", template.ObjectMeta.Name))
+
+	// Cleanup baselayer reference when template is deleted
+	op.cleanupBaseLayerReference(context.Background(), template)
+
 	// Cleanup is handled by owner references
 }
 
@@ -492,6 +521,215 @@ func (op *Operator) GetAutoScaler() *AutoScaler {
 // SetTemplateStatsPublisher injects a stats publisher (optional).
 func (op *Operator) SetTemplateStatsPublisher(publisher TemplateStatsPublisher) {
 	op.statsPublisher = publisher
+}
+
+// SetLayerClient injects a layer client for baselayer management (optional).
+func (op *Operator) SetLayerClient(client LayerClient) {
+	op.layerClient = client
+}
+
+// reconcileBaseLayer ensures a baselayer exists for the template's image reference.
+// This method is called during template reconciliation when rootfs is enabled.
+func (op *Operator) reconcileBaseLayer(ctx context.Context, template *v1alpha1.SandboxTemplate) error {
+	if op.layerClient == nil {
+		op.logger.Warn("LayerClient not configured, skipping baselayer reconciliation",
+			zap.String("template", template.Name),
+		)
+		return nil
+	}
+
+	imageRef := template.Spec.MainContainer.Image
+	if imageRef == "" {
+		return fmt.Errorf("template %s has no main container image specified", template.Name)
+	}
+
+	teamID := op.getBaseLayerTeamID(template)
+
+	// Check if image reference has changed
+	storedImageRef := ""
+	if template.Annotations != nil {
+		storedImageRef = template.Annotations["sandbox0.ai/baselayer-image-ref"]
+	}
+
+	// If image changed and we had a previous baselayer, decrement its ref count
+	if template.Spec.BaseLayerID != "" && storedImageRef != "" && storedImageRef != imageRef {
+		op.logger.Info("Image reference changed, decrementing old baselayer ref count",
+			zap.String("template", template.Name),
+			zap.String("old_image_ref", storedImageRef),
+			zap.String("new_image_ref", imageRef),
+			zap.String("old_layer_id", template.Spec.BaseLayerID),
+		)
+		if _, err := op.layerClient.DecrementRefCount(ctx, teamID, template.Spec.BaseLayerID); err != nil {
+			op.logger.Warn("Failed to decrement old baselayer ref count",
+				zap.String("template", template.Name),
+				zap.String("layer_id", template.Spec.BaseLayerID),
+				zap.Error(err),
+			)
+			// Continue anyway - the new baselayer still needs to be set up
+		}
+		template.Spec.BaseLayerID = ""
+	}
+
+	// Ensure baselayer exists
+	layerInfo, err := op.layerClient.EnsureBaseLayer(ctx, teamID, imageRef)
+	if err != nil {
+		op.logger.Error("Failed to ensure baselayer",
+			zap.String("template", template.Name),
+			zap.String("image_ref", imageRef),
+			zap.Error(err),
+		)
+		return fmt.Errorf("ensure baselayer for image %s: %w", imageRef, err)
+	}
+
+	// Update template with baselayer info
+	needsUpdate := false
+
+	// First time associating this layer - increment ref count
+	if template.Spec.BaseLayerID != layerInfo.ID {
+		if _, err := op.layerClient.IncrementRefCount(ctx, teamID, layerInfo.ID); err != nil {
+			return fmt.Errorf("increment baselayer ref count: %w", err)
+		}
+		template.Spec.BaseLayerID = layerInfo.ID
+		needsUpdate = true
+		op.logger.Info("Associated template with baselayer",
+			zap.String("template", template.Name),
+			zap.String("layer_id", layerInfo.ID),
+			zap.String("image_ref", imageRef),
+		)
+	}
+
+	// Update annotation for image reference tracking
+	if template.Annotations == nil {
+		template.Annotations = make(map[string]string)
+	}
+	if template.Annotations["sandbox0.ai/baselayer-image-ref"] != imageRef {
+		template.Annotations["sandbox0.ai/baselayer-image-ref"] = imageRef
+		needsUpdate = true
+	}
+
+	// Update status with baselayer info
+	if template.Status.BaseLayerID != layerInfo.ID ||
+		template.Status.BaseLayerStatus != layerInfo.Status ||
+		template.Status.BaseLayerError != layerInfo.Error {
+		template.Status.BaseLayerID = layerInfo.ID
+		template.Status.BaseLayerStatus = layerInfo.Status
+		template.Status.BaseLayerError = layerInfo.Error
+		needsUpdate = true
+	}
+
+	// Update BaseLayerReady condition
+	op.updateBaseLayerCondition(template, layerInfo.Status == v1alpha1.BaseLayerStatusReady, layerInfo.Error)
+
+	if needsUpdate {
+		op.logger.Debug("Template baselayer updated",
+			zap.String("template", template.Name),
+			zap.String("layer_id", layerInfo.ID),
+			zap.String("status", layerInfo.Status),
+		)
+	}
+
+	return nil
+}
+
+// getBaseLayerTeamID determines which team owns the baselayer for a template.
+// Public templates and builtin templates use the system team ID.
+func (op *Operator) getBaseLayerTeamID(template *v1alpha1.SandboxTemplate) string {
+	// Builtin templates always use system team
+	if template.Labels != nil && template.Labels["sandbox0.ai/template-scope"] == "builtin" {
+		return v1alpha1.SystemTeamID
+	}
+
+	// Public templates use system team
+	if template.Spec.Public {
+		return v1alpha1.SystemTeamID
+	}
+
+	// Private templates use the team from annotation
+	if template.Annotations != nil {
+		if teamID := template.Annotations["sandbox0.ai/template-team-id"]; teamID != "" {
+			return teamID
+		}
+	}
+
+	// Default to system team for backward compatibility
+	return v1alpha1.SystemTeamID
+}
+
+// updateBaseLayerCondition updates the BaseLayerReady condition
+func (op *Operator) updateBaseLayerCondition(template *v1alpha1.SandboxTemplate, ready bool, errMsg string) {
+	var status v1alpha1.ConditionStatus
+	var reason, message string
+
+	if ready {
+		status = v1alpha1.ConditionTrue
+		reason = "BaseLayerReady"
+		message = "Base layer is ready for use"
+	} else {
+		status = v1alpha1.ConditionFalse
+		if errMsg != "" {
+			reason = "BaseLayerFailed"
+			message = errMsg
+		} else {
+			reason = "BaseLayerExtracting"
+			message = "Base layer is being extracted"
+		}
+	}
+
+	// Check if condition already exists with same status
+	for i, c := range template.Status.Conditions {
+		if c.Type == v1alpha1.SandboxTemplateBaseLayerReady {
+			if c.Status == status && c.Reason == reason && c.Message == message {
+				return // No update needed
+			}
+			template.Status.Conditions[i] = v1alpha1.SandboxTemplateCondition{
+				Type:               v1alpha1.SandboxTemplateBaseLayerReady,
+				Status:             status,
+				LastTransitionTime: metav1.Now(),
+				Reason:             reason,
+				Message:            message,
+			}
+			return
+		}
+	}
+
+	// Add new condition
+	template.Status.Conditions = append(template.Status.Conditions, v1alpha1.SandboxTemplateCondition{
+		Type:               v1alpha1.SandboxTemplateBaseLayerReady,
+		Status:             status,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	})
+}
+
+// cleanupBaseLayerReference decrements the reference count for a template's baselayer.
+// This should be called when a template is being deleted.
+func (op *Operator) cleanupBaseLayerReference(ctx context.Context, template *v1alpha1.SandboxTemplate) {
+	if op.layerClient == nil {
+		return
+	}
+
+	if template.Spec.Rootfs == nil || !template.Spec.Rootfs.Enabled {
+		return
+	}
+
+	if template.Spec.BaseLayerID == "" {
+		return
+	}
+
+	teamID := op.getBaseLayerTeamID(template)
+	if _, err := op.layerClient.DecrementRefCount(ctx, teamID, template.Spec.BaseLayerID); err != nil {
+		op.logger.Warn("Failed to decrement baselayer ref count on template deletion",
+			zap.String("template", template.Name),
+			zap.String("layer_id", template.Spec.BaseLayerID),
+			zap.Error(err),
+		)
+	} else {
+		op.logger.Info("Decremented baselayer ref count on template deletion",
+			zap.String("template", template.Name),
+			zap.String("layer_id", template.Spec.BaseLayerID),
+		)
+	}
 }
 
 // toAutoScaleConfig converts config.AutoscalerConfig to AutoScaleConfig.

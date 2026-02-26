@@ -19,6 +19,7 @@ tags:
   - name: registry
   - name: sandbox-volumes
   - name: snapshots
+  - name: rootfs
 paths:
   /healthz:
     get:
@@ -1964,6 +1965,165 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessRestoreResponse"
+  # ========================================
+  # Rootfs API (per sandbox)
+  # ========================================
+  /api/v1/sandboxes/{id}/rootfs:
+    get:
+      tags: [rootfs]
+      summary: Get rootfs info for a sandbox
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+      responses:
+        "200":
+          description: Rootfs info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessRootfsInfoResponse"
+        "404":
+          description: Rootfs not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/sandboxes/{id}/rootfs/snapshots:
+    post:
+      tags: [rootfs]
+      summary: Create rootfs snapshot
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs/snapshots
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRootfsSnapshotRequest"
+      responses:
+        "201":
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessRootfsSnapshotResponse"
+    get:
+      tags: [rootfs]
+      summary: List rootfs snapshots
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs/snapshots
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+      responses:
+        "200":
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessRootfsSnapshotListResponse"
+  /api/v1/sandboxes/{id}/rootfs/snapshots/{snapshot_id}:
+    get:
+      tags: [rootfs]
+      summary: Get rootfs snapshot
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs/snapshots/{snapshot_id}
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+        - $ref: "#/components/parameters/RootfsSnapshotID"
+      responses:
+        "200":
+          description: Snapshot info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessRootfsSnapshotResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [rootfs]
+      summary: Delete rootfs snapshot
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs/snapshots/{snapshot_id}
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+        - $ref: "#/components/parameters/RootfsSnapshotID"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessDeletedResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/sandboxes/{id}/rootfs/snapshots/{snapshot_id}/restore:
+    post:
+      tags: [rootfs]
+      summary: Restore rootfs from snapshot
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs/snapshots/{snapshot_id}/restore
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+        - $ref: "#/components/parameters/RootfsSnapshotID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestoreRootfsSnapshotRequest"
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessRootfsRestoreResponse"
+  /api/v1/sandboxes/{id}/rootfs/fork:
+    post:
+      tags: [rootfs]
+      summary: Fork sandbox from rootfs
+      description: Creates a new sandbox with a COW copy of the current rootfs
+      security:
+        - bearerAuth: []
+      x-upstream-service: storage-proxy
+      x-upstream-path: /sandboxes/{id}/rootfs/fork
+      parameters:
+        - $ref: "#/components/parameters/SandboxID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForkRootfsRequest"
+      responses:
+        "201":
+          description: Forked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessRootfsInfoResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -2023,6 +2183,13 @@ components:
       name: snapshot_id
       in: path
       required: true
+      schema:
+        type: string
+    RootfsSnapshotID:
+      name: snapshot_id
+      in: path
+      required: true
+      description: Rootfs snapshot ID
       schema:
         type: string
     OIDCProvider:
@@ -3990,6 +4157,16 @@ components:
         activeCount:
           type: integer
           format: int32
+        baseLayerId:
+          type: string
+          description: System-managed base layer ID (read-only)
+        baseLayerStatus:
+          type: string
+          enum: [pending, extracting, ready, failed]
+          description: Base layer extraction status
+        baseLayerError:
+          type: string
+          description: Error message if base layer extraction failed
         conditions:
           type: array
           items:
@@ -4018,3 +4195,149 @@ components:
           properties:
             data:
               $ref: "#/components/schemas/TplSandboxNetworkPolicy"
+    # ========================================
+    # Rootfs Schemas
+    # ========================================
+    RootfsInfo:
+      type: object
+      properties:
+        sandbox_id:
+          type: string
+        team_id:
+          type: string
+        base_layer_id:
+          type: string
+        upper_volume_id:
+          type: string
+        upper_path:
+          type: string
+          description: Path to upperdir
+        work_path:
+          type: string
+          description: Path to workdir
+        mount_path:
+          type: string
+          description: Where overlay is mounted (if mounted)
+        mounted:
+          type: boolean
+        size_bytes:
+          type: integer
+          format: int64
+        snapshot_count:
+          type: integer
+        current_snapshot_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    RootfsSnapshot:
+      type: object
+      properties:
+        id:
+          type: string
+        sandbox_id:
+          type: string
+        team_id:
+          type: string
+        base_layer_id:
+          type: string
+        upper_volume_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+        root_inode:
+          type: integer
+          format: int64
+        source_inode:
+          type: integer
+          format: int64
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    CreateRootfsSnapshotRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        retention_seconds:
+          type: integer
+          description: Auto-expiry time in seconds
+    RestoreRootfsSnapshotRequest:
+      type: object
+      properties:
+        create_backup:
+          type: boolean
+          description: Create a backup snapshot of current state
+        backup_name:
+          type: string
+          description: Name for backup snapshot
+    ForkRootfsRequest:
+      type: object
+      required:
+        - new_sandbox_id
+      properties:
+        new_sandbox_id:
+          type: string
+          description: ID for the new sandbox
+    SuccessRootfsInfoResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RootfsInfo"
+    SuccessRootfsSnapshotResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RootfsSnapshot"
+    SuccessRootfsSnapshotListResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/RootfsSnapshot"
+                total:
+                  type: integer
+    SuccessRootfsRestoreResponse:
+      allOf:
+        - $ref: "#/components/schemas/SuccessEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                backup_snapshot_id:
+                  type: string
+                  description: ID of backup if created

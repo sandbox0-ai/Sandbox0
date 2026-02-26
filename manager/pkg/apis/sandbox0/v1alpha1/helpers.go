@@ -12,9 +12,10 @@ import (
 const (
 	procdBinVolumeName = "procd-bin"
 	procdConfigVolume  = "procd-config"
+	rootfsMountName    = "rootfs-mount"
 )
 
-// buildPodSpec builds a pod spec from a template
+// BuildPodSpec builds a pod spec from a template
 func BuildPodSpec(template *SandboxTemplate, restart bool) corev1.PodSpec {
 	spec := corev1.PodSpec{
 		RestartPolicy: corev1.RestartPolicyNever,
@@ -27,6 +28,11 @@ func BuildPodSpec(template *SandboxTemplate, restart bool) corev1.PodSpec {
 	applyProcdSecretVolume(&spec, template)
 	applyProcdInit(&spec)
 	applyFuseResource(&spec)
+
+	// Apply rootfs init if rootfs is enabled
+	if template.Spec.Rootfs != nil && template.Spec.Rootfs.Enabled && template.Spec.BaseLayerID != "" {
+		applyRootfsInit(&spec, template)
+	}
 
 	// Apply runtime class if specified
 	if template.Spec.RuntimeClassName != nil {
@@ -328,5 +334,118 @@ func BuildEgressSpec(policy *TplSandboxNetworkPolicy) *NetworkEgressPolicy {
 		DeniedDomains:  policy.Egress.DeniedDomains,
 		AllowedPorts:   policy.Egress.AllowedPorts,
 		DeniedPorts:    policy.Egress.DeniedPorts,
+	}
+}
+
+// applyRootfsInit adds an init container for rootfs overlay preparation
+func applyRootfsInit(spec *corev1.PodSpec, template *SandboxTemplate) {
+	cfg := config.LoadManagerConfig()
+	managerImage := cfg.ManagerImage
+
+	// Create volume for rootfs mount point
+	rootfsMountFound := false
+	for i := range spec.Volumes {
+		if spec.Volumes[i].Name == rootfsMountName {
+			rootfsMountFound = true
+			break
+		}
+	}
+	if !rootfsMountFound {
+		spec.Volumes = append(spec.Volumes, corev1.Volume{
+			Name: rootfsMountName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+	}
+
+	// Add rootfs-init init container
+	rootfsInitContainer := corev1.Container{
+		Name:            "rootfs-init",
+		Image:           managerImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command: []string{
+			"/usr/local/bin/rootfs-init",
+		},
+		Env: []corev1.EnvVar{
+			{
+				Name:  "BASE_LAYER_ID",
+				Value: template.Spec.BaseLayerID,
+			},
+			{
+				Name:  "ROOTFS_ENABLED",
+				Value: "true",
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      rootfsMountName,
+				MountPath: "/mnt/rootfs",
+			},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add: []corev1.Capability{"SYS_ADMIN"},
+			},
+		},
+	}
+
+	// Check if rootfs-init already exists
+	for i := range spec.InitContainers {
+		if spec.InitContainers[i].Name == "rootfs-init" {
+			spec.InitContainers[i] = rootfsInitContainer
+			return
+		}
+	}
+
+	spec.InitContainers = append(spec.InitContainers, rootfsInitContainer)
+
+	// Add rootfs mount to procd container
+	for i := range spec.Containers {
+		if spec.Containers[i].Name != "procd" {
+			continue
+		}
+
+		mountFound := false
+		for j := range spec.Containers[i].VolumeMounts {
+			if spec.Containers[i].VolumeMounts[j].Name == rootfsMountName {
+				mountFound = true
+				break
+			}
+		}
+
+		if !mountFound {
+			spec.Containers[i].VolumeMounts = append(spec.Containers[i].VolumeMounts, corev1.VolumeMount{
+				Name:      rootfsMountName,
+				MountPath: "/mnt/rootfs",
+			})
+		}
+
+		// Add rootfs environment variables
+		spec.Containers[i].Env = append(spec.Containers[i].Env,
+			corev1.EnvVar{
+				Name:  "ROOTFS_ENABLED",
+				Value: "true",
+			},
+			corev1.EnvVar{
+				Name:  "ROOTFS_BASE_LAYER_ID",
+				Value: template.Spec.BaseLayerID,
+			},
+			corev1.EnvVar{
+				Name:  "ROOTFS_MOUNT_PATH",
+				Value: "/mnt/rootfs",
+			},
+		)
+
+		if template.Spec.MainContainer.RootfsCwd != "" {
+			spec.Containers[i].Env = append(spec.Containers[i].Env,
+				corev1.EnvVar{
+					Name:  "ROOTFS_CWD",
+					Value: template.Spec.MainContainer.RootfsCwd,
+				},
+			)
+		}
+
+		break
 	}
 }

@@ -286,6 +286,17 @@ func (s *SandboxService) ClaimSandbox(ctx context.Context, req *ClaimRequest) (*
 
 	_ = resolvedName // reserved for audit/debugging (name used is template.ObjectMeta.Name)
 
+	// Validate baselayer status for templates with rootfs enabled
+	if template.Spec.Rootfs != nil && template.Spec.Rootfs.Enabled {
+		if template.Status.BaseLayerStatus != v1alpha1.BaseLayerStatusReady {
+			return nil, fmt.Errorf("template %s baselayer not ready (status: %s, error: %s)",
+				req.Template, template.Status.BaseLayerStatus, template.Status.BaseLayerError)
+		}
+		if template.Spec.BaseLayerID == "" {
+			return nil, fmt.Errorf("template %s has no baselayer assigned", req.Template)
+		}
+	}
+
 	// Try to claim an idle pod first
 	pod, err := s.claimIdlePod(ctx, template, req)
 	if err != nil {
