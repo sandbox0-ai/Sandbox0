@@ -17,36 +17,8 @@ The simplest deployment with basic sandbox functionality.
 - Development environments
 - Basic sandbox execution without persistence
 
-```yaml
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: minimal
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    type: builtin
-    builtin:
-      enabled: true
-      persistence:
-        enabled: true
-        size: "20Gi"
-  publicExposure:
-    enabled: true
-    rootDomain: sandbox0.app
-    regionId: aws-us-east-1
-  services:
-    internalGateway:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        authMode: public
-    manager:
-      enabled: true
-```
+Reference manifest:
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/single-cluster/minimal.yaml" newTab>single-cluster/minimal.yaml</DocLink>
 
 ### Volumes Mode
 
@@ -61,46 +33,8 @@ Adds persistent volume support via storage-proxy.
 - File system operations
 - Volume snapshots and restoration
 
-```yaml
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: volumes
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    type: builtin
-    builtin:
-      enabled: true
-      persistence:
-        size: "20Gi"
-  storage:
-    # Use builtin for development; switch to s3/oss for production
-    type: builtin
-    builtin:
-      enabled: true
-      persistence:
-        size: "20Gi"
-  publicExposure:
-    enabled: true
-    rootDomain: sandbox0.app
-    regionId: aws-us-east-1
-  services:
-    internalGateway:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        authMode: public
-    manager:
-      enabled: true
-    storageProxy:
-      enabled: true
-      config:
-        juicefsEncryptionEnabled: false
-```
+Reference manifest:
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/single-cluster/volumes.yaml" newTab>single-cluster/volumes.yaml</DocLink>
 
 ### Network Policy Mode
 
@@ -115,35 +49,8 @@ Adds network isolation and egress control via netd.
 - Egress traffic control
 - Network isolation between sandboxes
 
-```yaml
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: network-policy
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    type: builtin
-    builtin:
-      enabled: true
-  publicExposure:
-    enabled: true
-    rootDomain: sandbox0.app
-    regionId: aws-us-east-1
-  services:
-    internalGateway:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        authMode: public
-    manager:
-      enabled: true
-    netd:
-      enabled: true
-```
+Reference manifest:
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/single-cluster/network-policy.yaml" newTab>single-cluster/network-policy.yaml</DocLink>
 
 ### Full Mode
 
@@ -158,51 +65,8 @@ All data plane services with full feature support.
 - Full feature set
 - High availability requirements
 
-```yaml
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: fullmode
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    type: builtin
-    builtin:
-      enabled: true
-      persistence:
-        size: "20Gi"
-  storage:
-    type: builtin
-    builtin:
-      enabled: true
-      persistence:
-        size: "20Gi"
-  registry:
-    provider: builtin
-    builtin:
-      enabled: true
-  publicExposure:
-    enabled: true
-    rootDomain: sandbox0.app
-    regionId: aws-us-east-1
-  services:
-    internalGateway:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        authMode: public
-    manager:
-      enabled: true
-    storageProxy:
-      enabled: true
-      config:
-        juicefsEncryptionEnabled: false
-    netd:
-      enabled: true
-```
+Reference manifest:
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/single-cluster/fullmode.yaml" newTab>single-cluster/fullmode.yaml</DocLink>
 
 ## Multi-Cluster Scenarios
 
@@ -218,40 +82,8 @@ Deploy the control plane to manage multiple data plane clusters.
 - External PostgreSQL (shared with data planes)
 - Ingress for external access
 
-```yaml
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: s0cp
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    # Control plane and data planes must share the same PostgreSQL
-    type: external
-    external:
-      host: your-db.rds.amazonaws.com
-      port: 5432
-      database: sandbox0
-      username: sandbox0
-      passwordSecret:
-        name: db-credentials
-        key: password
-  publicExposure:
-    enabled: true
-    rootDomain: sandbox0.app
-    regionId: aws-us-east-1
-  services:
-    edgeGateway:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        schedulerEnabled: true
-    scheduler:
-      enabled: true
-```
+Reference manifest:
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/multi-cluster/control-plane.yaml" newTab>multi-cluster/control-plane.yaml</DocLink>
 
 ### Data Plane
 
@@ -264,57 +96,8 @@ Deploy data planes in different clusters/regions.
 - Connection to control plane
 - Unique cluster ID
 
-```yaml
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: s0dp
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    # Must match control plane database
-    type: external
-    external:
-      host: your-db.rds.amazonaws.com
-      port: 5432
-      database: sandbox0
-      username: sandbox0
-      passwordSecret:
-        name: db-credentials
-        key: password
-  storage:
-    # Each data plane has its own S3 bucket
-    type: s3
-    s3:
-      bucket: sandbox0-prod-cluster1
-      region: us-east-1
-      endpoint: https://s3.amazonaws.com
-      credentialsSecret:
-        name: aws-credentials
-  controlPlane:
-    url: https://api.sandbox0.ai
-    internalAuthPublicKeySecret:
-      name: control-plane-public-key
-      key: public.key
-  cluster:
-    id: cluster-001
-    name: Production US East 1
-  services:
-    internalGateway:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        authMode: internal
-    manager:
-      enabled: true
-    storageProxy:
-      enabled: true
-    netd:
-      enabled: true
-```
+Reference manifest:
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/multi-cluster/data-plane.yaml" newTab>multi-cluster/data-plane.yaml</DocLink>
 
 ## Choosing a Scenario
 

@@ -179,13 +179,26 @@ func (p *builtinProvider) GetPushCredentials(ctx context.Context, teamID string)
 	if strings.TrimSpace(p.registry) == "" {
 		return nil, fmt.Errorf("builtin push registry is required")
 	}
-	username, err := p.secrets.read(ctx, p.cfg.AuthSecretName, p.cfg.UsernameKey)
-	if err != nil {
-		return nil, fmt.Errorf("read username: %w", err)
-	}
-	password, err := p.secrets.read(ctx, p.cfg.AuthSecretName, p.cfg.PasswordKey)
-	if err != nil {
-		return nil, fmt.Errorf("read password: %w", err)
+	username := strings.TrimSpace(p.cfg.Username)
+	password := strings.TrimSpace(p.cfg.Password)
+	if username == "" || password == "" {
+		usernameKey := strings.TrimSpace(p.cfg.UsernameKey)
+		if usernameKey == "" {
+			usernameKey = "username"
+		}
+		passwordKey := strings.TrimSpace(p.cfg.PasswordKey)
+		if passwordKey == "" {
+			passwordKey = "password"
+		}
+		var err error
+		username, err = p.secrets.read(ctx, p.cfg.AuthSecretName, usernameKey)
+		if err != nil {
+			return nil, fmt.Errorf("read username: %w", err)
+		}
+		password, err = p.secrets.read(ctx, p.cfg.AuthSecretName, passwordKey)
+		if err != nil {
+			return nil, fmt.Errorf("read password: %w", err)
+		}
 	}
 	return &Credential{
 		Provider:     "builtin",

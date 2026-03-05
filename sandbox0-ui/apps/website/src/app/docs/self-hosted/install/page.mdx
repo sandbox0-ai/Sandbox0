@@ -8,7 +8,7 @@ Before installing, ensure you have:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Kubernetes | 1.23+ | Tested on 1.28+ |
+| Kubernetes | 1.35+ | Required for in-place CPU/memory request/limit updates |
 | Helm | 3.8+ | For chart installation |
 | kubectl | 1.23+ | For cluster interaction |
 | StorageClass | - | Default storage class for PVCs |
@@ -16,11 +16,52 @@ Before installing, ensure you have:
 ### Kubernetes Requirements
 
 <Callout variant="info">
+Sandbox0 requires Kubernetes `1.35+` to support in-place Pod resource updates (`requests`/`limits`) without pod recreation.
+</Callout>
+
+<Callout variant="warning">
+`netd` and `storage-proxy` can run only on Linux nodes. For local deployment on macOS/Windows, start with `minimal` mode.
+</Callout>
+
+<Callout variant="info">
 For production deployments, you'll also need:
 - **PostgreSQL**: External managed database (RDS, Cloud SQL, etc.)
 - **Object Storage**: S3-compatible storage or Aliyun OSS
 - **Container Registry**: ECR, GCR, ACR, or built-in registry
 </Callout>
+
+### Quick Local Cluster with kind (Recommended)
+
+For the simplest local setup, use kind with the same config used by e2e tests:
+
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra/tests/e2e/kind-config.yaml" newTab>infra/tests/e2e/kind-config.yaml</DocLink>
+
+```yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: sandbox0-e2e
+nodes:
+    - role: control-plane
+      image: kindest/node:v1.35.0
+      kubeadmConfigPatches:
+        - |
+            kind: ClusterConfiguration
+            apiServer:
+                extraArgs:
+                    enable-aggregator-routing: "true"
+      extraPortMappings:
+        # edge-gateway / internal-gateway HTTP port
+        - containerPort: 30080
+          hostPort: 30080
+        # registry port for template image push
+        - containerPort: 30500
+          hostPort: 30500
+```
+
+```bash
+# Save the YAML above as kind-config.yaml, then create the cluster
+kind create cluster --name sandbox0-e2e --config kind-config.yaml
+```
 
 ### Verify Prerequisites
 
@@ -75,60 +116,14 @@ infra-operator-xxx-xxx      1/1     Running   0          30s
 
 ### Quick Start: Minimal Mode
 
-Create a file named `sandbox0infra-minimal.yaml`:
+Use the official sample manifest (source of truth):
 
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: sandbox0-system
----
-apiVersion: infra.sandbox0.ai/v1alpha1
-kind: Sandbox0Infra
-metadata:
-  name: minimal
-  namespace: sandbox0-system
-spec:
-  version: "latest"
-  database:
-    type: builtin
-    builtin:
-      enabled: true
-      persistence:
-        enabled: true
-        size: "20Gi"
-  publicExposure:
-    enabled: true
-    rootDomain: sandbox0.app
-    regionId: aws-us-east-1
-  builtinTemplates:
-    - templateId: default
-      image: sandbox0ai/otemplates:default-v0.1.0
-      displayName: Default
-      description: Builtin template installed by infra-operator.
-      pool:
-        minIdle: 1
-        maxIdle: 5
-  services:
-    internalGateway:
-      enabled: true
-      replicas: 1
-      service:
-        type: NodePort
-        port: 30080
-      config:
-        authMode: public
-    manager:
-      enabled: true
-      replicas: 1
-  initUser:
-    email: "admin@example.com"
-```
+- <DocLink href="https://github.com/sandbox0-ai/sandbox0/blob/main/infra-operator/chart/samples/single-cluster/minimal.yaml" newTab>single-cluster/minimal.yaml</DocLink>
 
 Apply the configuration:
 
 ```bash
-kubectl apply -f sandbox0infra-minimal.yaml
+kubectl apply -f https://raw.githubusercontent.com/sandbox0-ai/sandbox0/main/infra-operator/chart/samples/single-cluster/minimal.yaml
 ```
 
 ### Monitor Installation Progress

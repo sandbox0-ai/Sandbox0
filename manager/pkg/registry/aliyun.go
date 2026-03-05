@@ -26,24 +26,29 @@ func (p *aliyunProvider) GetPushCredentials(ctx context.Context, teamID string) 
 	if p.cfg.InstanceID == "" {
 		return nil, fmt.Errorf("aliyun instanceId is required")
 	}
-	if strings.TrimSpace(p.cfg.CredentialsSecret) == "" {
-		return nil, fmt.Errorf("aliyun credentials secret is required")
-	}
-	accessKeyKey := strings.TrimSpace(p.cfg.AccessKeyKey)
-	if accessKeyKey == "" {
-		accessKeyKey = "accessKeyId"
-	}
-	secretKeyKey := strings.TrimSpace(p.cfg.SecretKeyKey)
-	if secretKeyKey == "" {
-		secretKeyKey = "accessKeySecret"
-	}
-	accessKey, err := p.secrets.read(ctx, p.cfg.CredentialsSecret, accessKeyKey)
-	if err != nil {
-		return nil, fmt.Errorf("read aliyun access key: %w", err)
-	}
-	secretKey, err := p.secrets.read(ctx, p.cfg.CredentialsSecret, secretKeyKey)
-	if err != nil {
-		return nil, fmt.Errorf("read aliyun secret key: %w", err)
+	accessKey := strings.TrimSpace(p.cfg.AccessKeyID)
+	secretKey := strings.TrimSpace(p.cfg.AccessKeySecret)
+	if accessKey == "" || secretKey == "" {
+		if strings.TrimSpace(p.cfg.CredentialsSecret) == "" {
+			return nil, fmt.Errorf("aliyun credentials secret is required")
+		}
+		accessKeyKey := strings.TrimSpace(p.cfg.AccessKeyKey)
+		if accessKeyKey == "" {
+			accessKeyKey = "accessKeyId"
+		}
+		secretKeyKey := strings.TrimSpace(p.cfg.SecretKeyKey)
+		if secretKeyKey == "" {
+			secretKeyKey = "accessKeySecret"
+		}
+		var err error
+		accessKey, err = p.secrets.read(ctx, p.cfg.CredentialsSecret, accessKeyKey)
+		if err != nil {
+			return nil, fmt.Errorf("read aliyun access key: %w", err)
+		}
+		secretKey, err = p.secrets.read(ctx, p.cfg.CredentialsSecret, secretKeyKey)
+		if err != nil {
+			return nil, fmt.Errorf("read aliyun secret key: %w", err)
+		}
 	}
 
 	client, err := cr.NewClientWithAccessKey(p.cfg.Region, accessKey, secretKey)

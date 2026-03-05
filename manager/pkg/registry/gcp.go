@@ -19,16 +19,20 @@ func (p *gcpProvider) GetPushCredentials(ctx context.Context, teamID string) (*C
 	if registry == "" {
 		return nil, fmt.Errorf("gcp registry is required")
 	}
-	if strings.TrimSpace(p.cfg.ServiceAccountSecret) == "" {
-		return nil, fmt.Errorf("gcp service account secret is required")
-	}
-	secretKey := strings.TrimSpace(p.cfg.ServiceAccountKey)
-	if secretKey == "" {
-		secretKey = "serviceAccount.json"
-	}
-	serviceAccountJSON, err := p.secrets.read(ctx, p.cfg.ServiceAccountSecret, secretKey)
-	if err != nil {
-		return nil, fmt.Errorf("read gcp service account: %w", err)
+	serviceAccountJSON := strings.TrimSpace(p.cfg.ServiceAccountJSON)
+	if serviceAccountJSON == "" {
+		if strings.TrimSpace(p.cfg.ServiceAccountSecret) == "" {
+			return nil, fmt.Errorf("gcp service account secret is required")
+		}
+		secretKey := strings.TrimSpace(p.cfg.ServiceAccountKey)
+		if secretKey == "" {
+			secretKey = "serviceAccount.json"
+		}
+		var err error
+		serviceAccountJSON, err = p.secrets.read(ctx, p.cfg.ServiceAccountSecret, secretKey)
+		if err != nil {
+			return nil, fmt.Errorf("read gcp service account: %w", err)
+		}
 	}
 	jwtConfig, err := google.JWTConfigFromJSON([]byte(serviceAccountJSON), "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {

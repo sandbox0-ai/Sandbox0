@@ -79,6 +79,11 @@ type EdgeGatewayConfig struct {
 	// Shared gateway configuration
 	// +optional
 	GatewayConfig `yaml:",inline" json:",inline"`
+
+	// Registry config for control-plane image push credentials.
+	// +optional
+	// +kubebuilder:default={}
+	Registry RegistryConfig `yaml:"registry" json:"-"`
 }
 
 // LoadEdgeGatewayConfig returns the edge-gateway configuration.

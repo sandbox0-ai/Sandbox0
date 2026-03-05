@@ -256,6 +256,9 @@ type RegistryAWSConfig struct {
 	SecretKeyKey     string `yaml:"secret_key_key" json:"-"`
 	SessionTokenKey  string `yaml:"session_token_key" json:"-"`
 	RegistryOverride string `yaml:"registry_override" json:"-"`
+	AccessKeyID      string `yaml:"access_key_id" json:"-"`
+	SecretAccessKey  string `yaml:"secret_access_key" json:"-"`
+	SessionToken     string `yaml:"session_token" json:"-"`
 }
 
 // RegistryGCPConfig defines GCP registry config.
@@ -263,6 +266,7 @@ type RegistryGCPConfig struct {
 	Registry             string `yaml:"registry" json:"-"`
 	ServiceAccountSecret string `yaml:"service_account_secret" json:"-"`
 	ServiceAccountKey    string `yaml:"service_account_key" json:"-"`
+	ServiceAccountJSON   string `yaml:"service_account_json" json:"-"`
 }
 
 // RegistryAzureConfig defines Azure registry config.
@@ -272,6 +276,9 @@ type RegistryAzureConfig struct {
 	TenantIDKey       string `yaml:"tenant_id_key" json:"-"`
 	ClientIDKey       string `yaml:"client_id_key" json:"-"`
 	ClientSecretKey   string `yaml:"client_secret_key" json:"-"`
+	TenantID          string `yaml:"tenant_id" json:"-"`
+	ClientID          string `yaml:"client_id" json:"-"`
+	ClientSecret      string `yaml:"client_secret" json:"-"`
 }
 
 // RegistryAliyunConfig defines Aliyun registry config.
@@ -282,6 +289,8 @@ type RegistryAliyunConfig struct {
 	CredentialsSecret string `yaml:"credentials_secret" json:"-"`
 	AccessKeyKey      string `yaml:"access_key_key" json:"-"`
 	SecretKeyKey      string `yaml:"secret_key_key" json:"-"`
+	AccessKeyID       string `yaml:"access_key_id" json:"-"`
+	AccessKeySecret   string `yaml:"access_key_secret" json:"-"`
 }
 
 // RegistryHarborConfig defines Harbor registry config.
@@ -290,6 +299,8 @@ type RegistryHarborConfig struct {
 	CredentialsSecret string `yaml:"credentials_secret" json:"-"`
 	UsernameKey       string `yaml:"username_key" json:"-"`
 	PasswordKey       string `yaml:"password_key" json:"-"`
+	Username          string `yaml:"username" json:"-"`
+	Password          string `yaml:"password" json:"-"`
 }
 
 // RegistryBuiltinConfig defines builtin registry config.
@@ -300,6 +311,10 @@ type RegistryBuiltinConfig struct {
 	UsernameKey string `yaml:"username_key" json:"-"`
 	// PasswordKey is the key for password in the auth secret.
 	PasswordKey string `yaml:"password_key" json:"-"`
+	// Username is the direct registry username. If set, AuthSecretName is not required.
+	Username string `yaml:"username" json:"-"`
+	// Password is the direct registry password. If set, AuthSecretName is not required.
+	Password string `yaml:"password" json:"-"`
 }
 
 // LoadManagerConfig returns the manager configuration.

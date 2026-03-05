@@ -61,8 +61,8 @@ spec:
   #     service:
   #       type: NodePort
   #       port: 30500
-  #   # For local kind debug, s0 CLI can push via this endpoint.
-  #   pushEndpoint: 127.0.0.1:30500
+  #     # For local kind debug, s0 CLI can push via this endpoint.
+  #     pushEndpoint: 127.0.0.1:30500
   builtinTemplates:
     - templateId: default
       image: sandbox0ai/otemplates:default-v0.1.0

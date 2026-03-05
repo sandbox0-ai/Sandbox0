@@ -33,6 +33,7 @@ import (
 	"github.com/sandbox0-ai/sandbox0/infra-operator/internal/controller/pkg/common"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/internal/controller/services/database"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/internal/controller/services/internalauth"
+	"github.com/sandbox0-ai/sandbox0/infra-operator/internal/controller/services/registry"
 	pkginternalauth "github.com/sandbox0-ai/sandbox0/pkg/internalauth"
 )
 
@@ -65,7 +66,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	labels := common.GetServiceLabels(infra.Name, "edge-gateway")
 	keySecretName, privateKeyKey, _ := internalauth.GetControlPlaneKeyRefs(infra)
 
-	config, err := r.buildConfig(ctx, infra)
+	config, registryEnvVars, err := r.buildConfig(ctx, infra)
 	if err != nil {
 		return err
 	}
@@ -127,6 +128,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		volumeMounts, volumes = common.AppendEnterpriseLicenseVolume(infra.Name, config.LicenseFile, volumeMounts, volumes)
 	}
 
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "SERVICE",
+			Value: "edge-gateway",
+		},
+		{
+			Name:  "CONFIG_PATH",
+			Value: "/config/config.yaml",
+		},
+	}
+	envVars = append(envVars, registryEnvVars...)
+
 	// Create deployment
 	httpPort := int32(config.HTTPPort)
 	if err := r.Resources.ReconcileDeployment(ctx, infra, deploymentName, labels, replicas, common.ServiceDefinition{
@@ -139,17 +152,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 				ContainerPort: httpPort,
 			},
 		},
-		Image: fmt.Sprintf("%s:%s", imageRepo, infra.Spec.Version),
-		EnvVars: []corev1.EnvVar{
-			{
-				Name:  "SERVICE",
-				Value: "edge-gateway",
-			},
-			{
-				Name:  "CONFIG_PATH",
-				Value: "/config/config.yaml",
-			},
-		},
+		Image:        fmt.Sprintf("%s:%s", imageRepo, infra.Spec.Version),
+		EnvVars:      envVars,
 		VolumeMounts: volumeMounts,
 		Volumes:      volumes,
 		LivenessProbe: &corev1.Probe{
@@ -207,7 +211,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	return nil
 }
 
-func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) (*apiconfig.EdgeGatewayConfig, error) {
+func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) (*apiconfig.EdgeGatewayConfig, []corev1.EnvVar, error) {
 	cfg := &apiconfig.EdgeGatewayConfig{}
 	if infra.Spec.Services != nil && infra.Spec.Services.EdgeGateway != nil && infra.Spec.Services.EdgeGateway.Config != nil {
 		cfg = infra.Spec.Services.EdgeGateway.Config
@@ -233,7 +237,7 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 		secretRef := common.ResolveSecretKeyRef(infra.Spec.InitUser.PasswordSecret, "admin-password", "password")
 		password, err := common.GetSecretValue(ctx, r.Resources.Client, infra.Namespace, secretRef)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		cfg.BuiltInAuth.InitUser = &apiconfig.InitUserConfig{
@@ -258,7 +262,7 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 			32,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		cfg.JWTSecret = jwtSecret
 	}
@@ -270,7 +274,141 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 		cfg.PublicRegionID = infra.Spec.PublicExposure.RegionID
 	}
 
-	return cfg, nil
+	registryEnvVars, err := r.applyRegistryConfig(infra, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return cfg, registryEnvVars, nil
+}
+
+func (r *Reconciler) applyRegistryConfig(infra *infrav1alpha1.Sandbox0Infra, cfg *apiconfig.EdgeGatewayConfig) ([]corev1.EnvVar, error) {
+	if !infrav1alpha1.IsRegistryEnabled(infra) {
+		return nil, nil
+	}
+
+	resolved := registry.ResolveRegistryConfig(infra)
+	if resolved == nil {
+		return nil, nil
+	}
+
+	cfg.Registry.Provider = string(resolved.Provider)
+	cfg.Registry.PushRegistry = resolved.PushRegistry
+	cfg.Registry.PullRegistry = resolved.PullRegistry
+	cfg.Registry.Namespace = infra.Namespace
+
+	switch resolved.Provider {
+	case infrav1alpha1.RegistryProviderBuiltin:
+		cfg.Registry.Builtin = &apiconfig.RegistryBuiltinConfig{
+			Username: "${S0_REGISTRY_BUILTIN_USERNAME}",
+			Password: "${S0_REGISTRY_BUILTIN_PASSWORD}",
+		}
+		secretName := fmt.Sprintf("%s-registry-auth", infra.Name)
+		return []corev1.EnvVar{
+			secretEnvVar("S0_REGISTRY_BUILTIN_USERNAME", secretName, "username"),
+			secretEnvVar("S0_REGISTRY_BUILTIN_PASSWORD", secretName, "password"),
+		}, nil
+	case infrav1alpha1.RegistryProviderAWS:
+		if infra.Spec.Registry == nil || infra.Spec.Registry.AWS == nil {
+			return nil, fmt.Errorf("registry.aws configuration is required")
+		}
+		cred := infra.Spec.Registry.AWS.CredentialsSecret
+		cfg.Registry.AWS = &apiconfig.RegistryAWSConfig{
+			Region:           infra.Spec.Registry.AWS.Region,
+			RegistryID:       infra.Spec.Registry.AWS.RegistryID,
+			RegistryOverride: infra.Spec.Registry.AWS.Registry,
+			AccessKeyID:      "${S0_REGISTRY_AWS_ACCESS_KEY_ID}",
+			SecretAccessKey:  "${S0_REGISTRY_AWS_SECRET_ACCESS_KEY}",
+		}
+		envVars := []corev1.EnvVar{
+			secretEnvVar("S0_REGISTRY_AWS_ACCESS_KEY_ID", cred.Name, defaultString(cred.AccessKeyKey, "accessKeyId")),
+			secretEnvVar("S0_REGISTRY_AWS_SECRET_ACCESS_KEY", cred.Name, defaultString(cred.SecretKeyKey, "secretAccessKey")),
+		}
+		if strings.TrimSpace(cred.SessionTokenKey) != "" {
+			cfg.Registry.AWS.SessionToken = "${S0_REGISTRY_AWS_SESSION_TOKEN}"
+			envVars = append(envVars, secretEnvVar("S0_REGISTRY_AWS_SESSION_TOKEN", cred.Name, cred.SessionTokenKey))
+		}
+		return envVars, nil
+	case infrav1alpha1.RegistryProviderGCP:
+		if infra.Spec.Registry == nil || infra.Spec.Registry.GCP == nil {
+			return nil, fmt.Errorf("registry.gcp configuration is required")
+		}
+		sa := infra.Spec.Registry.GCP.ServiceAccountSecret
+		cfg.Registry.GCP = &apiconfig.RegistryGCPConfig{
+			Registry:           infra.Spec.Registry.GCP.Registry,
+			ServiceAccountJSON: "${S0_REGISTRY_GCP_SERVICE_ACCOUNT_JSON}",
+		}
+		return []corev1.EnvVar{
+			secretEnvVar("S0_REGISTRY_GCP_SERVICE_ACCOUNT_JSON", sa.Name, defaultString(sa.Key, "serviceAccount.json")),
+		}, nil
+	case infrav1alpha1.RegistryProviderAzure:
+		if infra.Spec.Registry == nil || infra.Spec.Registry.Azure == nil {
+			return nil, fmt.Errorf("registry.azure configuration is required")
+		}
+		cred := infra.Spec.Registry.Azure.CredentialsSecret
+		cfg.Registry.Azure = &apiconfig.RegistryAzureConfig{
+			Registry:     infra.Spec.Registry.Azure.Registry,
+			TenantID:     "${S0_REGISTRY_AZURE_TENANT_ID}",
+			ClientID:     "${S0_REGISTRY_AZURE_CLIENT_ID}",
+			ClientSecret: "${S0_REGISTRY_AZURE_CLIENT_SECRET}",
+		}
+		return []corev1.EnvVar{
+			secretEnvVar("S0_REGISTRY_AZURE_TENANT_ID", cred.Name, defaultString(cred.TenantIDKey, "tenantId")),
+			secretEnvVar("S0_REGISTRY_AZURE_CLIENT_ID", cred.Name, defaultString(cred.ClientIDKey, "clientId")),
+			secretEnvVar("S0_REGISTRY_AZURE_CLIENT_SECRET", cred.Name, defaultString(cred.ClientSecretKey, "clientSecret")),
+		}, nil
+	case infrav1alpha1.RegistryProviderAliyun:
+		if infra.Spec.Registry == nil || infra.Spec.Registry.Aliyun == nil {
+			return nil, fmt.Errorf("registry.aliyun configuration is required")
+		}
+		cred := infra.Spec.Registry.Aliyun.CredentialsSecret
+		cfg.Registry.Aliyun = &apiconfig.RegistryAliyunConfig{
+			Registry:        infra.Spec.Registry.Aliyun.Registry,
+			Region:          infra.Spec.Registry.Aliyun.Region,
+			InstanceID:      infra.Spec.Registry.Aliyun.InstanceID,
+			AccessKeyID:     "${S0_REGISTRY_ALIYUN_ACCESS_KEY_ID}",
+			AccessKeySecret: "${S0_REGISTRY_ALIYUN_ACCESS_KEY_SECRET}",
+		}
+		return []corev1.EnvVar{
+			secretEnvVar("S0_REGISTRY_ALIYUN_ACCESS_KEY_ID", cred.Name, defaultString(cred.AccessKeyKey, "accessKeyId")),
+			secretEnvVar("S0_REGISTRY_ALIYUN_ACCESS_KEY_SECRET", cred.Name, defaultString(cred.SecretKeyKey, "accessKeySecret")),
+		}, nil
+	case infrav1alpha1.RegistryProviderHarbor:
+		if infra.Spec.Registry == nil || infra.Spec.Registry.Harbor == nil {
+			return nil, fmt.Errorf("registry.harbor configuration is required")
+		}
+		cred := infra.Spec.Registry.Harbor.CredentialsSecret
+		cfg.Registry.Harbor = &apiconfig.RegistryHarborConfig{
+			Registry: infra.Spec.Registry.Harbor.Registry,
+			Username: "${S0_REGISTRY_HARBOR_USERNAME}",
+			Password: "${S0_REGISTRY_HARBOR_PASSWORD}",
+		}
+		return []corev1.EnvVar{
+			secretEnvVar("S0_REGISTRY_HARBOR_USERNAME", cred.Name, defaultString(cred.UsernameKey, "username")),
+			secretEnvVar("S0_REGISTRY_HARBOR_PASSWORD", cred.Name, defaultString(cred.PasswordKey, "password")),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported registry provider for edge-gateway: %s", resolved.Provider)
+	}
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func secretEnvVar(name, secretName, key string) corev1.EnvVar {
+	return corev1.EnvVar{
+		Name: name,
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+				Key:                  key,
+			},
+		},
+	}
 }
 
 func updateEndpoints(infra *infrav1alpha1.Sandbox0Infra, serviceName string, servicePort int32) {

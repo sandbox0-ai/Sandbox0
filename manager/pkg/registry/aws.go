@@ -23,31 +23,36 @@ func (p *awsProvider) GetPushCredentials(ctx context.Context, teamID string) (*C
 	if p.cfg.Region == "" {
 		return nil, fmt.Errorf("aws region is required")
 	}
-	if strings.TrimSpace(p.cfg.AccessKeySecret) == "" {
-		return nil, fmt.Errorf("aws access key secret is required")
-	}
-	accessKeyKey := p.cfg.AccessKeyKey
-	if accessKeyKey == "" {
-		accessKeyKey = "accessKeyId"
-	}
-	secretKeyKey := p.cfg.SecretKeyKey
-	if secretKeyKey == "" {
-		secretKeyKey = "secretAccessKey"
-	}
+	accessKey := strings.TrimSpace(p.cfg.AccessKeyID)
+	secretKey := strings.TrimSpace(p.cfg.SecretAccessKey)
+	sessionToken := strings.TrimSpace(p.cfg.SessionToken)
+	if accessKey == "" || secretKey == "" {
+		if strings.TrimSpace(p.cfg.AccessKeySecret) == "" {
+			return nil, fmt.Errorf("aws access key secret is required")
+		}
+		accessKeyKey := p.cfg.AccessKeyKey
+		if accessKeyKey == "" {
+			accessKeyKey = "accessKeyId"
+		}
+		secretKeyKey := p.cfg.SecretKeyKey
+		if secretKeyKey == "" {
+			secretKeyKey = "secretAccessKey"
+		}
 
-	accessKey, err := p.secrets.read(ctx, p.cfg.AccessKeySecret, accessKeyKey)
-	if err != nil {
-		return nil, fmt.Errorf("read aws access key: %w", err)
-	}
-	secretKey, err := p.secrets.read(ctx, p.cfg.AccessKeySecret, secretKeyKey)
-	if err != nil {
-		return nil, fmt.Errorf("read aws secret key: %w", err)
-	}
-	sessionToken := ""
-	if strings.TrimSpace(p.cfg.SessionTokenKey) != "" {
-		sessionToken, err = p.secrets.read(ctx, p.cfg.AccessKeySecret, p.cfg.SessionTokenKey)
+		var err error
+		accessKey, err = p.secrets.read(ctx, p.cfg.AccessKeySecret, accessKeyKey)
 		if err != nil {
-			return nil, fmt.Errorf("read aws session token: %w", err)
+			return nil, fmt.Errorf("read aws access key: %w", err)
+		}
+		secretKey, err = p.secrets.read(ctx, p.cfg.AccessKeySecret, secretKeyKey)
+		if err != nil {
+			return nil, fmt.Errorf("read aws secret key: %w", err)
+		}
+		if strings.TrimSpace(p.cfg.SessionTokenKey) != "" {
+			sessionToken, err = p.secrets.read(ctx, p.cfg.AccessKeySecret, p.cfg.SessionTokenKey)
+			if err != nil {
+				return nil, fmt.Errorf("read aws session token: %w", err)
+			}
 		}
 	}
 

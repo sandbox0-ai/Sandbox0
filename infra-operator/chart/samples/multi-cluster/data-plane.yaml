@@ -54,15 +54,21 @@ spec:
       name: control-plane-public-key
       key: public.key
   registry:
-    # Builtin registry defaults to NodePort for easy kind debugging.
-    provider: builtin
-    builtin:
-      enabled: true
-      service:
-        type: NodePort
-        port: 30500
-      # For local kind debug, s0 CLI can push via this endpoint.
-      pushEndpoint: 127.0.0.1:30500
+    # Must match control-plane registry config in this region.
+    # Data-plane uses this for pull secret propagation to sandbox namespaces.
+    provider: aws
+    imagePullSecretName: sandbox0-registry-pull
+    aws:
+      region: us-east-1
+      registryId: "123456789012"
+      registry: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+      pullSecret:
+        name: ecr-pull-secret
+        key: .dockerconfigjson
+      credentialsSecret:
+        name: aws-credentials
+        accessKeyKey: accessKeyId
+        secretKeyKey: secretAccessKey
   cluster:
     id: cluster-001
     name: Production US East 1

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
+	registryprovider "github.com/sandbox0-ai/sandbox0/manager/pkg/registry"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
@@ -48,6 +49,7 @@ type Server struct {
 	clusterCacheAt time.Time
 	clusterCacheMu sync.RWMutex
 	entitlements   licensing.Entitlements
+	registry       registryprovider.Provider
 
 	// Auth components
 	builtinProvider *builtin.Provider
@@ -72,6 +74,10 @@ func NewServer(
 
 	// Create repository
 	repo := db.NewRepository(pool)
+	registryProvider, err := registryprovider.NewProvider(cfg.Registry, nil, logger)
+	if err != nil {
+		logger.Warn("Registry provider disabled", zap.Error(err))
+	}
 	oidcConfigured := config.HasEnabledOIDCProviders(cfg.OIDCProviders)
 	schedulerConfigured := cfg.SchedulerEnabled && cfg.SchedulerURL != ""
 	enterpriseFeaturesEnabled := oidcConfigured || schedulerConfigured
@@ -188,6 +194,7 @@ func NewServer(
 		internalGatewayProxies: make(map[string]*proxy.Router),
 		clusterCache:           make(map[string]string),
 		entitlements:           publicEntitlements,
+		registry:               registryProvider,
 
 		builtinProvider: builtinProvider,
 		oidcManager:     oidcManager,
@@ -253,6 +260,12 @@ func (s *Server) setupRoutes() {
 			sandboxes.POST("", s.injectInternalTokenForTarget("scheduler"), s.schedulerRouter.ProxyToTarget)
 			sandboxes.Any("/:id", s.proxySandbox)
 			sandboxes.Any("/:id/*path", s.proxySandbox)
+		}
+
+		// Registry credentials are served by edge-gateway in control plane.
+		registry := api.Group("/v1/registry")
+		{
+			registry.POST("/credentials", s.getRegistryCredentials)
 		}
 
 		// All other API routes go to default internal-gateway
