@@ -52,7 +52,10 @@ export function PixelTableOfContents() {
 
         return {
           id: uniqueId,
-          text: el.textContent?.replace(/^#\s*/, "") || "",
+          text: el.textContent
+            ?.replace(/^#\s*/, "")
+            .replace(/\s*#\s*$/, "")
+            .trim() || "",
           level: parseInt(el.tagName.substring(1)),
         };
       });
@@ -115,17 +118,21 @@ export function PixelTableOfContents() {
             key={heading.id}
             href={`#${heading.id}`}
             className={cn(
-              "block text-sm transition-all duration-200 hover:text-accent",
+              "flex items-start gap-2 text-sm transition-all duration-200 hover:text-accent",
               heading.level === 3 ? "ml-4" : "",
               activeId === heading.id
                 ? "text-accent font-medium"
                 : "text-muted"
             )}
           >
-            {activeId === heading.id && (
-              <span className="inline-block w-1.5 h-1.5 bg-accent mr-2 translate-y-[-1px]" />
-            )}
-            {heading.text}
+            <span
+              aria-hidden
+              className={cn(
+                "inline-block w-1.5 h-1.5 mt-1.5 rounded-full transition-opacity duration-200",
+                activeId === heading.id ? "bg-accent opacity-100" : "opacity-0"
+              )}
+            />
+            <span>{heading.text}</span>
           </a>
         ))}
       </nav>

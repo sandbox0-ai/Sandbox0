@@ -21,6 +21,64 @@ function cx(...classes: Array<string | undefined | null | false>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function extractText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(extractText).join("");
+  }
+  if (React.isValidElement(node)) {
+    const element = node as React.ReactElement<{ children?: React.ReactNode }>;
+    return extractText(element.props.children);
+  }
+  return "";
+}
+
+function toHeadingId(children: React.ReactNode, fallbackId?: string): string | undefined {
+  if (fallbackId) return fallbackId;
+  const text = extractText(children)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  return text || undefined;
+}
+
+type HeadingLevel = "h2" | "h3" | "h4";
+type HeadingProps = React.ComponentPropsWithoutRef<HeadingLevel>;
+
+function HeadingWithAnchor(level: HeadingLevel, props: HeadingProps) {
+  const { children, id, className, ...rest } = props;
+  const headingId = toHeadingId(children, id);
+
+  return (
+    <PixelHeading
+      as={level}
+      tone="docs"
+      id={headingId}
+      className={cx("group scroll-mt-24", className)}
+      {...rest}
+    >
+      <span>{children}</span>
+      {headingId ? (
+        <a
+          href={`#${headingId}`}
+          aria-label={`Link to ${extractText(children) || level}`}
+          className={cx(
+            "ml-2 inline-flex align-middle text-accent/80 hover:text-accent",
+            "opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          )}
+        >
+          #
+        </a>
+      ) : null}
+    </PixelHeading>
+  );
+}
+
 type DocLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
   href: string;
   newTab?: boolean;
@@ -241,19 +299,13 @@ export const mdxComponents: MDXComponents = {
     </PixelHeading>
   ),
   h2: ({ children, ...props }) => (
-    <PixelHeading as="h2" tone="docs" {...props}>
-      {children}
-    </PixelHeading>
+    HeadingWithAnchor("h2", { children, ...props })
   ),
   h3: ({ children, ...props }) => (
-    <PixelHeading as="h3" tone="docs" {...props}>
-      {children}
-    </PixelHeading>
+    HeadingWithAnchor("h3", { children, ...props })
   ),
   h4: ({ children, ...props }) => (
-    <PixelHeading as="h4" tone="docs" {...props}>
-      {children}
-    </PixelHeading>
+    HeadingWithAnchor("h4", { children, ...props })
   ),
 
   // Paragraphs and text

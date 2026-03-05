@@ -1,4 +1,6 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useRef } from "react";
 import { cn } from "@sandbox0/ui";
 
 export interface PixelSidebarItem {
@@ -21,15 +23,34 @@ export function PixelSidebar({
   currentPath,
   className,
 }: PixelSidebarProps) {
+  const navRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const navEl = navRef.current;
+    if (!navEl) return;
+
+    const activeLink = navEl.querySelector<HTMLElement>("[data-sidebar-active='true']");
+    if (!activeLink) return;
+
+    const activeSection = activeLink.closest<HTMLElement>("[data-sidebar-section='true']");
+    const sectionTitle = activeSection?.querySelector<HTMLElement>("[data-sidebar-section-title='true']");
+
+    // Keep the active section title visible before revealing the active leaf item.
+    sectionTitle?.scrollIntoView({ block: "nearest" });
+    activeLink.scrollIntoView({ block: "nearest" });
+  }, [currentPath]);
+
   return (
-    <nav className={cn("py-8", className)}>
+    <nav ref={navRef} className={cn("py-8", className)}>
       <div className="space-y-8">
         {items.map((section, idx) => {
           const isSectionActive = currentPath === section.href;
           return (
-            <div key={idx}>
+            <div key={idx} data-sidebar-section="true">
               <a
                 href={section.href}
+                data-sidebar-section-title="true"
+                data-sidebar-active={isSectionActive ? "true" : undefined}
                 className={cn(
                   "flex items-center gap-2 mb-3 font-pixel text-xs transition-colors duration-200",
                   isSectionActive
@@ -50,6 +71,7 @@ export function PixelSidebar({
                       <li key={itemIdx}>
                         <a
                           href={item.href}
+                          data-sidebar-active={isActive ? "true" : undefined}
                           className={cn(
                             "group relative flex items-center px-4 py-2 text-sm transition-all duration-200",
                             isActive
@@ -82,6 +104,7 @@ export function PixelSidebar({
                                 <li key={subIdx}>
                                   <a
                                     href={subItem.href}
+                                    data-sidebar-active={isSubActive ? "true" : undefined}
                                     className={cn(
                                       "group relative flex items-center px-4 py-1.5 text-sm transition-all duration-200",
                                       isSubActive

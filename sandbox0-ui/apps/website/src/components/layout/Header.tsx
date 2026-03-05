@@ -62,22 +62,22 @@ export function Header({
           >
             Docs
           </Link>
-          <Link
-            href="/pricing"
-            className="text-sm text-muted hover:text-foreground transition-colors"
-          >
-            Pricing
-          </Link>
           <a
-            href="https://github.com/sandbox0"
+            href="https://github.com/sandbox0-ai/sandbox0"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-muted hover:text-foreground transition-colors"
           >
             GitHub
           </a>
-          <PixelButton variant="primary" scale="sm">
-            Get Started
+          <PixelButton
+            variant="primary"
+            scale="sm"
+            onClick={() => {
+              window.location.href = "mailto:contact@sandbox0.ai";
+            }}
+          >
+            Contact
           </PixelButton>
         </div>
 
