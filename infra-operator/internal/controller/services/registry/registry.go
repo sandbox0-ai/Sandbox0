@@ -25,7 +25,9 @@ import (
 
 	infrav1alpha1 "github.com/sandbox0-ai/infra/infra-operator/api/v1alpha1"
 	"github.com/sandbox0-ai/infra/infra-operator/internal/controller/pkg/common"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -144,15 +146,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	switch provider {
 	case infrav1alpha1.RegistryProviderBuiltin:
 		logger.Info("Reconciling builtin registry")
+		builtin := resolveBuiltinRegistryConfig(infra)
+		if !builtin.Enabled {
+			return r.cleanupBuiltinRegistryRuntime(ctx, infra)
+		}
 		return r.reconcileBuiltinRegistry(ctx, infra)
 	case infrav1alpha1.RegistryProviderAWS,
 		infrav1alpha1.RegistryProviderGCP,
 		infrav1alpha1.RegistryProviderAzure,
 		infrav1alpha1.RegistryProviderAliyun,
 		infrav1alpha1.RegistryProviderHarbor:
+		if err := r.cleanupBuiltinRegistryRuntime(ctx, infra); err != nil {
+			return err
+		}
 		logger.Info("Validating external registry configuration")
 		return r.validateExternalRegistry(ctx, infra)
 	default:
+		if err := r.cleanupBuiltinRegistryRuntime(ctx, infra); err != nil {
+			return err
+		}
 		return r.validateExternalRegistry(ctx, infra)
 	}
 }
@@ -220,7 +232,7 @@ func (r *Reconciler) validateExternalRegistry(ctx context.Context, infra *infrav
 func (r *Reconciler) reconcileBuiltinRegistry(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
 	builtin := resolveBuiltinRegistryConfig(infra)
 	if !builtin.Enabled {
-		return nil
+		return r.cleanupBuiltinRegistryRuntime(ctx, infra)
 	}
 
 	if err := r.reconcileRegistryPVC(ctx, infra, builtin); err != nil {
@@ -248,6 +260,50 @@ func (r *Reconciler) reconcileBuiltinRegistry(ctx context.Context, infra *infrav
 		if err := r.Resources.ReconcileIngress(ctx, infra, fmt.Sprintf("%s-registry", infra.Name), common.ResolveServicePort(builtin.Service, builtin.Port), builtin.Ingress); err != nil {
 			return err
 		}
+	} else {
+		ingress := &networkingv1.Ingress{}
+		name := fmt.Sprintf("%s-registry", infra.Name)
+		err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, ingress)
+		if err == nil {
+			if err := r.Resources.Client.Delete(ctx, ingress); err != nil && !errors.IsNotFound(err) {
+				return err
+			}
+		} else if !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *Reconciler) cleanupBuiltinRegistryRuntime(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
+	name := fmt.Sprintf("%s-registry", infra.Name)
+
+	deploy := &appsv1.Deployment{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, deploy); err == nil {
+		if err := r.Resources.Client.Delete(ctx, deploy); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	service := &corev1.Service{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, service); err == nil {
+		if err := r.Resources.Client.Delete(ctx, service); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	ingress := &networkingv1.Ingress{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, ingress); err == nil {
+		if err := r.Resources.Client.Delete(ctx, ingress); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
 	}
 
 	return nil

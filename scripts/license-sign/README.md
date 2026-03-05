@@ -11,7 +11,7 @@ go run ./scripts/license-sign \
   -subject customer-acme \
   -features multi_cluster \
   -expires-at 2027-03-05T00:00:00Z \
-  -out ./license.json
+  -out ./license.lic
 ```
 
 ## Flags
@@ -23,4 +23,4 @@ go run ./scripts/license-sign \
 - `-not-before`: RFC3339 activation time (default: now).
 - `-expires-at`: RFC3339 expiration time.
 - `-expires-in`: relative expiration duration from now (used when `-expires-at` is omitted).
-- `-out`: output path for signed license JSON.
+- `-out`: output path for signed license file.

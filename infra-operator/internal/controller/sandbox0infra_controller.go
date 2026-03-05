@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -263,6 +264,9 @@ func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, in
 	if err := r.validateComponentPlan(infra, plan); err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := r.cleanupDisabledServiceResources(ctx, infra, plan); err != nil {
+		return ctrl.Result{RequeueAfter: requeueInterval}, err
+	}
 
 	resources := common.NewResourceManager(r.Client, r.Scheme, r.getImagePullPolicy(ctx), r.getLocalDevConfig(ctx))
 	imageRepo := r.getImageRepo(ctx)
@@ -491,6 +495,185 @@ func (r *Sandbox0InfraReconciler) reconcileComponentPlan(ctx context.Context, in
 	}
 
 	return r.runSteps(ctx, infra, steps)
+}
+
+func (r *Sandbox0InfraReconciler) cleanupDisabledServiceResources(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, plan componentPlan) error {
+	deleteNamespaced := func(name string, obj client.Object) error {
+		key := types.NamespacedName{Name: name, Namespace: infra.Namespace}
+		if err := r.Get(ctx, key, obj); err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if err := r.Delete(ctx, obj); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}
+	deleteClusterScoped := func(name string, obj client.Object) error {
+		key := types.NamespacedName{Name: name}
+		if err := r.Get(ctx, key, obj); err != nil {
+			if errors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if err := r.Delete(ctx, obj); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}
+
+	edgeName := fmt.Sprintf("%s-edge-gateway", infra.Name)
+	if !plan.EnableEdgeGateway {
+		if err := deleteNamespaced(edgeName, &appsv1.Deployment{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(edgeName, &corev1.Service{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(edgeName, &corev1.ConfigMap{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(edgeName, &networkingv1.Ingress{}); err != nil {
+			return err
+		}
+	}
+
+	schedulerName := fmt.Sprintf("%s-scheduler", infra.Name)
+	if !plan.EnableScheduler {
+		if err := deleteNamespaced(schedulerName, &appsv1.Deployment{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(schedulerName, &corev1.Service{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(schedulerName, &corev1.ConfigMap{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(schedulerName, &corev1.ServiceAccount{}); err != nil {
+			return err
+		}
+	}
+
+	internalGatewayName := fmt.Sprintf("%s-internal-gateway", infra.Name)
+	if !plan.EnableInternalGateway {
+		if err := deleteNamespaced(internalGatewayName, &appsv1.Deployment{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(internalGatewayName, &corev1.Service{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(internalGatewayName, &corev1.ConfigMap{}); err != nil {
+			return err
+		}
+	}
+
+	managerName := fmt.Sprintf("%s-manager", infra.Name)
+	if !plan.EnableManager {
+		if err := deleteNamespaced(managerName, &appsv1.Deployment{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(managerName, &corev1.Service{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(managerName, &corev1.ConfigMap{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(managerName, &corev1.ServiceAccount{}); err != nil {
+			return err
+		}
+		if err := deleteClusterScoped(managerName, &rbacv1.ClusterRole{}); err != nil {
+			return err
+		}
+		if err := deleteClusterScoped(managerName, &rbacv1.ClusterRoleBinding{}); err != nil {
+			return err
+		}
+	}
+
+	storageProxyName := fmt.Sprintf("%s-storage-proxy", infra.Name)
+	if !plan.EnableStorageProxy {
+		if err := deleteNamespaced(storageProxyName, &appsv1.Deployment{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(storageProxyName, &corev1.Service{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(storageProxyName, &corev1.ConfigMap{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(storageProxyName, &corev1.ServiceAccount{}); err != nil {
+			return err
+		}
+		if err := deleteClusterScoped(storageProxyName, &rbacv1.ClusterRole{}); err != nil {
+			return err
+		}
+		if err := deleteClusterScoped(storageProxyName, &rbacv1.ClusterRoleBinding{}); err != nil {
+			return err
+		}
+	}
+
+	netdName := fmt.Sprintf("%s-netd", infra.Name)
+	if !plan.EnableNetd {
+		if err := deleteNamespaced(netdName, &appsv1.DaemonSet{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(netdName, &corev1.ConfigMap{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(netdName, &corev1.ServiceAccount{}); err != nil {
+			return err
+		}
+		if err := deleteClusterScoped(netdName, &rbacv1.ClusterRole{}); err != nil {
+			return err
+		}
+		if err := deleteClusterScoped(netdName, &rbacv1.ClusterRoleBinding{}); err != nil {
+			return err
+		}
+	}
+
+	fusePluginName := fmt.Sprintf("%s-k8s-plugin", infra.Name)
+	if !plan.EnableFusePlugin {
+		if err := deleteNamespaced(fusePluginName, &appsv1.DaemonSet{}); err != nil {
+			return err
+		}
+	}
+
+	postgresName := fmt.Sprintf("%s-postgres", infra.Name)
+	if !plan.EnableDatabase {
+		if err := deleteNamespaced(postgresName, &appsv1.StatefulSet{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(postgresName, &corev1.Service{}); err != nil {
+			return err
+		}
+	}
+
+	rustfsName := fmt.Sprintf("%s-rustfs", infra.Name)
+	if !plan.EnableStorage {
+		if err := deleteNamespaced(rustfsName, &appsv1.StatefulSet{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(rustfsName, &corev1.Service{}); err != nil {
+			return err
+		}
+	}
+
+	registryName := fmt.Sprintf("%s-registry", infra.Name)
+	if !plan.EnableRegistry {
+		if err := deleteNamespaced(registryName, &appsv1.Deployment{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(registryName, &corev1.Service{}); err != nil {
+			return err
+		}
+		if err := deleteNamespaced(registryName, &networkingv1.Ingress{}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // updateOverallStatus updates the overall status based on conditions

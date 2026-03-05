@@ -147,7 +147,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: common.EnsurePodTemplateAnnotations(infra, nil),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: name,

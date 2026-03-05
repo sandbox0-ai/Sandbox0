@@ -32,7 +32,7 @@ func main() {
 	)
 
 	flag.StringVar(&privateKeyFile, "private-key-file", "", "Path to Ed25519 private key PEM file (required)")
-	flag.StringVar(&outFile, "out", "license.json", "Output license file path")
+	flag.StringVar(&outFile, "out", "license.lic", "Output license file path")
 	flag.StringVar(&keyID, "kid", license.CurrentKeyID, "Signing key id embedded in license envelope")
 	flag.StringVar(&subject, "subject", defaultLicenseSubject, "License subject/customer identifier")
 	flag.StringVar(&version, "version", "v1", "License payload version")

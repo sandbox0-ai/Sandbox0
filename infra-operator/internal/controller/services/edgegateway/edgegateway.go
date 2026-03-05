@@ -22,6 +22,9 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -66,6 +69,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if err != nil {
 		return err
 	}
+	needEnterpriseLicense := config.SchedulerEnabled && strings.TrimSpace(config.SchedulerURL) != ""
+	if needEnterpriseLicense && strings.TrimSpace(config.LicenseFile) == "" {
+		config.LicenseFile = common.EnterpriseLicenseDefaultPath
+	}
+	if needEnterpriseLicense {
+		_, err := common.GetSecretValue(ctx, r.Resources.Client, infra.Namespace, infrav1alpha1.SecretKeyRef{
+			Name: common.EnterpriseLicenseSecretName(infra.Name),
+			Key:  common.EnterpriseLicenseSecretKey,
+		})
+		if err != nil {
+			return fmt.Errorf("enterprise license secret is required for scheduler mode: %w", err)
+		}
+	}
 	if err := r.Resources.ReconcileServiceConfigMap(ctx, infra, deploymentName, labels, config); err != nil {
 		return err
 	}
@@ -75,6 +91,67 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if infra.Spec.Services != nil && infra.Spec.Services.EdgeGateway != nil {
 		resources = infra.Spec.Services.EdgeGateway.Resources
 		serviceConfig = infra.Spec.Services.EdgeGateway.Service
+	}
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "config",
+			MountPath: "/config/config.yaml",
+			SubPath:   "config.yaml",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "internal-jwt-private-key",
+			MountPath: pkginternalauth.DefaultInternalJWTPrivateKeyPath,
+			SubPath:   "internal_jwt_private.key",
+			ReadOnly:  true,
+		},
+	}
+	volumes := []corev1.Volume{
+		{
+			Name: "config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: deploymentName},
+				},
+			},
+		},
+		{
+			Name: "internal-jwt-private-key",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: keySecretName,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  privateKeyKey,
+							Path: "internal_jwt_private.key",
+						},
+					},
+				},
+			},
+		},
+	}
+	if needEnterpriseLicense {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "enterprise-license",
+			MountPath: config.LicenseFile,
+			SubPath:   common.EnterpriseLicenseSecretKey,
+			ReadOnly:  true,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "enterprise-license",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: common.EnterpriseLicenseSecretName(infra.Name),
+					Items: []corev1.KeyToPath{
+						{
+							Key:  common.EnterpriseLicenseSecretKey,
+							Path: common.EnterpriseLicenseSecretKey,
+						},
+					},
+				},
+			},
+		})
 	}
 
 	// Create deployment
@@ -100,44 +177,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 				Value: "/config/config.yaml",
 			},
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "config",
-				MountPath: "/config/config.yaml",
-				SubPath:   "config.yaml",
-				ReadOnly:  true,
-			},
-			{
-				Name:      "internal-jwt-private-key",
-				MountPath: pkginternalauth.DefaultInternalJWTPrivateKeyPath,
-				SubPath:   "internal_jwt_private.key",
-				ReadOnly:  true,
-			},
-		},
-		Volumes: []corev1.Volume{
-			{
-				Name: "config",
-				VolumeSource: corev1.VolumeSource{
-					ConfigMap: &corev1.ConfigMapVolumeSource{
-						LocalObjectReference: corev1.LocalObjectReference{Name: deploymentName},
-					},
-				},
-			},
-			{
-				Name: "internal-jwt-private-key",
-				VolumeSource: corev1.VolumeSource{
-					Secret: &corev1.SecretVolumeSource{
-						SecretName: keySecretName,
-						Items: []corev1.KeyToPath{
-							{
-								Key:  privateKeyKey,
-								Path: "internal_jwt_private.key",
-							},
-						},
-					},
-				},
-			},
-		},
+		VolumeMounts: volumeMounts,
+		Volumes:      volumes,
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
@@ -174,6 +215,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if infra.Spec.Services != nil && infra.Spec.Services.EdgeGateway != nil &&
 		infra.Spec.Services.EdgeGateway.Ingress != nil && infra.Spec.Services.EdgeGateway.Ingress.Enabled {
 		if err := r.Resources.ReconcileIngress(ctx, infra, serviceName, servicePort, infra.Spec.Services.EdgeGateway.Ingress); err != nil {
+			return err
+		}
+	} else {
+		if err := r.deleteIngressIfExists(ctx, infra, serviceName); err != nil {
 			return err
 		}
 	}
@@ -272,4 +317,19 @@ func updateEndpoints(infra *infrav1alpha1.Sandbox0Infra, serviceName string, ser
 		}
 		infra.Status.Endpoints.EdgeGateway = fmt.Sprintf("%s://%s", scheme, ingress.Host)
 	}
+}
+
+func (r *Reconciler) deleteIngressIfExists(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra, name string) error {
+	obj := &networkingv1.Ingress{}
+	err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: infra.Namespace}, obj)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if err := r.Resources.Client.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }

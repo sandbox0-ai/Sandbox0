@@ -21,6 +21,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 
 	yamlv3 "gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
@@ -52,6 +53,8 @@ type LocalDevConfig struct {
 	LocalDevMode   bool
 	KubeconfigPath string
 }
+
+const PodTemplateSpecGenerationAnnotation = "infra.sandbox0.ai/spec-generation"
 
 func NewResourceManager(client client.Client, scheme *runtime.Scheme, imagePullPolicy *corev1.PullPolicy, localDev LocalDevConfig) *ResourceManager {
 	return &ResourceManager{
@@ -117,7 +120,8 @@ func (r *ResourceManager) ReconcileDeployment(ctx context.Context, infra *infrav
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: desiredLabels,
+					Labels:      desiredLabels,
+					Annotations: EnsurePodTemplateAnnotations(infra, nil),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: def.ServiceAccountName,
@@ -214,7 +218,8 @@ func (r *ResourceManager) ReconcileDaemonSet(ctx context.Context, infra *infrav1
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: desiredLabels,
+					Labels:      desiredLabels,
+					Annotations: EnsurePodTemplateAnnotations(infra, nil),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: def.ServiceAccountName,
@@ -641,4 +646,16 @@ func GetServiceLabels(instanceName, componentName string) map[string]string {
 // BoolPtr returns a pointer to a bool.
 func BoolPtr(b bool) *bool {
 	return &b
+}
+
+// EnsurePodTemplateAnnotations returns annotations with the current CR generation marker.
+func EnsurePodTemplateAnnotations(infra *infrav1alpha1.Sandbox0Infra, annotations map[string]string) map[string]string {
+	out := map[string]string{}
+	for key, value := range annotations {
+		out[key] = value
+	}
+	if infra != nil {
+		out[PodTemplateSpecGenerationAnnotation] = strconv.FormatInt(infra.Generation, 10)
+	}
+	return out
 }

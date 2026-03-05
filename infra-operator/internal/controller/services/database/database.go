@@ -59,7 +59,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	logger := log.FromContext(ctx)
 
 	if infra.Spec.Database == nil {
-		return nil
+		return r.cleanupBuiltinDatabaseRuntime(ctx, infra)
 	}
 
 	switch infra.Spec.Database.Type {
@@ -68,6 +68,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		return r.reconcileBuiltinDatabase(ctx, infra)
 	case infrav1alpha1.DatabaseTypeExternal:
 		logger.Info("Using external database")
+		if err := r.cleanupBuiltinDatabaseRuntime(ctx, infra); err != nil {
+			return err
+		}
 		return ValidateExternalDatabase(ctx, r.Resources.Client, infra)
 	default:
 		return r.reconcileBuiltinDatabase(ctx, infra)
@@ -257,7 +260,8 @@ func (r *Reconciler) reconcileDatabaseStatefulSet(ctx context.Context, infra *in
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: common.EnsurePodTemplateAnnotations(infra, nil),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -498,6 +502,29 @@ func parsePortForwardURL(raw string) (string, int32, error) {
 		return "", 0, fmt.Errorf("parse port-forward port %q: %w", portValue, err)
 	}
 	return host, int32(portInt), nil
+}
+
+func (r *Reconciler) cleanupBuiltinDatabaseRuntime(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
+	stsName := fmt.Sprintf("%s-postgres", infra.Name)
+	sts := &appsv1.StatefulSet{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: stsName, Namespace: infra.Namespace}, sts); err == nil {
+		if err := r.Resources.Client.Delete(ctx, sts); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	svc := &corev1.Service{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: stsName, Namespace: infra.Namespace}, svc); err == nil {
+		if err := r.Resources.Client.Delete(ctx, svc); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
 }
 
 // GetDatabaseDSN returns the database DSN for services to use.

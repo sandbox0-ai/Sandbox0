@@ -60,7 +60,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	logger := log.FromContext(ctx)
 
 	if infra.Spec.Storage == nil {
-		return nil
+		return r.cleanupBuiltinStorageRuntime(ctx, infra)
 	}
 
 	switch infra.Spec.Storage.Type {
@@ -72,6 +72,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 		return r.ensureStorageBucket(ctx, infra)
 	case infrav1alpha1.StorageTypeS3, infrav1alpha1.StorageTypeOSS:
 		logger.Info("Using external storage")
+		if err := r.cleanupBuiltinStorageRuntime(ctx, infra); err != nil {
+			return err
+		}
 		if err := ValidateExternalStorage(ctx, r.Resources.Client, infra); err != nil {
 			return err
 		}
@@ -286,7 +289,8 @@ func (r *Reconciler) reconcileStorageStatefulSet(ctx context.Context, infra *inf
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: common.EnsurePodTemplateAnnotations(infra, nil),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -669,6 +673,29 @@ func parseEndpointHostPort(endpoint string, fallbackPort int32) (string, int32, 
 		return "", 0, fmt.Errorf("parse storage endpoint port %q: %w", portValue, err)
 	}
 	return host, int32(portInt), nil
+}
+
+func (r *Reconciler) cleanupBuiltinStorageRuntime(ctx context.Context, infra *infrav1alpha1.Sandbox0Infra) error {
+	stsName := fmt.Sprintf("%s-rustfs", infra.Name)
+	sts := &appsv1.StatefulSet{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: stsName, Namespace: infra.Namespace}, sts); err == nil {
+		if err := r.Resources.Client.Delete(ctx, sts); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	svc := &corev1.Service{}
+	if err := r.Resources.Client.Get(ctx, types.NamespacedName{Name: stsName, Namespace: infra.Namespace}, svc); err == nil {
+		if err := r.Resources.Client.Delete(ctx, svc); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
 }
 
 func parsePortForwardURL(raw string) (string, int32, error) {

@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -59,6 +60,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(config.LicenseFile) == "" {
+		config.LicenseFile = common.EnterpriseLicenseDefaultPath
+	}
+	_, err = common.GetSecretValue(ctx, r.Resources.Client, infra.Namespace, infrav1alpha1.SecretKeyRef{
+		Name: common.EnterpriseLicenseSecretName(infra.Name),
+		Key:  common.EnterpriseLicenseSecretKey,
+	})
+	if err != nil {
+		return fmt.Errorf("enterprise license secret is required for scheduler: %w", err)
+	}
 	if err := common.EnsureBuiltinTemplates(ctx, infra, common.BuiltinTemplateOptions{
 		DatabaseURL:          config.DatabaseURL,
 		DatabaseMaxConns:     config.DatabasePool.MaxConns,
@@ -77,6 +88,85 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 	if infra.Spec.Services != nil && infra.Spec.Services.Scheduler != nil {
 		resources = infra.Spec.Services.Scheduler.Resources
 		serviceConfig = infra.Spec.Services.Scheduler.Service
+	}
+
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "config",
+			MountPath: "/config/config.yaml",
+			SubPath:   "config.yaml",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "internal-jwt-private-key",
+			MountPath: pkginternalauth.DefaultInternalJWTPrivateKeyPath,
+			SubPath:   "internal_jwt_private.key",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "internal-jwt-public-key",
+			MountPath: pkginternalauth.DefaultInternalJWTPublicKeyPath,
+			SubPath:   "internal_jwt_public.key",
+			ReadOnly:  true,
+		},
+		{
+			Name:      "enterprise-license",
+			MountPath: config.LicenseFile,
+			SubPath:   common.EnterpriseLicenseSecretKey,
+			ReadOnly:  true,
+		},
+	}
+	volumes := []corev1.Volume{
+		{
+			Name: "config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: deploymentName},
+				},
+			},
+		},
+		{
+			Name: "internal-jwt-private-key",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: keySecretName,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  privateKeyKey,
+							Path: "internal_jwt_private.key",
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "internal-jwt-public-key",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: keySecretName,
+					Items: []corev1.KeyToPath{
+						{
+							Key:  publicKeyKey,
+							Path: "internal_jwt_public.key",
+						},
+					},
+				},
+			},
+		},
+		{
+			Name: "enterprise-license",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: common.EnterpriseLicenseSecretName(infra.Name),
+					Items: []corev1.KeyToPath{
+						{
+							Key:  common.EnterpriseLicenseSecretKey,
+							Path: common.EnterpriseLicenseSecretKey,
+						},
+					},
+				},
+			},
+		},
 	}
 
 	// Create deployment
@@ -103,64 +193,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 				Value: "/config/config.yaml",
 			},
 		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "config",
-				MountPath: "/config/config.yaml",
-				SubPath:   "config.yaml",
-				ReadOnly:  true,
-			},
-			{
-				Name:      "internal-jwt-private-key",
-				MountPath: pkginternalauth.DefaultInternalJWTPrivateKeyPath,
-				SubPath:   "internal_jwt_private.key",
-				ReadOnly:  true,
-			},
-			{
-				Name:      "internal-jwt-public-key",
-				MountPath: pkginternalauth.DefaultInternalJWTPublicKeyPath,
-				SubPath:   "internal_jwt_public.key",
-				ReadOnly:  true,
-			},
-		},
-		Volumes: []corev1.Volume{
-			{
-				Name: "config",
-				VolumeSource: corev1.VolumeSource{
-					ConfigMap: &corev1.ConfigMapVolumeSource{
-						LocalObjectReference: corev1.LocalObjectReference{Name: deploymentName},
-					},
-				},
-			},
-			{
-				Name: "internal-jwt-private-key",
-				VolumeSource: corev1.VolumeSource{
-					Secret: &corev1.SecretVolumeSource{
-						SecretName: keySecretName,
-						Items: []corev1.KeyToPath{
-							{
-								Key:  privateKeyKey,
-								Path: "internal_jwt_private.key",
-							},
-						},
-					},
-				},
-			},
-			{
-				Name: "internal-jwt-public-key",
-				VolumeSource: corev1.VolumeSource{
-					Secret: &corev1.SecretVolumeSource{
-						SecretName: keySecretName,
-						Items: []corev1.KeyToPath{
-							{
-								Key:  publicKeyKey,
-								Path: "internal_jwt_public.key",
-							},
-						},
-					},
-				},
-			},
-		},
+		VolumeMounts: volumeMounts,
+		Volumes:      volumes,
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
