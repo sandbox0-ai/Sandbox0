@@ -55,7 +55,7 @@ export function Header({
         {/* Desktop Navigation */}
         <div className="hidden lg:flex items-center gap-8">
           <Link
-            href="/docs"
+            href="/docs/get-started"
             className={`text-sm font-medium transition-colors ${
               isDocs ? "text-accent" : "text-muted hover:text-foreground"
             }`}

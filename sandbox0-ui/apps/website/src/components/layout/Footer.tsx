@@ -21,11 +21,11 @@ export function Footer() {
         </div>
         
         <div className="flex flex-wrap justify-center gap-8 text-sm text-muted">
-          <Link href="/docs" className="hover:text-foreground transition-colors">
+          <Link href="/docs/get-started" className="hover:text-foreground transition-colors">
             Documentation
           </Link>
           <a
-            href="https://github.com/sandbox0"
+            href="https://github.com/sandbox0-ai/sandbox0"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-foreground transition-colors"
@@ -33,16 +33,11 @@ export function Footer() {
             GitHub
           </a>
           <a
-            href="https://discord.gg/sandbox0"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="mailto:contact@sandbox0.ai"
             className="hover:text-foreground transition-colors"
           >
-            Discord
+            contact@sandbox0.ai
           </a>
-          <Link href="/pricing" className="hover:text-foreground transition-colors">
-            Pricing
-          </Link>
         </div>
         
         <div className="flex flex-col items-center md:items-end gap-1">

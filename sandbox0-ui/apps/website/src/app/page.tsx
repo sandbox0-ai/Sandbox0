@@ -1,140 +1,245 @@
-import { PixelLayout, PixelCard, PixelButton, PixelBox, PixelHeading } from "@sandbox0/ui";
+"use client";
+
+import {
+  PixelLayout,
+  PixelCard,
+  PixelButton,
+  PixelBox,
+  PixelHeading,
+} from "@sandbox0/ui";
 import Image from "next/image";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+
+const runtimeCapabilities = [
+  {
+    title: "Template Runtime",
+    body:
+      "Templates define the execution environment behind each tool call: image, resources, warm pool, and default network policy.",
+  },
+  {
+    title: "Persistent Volume",
+    body:
+      "Volumes are the persistent layer created around tool execution, with snapshot, restore, fork, and reuse flows.",
+  },
+  {
+    title: "Sub-200ms Cold Start",
+    body:
+      "Warm pools keep tool runtimes ready so bash, Python, and app-serving environments can start quickly.",
+  },
+  {
+    title: "Network Control",
+    body:
+      "Built-in network policy support gives you egress control, DNS protections, and runtime policy enforcement.",
+  },
+];
+
+const platformSections = [
+  {
+    title: "Sandbox as tool",
+    body:
+      "Sandbox0 is designed for agents that call an isolated environment as a tool, not for agents that live entirely inside a long-running sandbox.",
+  },
+  {
+    title: "Operator-first self-hosting",
+    body:
+      "Deploy Sandbox0 by installing infra-operator and applying a Sandbox0Infra resource. Single-cluster is the fastest path; multi-cluster is available when regional scale-out matters.",
+  },
+  {
+    title: "Tooling for real agent workflows",
+    body:
+      "Use the s0 CLI or SDKs to claim sandboxes, run bash and Python REPL-style tools, execute commands, expose app ports, and manage volumes from your application code.",
+  },
+];
 
 export default function Home() {
   return (
     <PixelLayout>
       <Header position="fixed" background="translucent" />
 
-      {/* Hero Section */}
-      <section className="min-h-screen flex flex-col items-center justify-center px-4 pt-20">
-        <div className="text-center max-w-4xl">
-          {/* Pixel Art Logo */}
-          <div className="mb-8 flex justify-center">
-            <Image
-              src="/sandbox0.png"
-              alt="Sandbox0"
-              width={120}
-              height={120}
-              className="pixel-art"
-              data-pixel
-            />
-          </div>
+      <section className="min-h-screen px-4 pt-28 pb-20">
+        <div className="max-w-5xl mx-auto flex min-h-[calc(100vh-7rem)] flex-col items-center justify-center">
 
-          {/* Headline */}
-          <PixelHeading as="h1" tone="site" className="mb-6">
-            AI-NATIVE
-            <br />
-            <span className="text-accent">SANDBOX</span>
-            <br />
-            INFRASTRUCTURE
+          <PixelHeading
+            as="h1"
+            tone="site"
+            className="text-center text-3xl leading-[1.05] tracking-[-0.1em] md:text-5xl lg:text-6xl"
+          >
+            Sandbox
+            <span className="text-accent"> for agent</span>
           </PixelHeading>
 
-          {/* Subheadline */}
-          <p className="text-lg md:text-xl text-muted mb-8 max-w-2xl mx-auto">
-            Persistent storage, session state retention, 200ms cold start, and
-            easy private deployment.
+          <p className="mt-6 max-w-xl text-center text-sm leading-7 text-muted md:text-base">
+            Isolated runtime, persistent volume, and network control in one
+            simple layer.
           </p>
 
-          {/* CTA Buttons */}
-          <div className="flex flex-wrap gap-4 justify-center mb-12">
-            <PixelButton variant="primary" scale="lg" accent>
-              START BUILDING
+          <div className="mt-8 flex flex-wrap justify-center gap-4">
+            <PixelButton
+              variant="primary"
+              scale="lg"
+              accent
+              onClick={() => {
+                window.location.href = "/docs/get-started";
+              }}
+            >
+              READ DOCS
             </PixelButton>
-            <PixelButton variant="secondary" scale="lg">
-              VIEW DOCS
+            <PixelButton
+              variant="secondary"
+              scale="lg"
+              onClick={() => {
+                window.open("https://github.com/sandbox0-ai/sandbox0", "_blank", "noopener,noreferrer");
+              }}
+            >
+              VIEW GITHUB
             </PixelButton>
           </div>
 
-          {/* Terminal Preview */}
-          <PixelBox scale="lg" className="text-left max-w-2xl mx-auto">
+          <PixelBox scale="lg" className="mt-14 w-full max-w-3xl text-left">
             <div className="flex items-center gap-2 mb-3 pb-3 border-b-2 border-foreground/20">
               <div className="w-3 h-3 bg-red-500" />
               <div className="w-3 h-3 bg-yellow-500" />
               <div className="w-3 h-3 bg-green-500" />
               <span className="ml-2 text-xs text-muted font-mono">
-                sandbox-dev-001
+                tool-runtime-session
               </span>
             </div>
             <pre className="font-mono text-sm text-accent overflow-x-auto">
-              <code>{`$ sandbox0 create --template python
-✓ Sandbox created in 98ms
-✓ Volume mounted: /workspace
-✓ Session restored
+              <code>{`from sandbox0 import Client
+import os
 
-sandbox@dev-001:~$ python main.py
-Hello from Sandbox0!`}</code>
+client = Client(
+    token=os.environ["SANDBOX0_TOKEN"],
+    base_url=os.environ.get("SANDBOX0_BASE_URL", "http://localhost:30080"),
+)
+
+sandbox = client.claim_sandbox(template="default")
+sandbox.run("sqlite", ".open /workspace/demo.db")
+sandbox.run("sqlite", "create table if not exists runs (n integer);")
+sandbox.run("sqlite", "insert into runs values (42);")
+result = sandbox.run("sqlite", "select n from runs;")
+print(result.output_raw, end="")`}</code>
             </pre>
           </PixelBox>
-        </div>
-      </section>
 
-      {/* Features Section */}
-      <section className="py-20 px-4">
-        <div className="max-w-6xl mx-auto">
-          <PixelHeading as="h2" tone="site" className="text-center mb-12">
-            WHY <span className="text-accent">SANDBOX0</span>?
-          </PixelHeading>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <PixelCard header="⚡ 200ms Cold Start" scale="md" accent>
-              <p className="text-muted">
-                Pre-warmed sandbox pools ensure your AI agents start instantly.
-                No waiting, just coding.
-              </p>
-            </PixelCard>
-
-            <PixelCard header="💾 Persistent Storage" scale="md" accent>
-              <p className="text-muted">
-                JuiceFS-powered volumes that survive restarts. Snapshots,
-                restore, and share with ease.
-              </p>
-            </PixelCard>
-
-            <PixelCard header="🔒 Network Isolation" scale="md" accent>
-              <p className="text-muted">
-                Fine-grained network policies. IP/CIDR filtering, DNS spoofing
-                protection built-in.
-              </p>
-            </PixelCard>
-
-            <PixelCard header="🎯 Session State" scale="md">
-              <p className="text-muted">
-                REPL sessions persist across connections. Pick up exactly where
-                you left off.
-              </p>
-            </PixelCard>
-
-            <PixelCard header="☁️ Easy Deployment" scale="md">
-              <p className="text-muted">
-                Cloud-native Kubernetes architecture. Deploy to your own
-                infrastructure in minutes.
-              </p>
-            </PixelCard>
-
-            <PixelCard header="🔌 E2B Compatible" scale="md">
-              <p className="text-muted">
-                Drop-in E2B compatibility layer. Migrate existing integrations
-                seamlessly.
-              </p>
-            </PixelCard>
+          <div className="mt-6 grid w-full max-w-3xl gap-3 sm:grid-cols-3">
+            <PixelBox className="text-center text-sm">
+              <div className="font-pixel text-[10px] uppercase tracking-[0.2em] text-accent">
+                Runtime
+              </div>
+              <p className="mt-2 text-muted">Warm, isolated execution.</p>
+            </PixelBox>
+            <PixelBox className="text-center text-sm">
+              <div className="font-pixel text-[10px] uppercase tracking-[0.2em] text-accent">
+                Volume
+              </div>
+              <p className="mt-2 text-muted">State that persists.</p>
+            </PixelBox>
+            <PixelBox className="text-center text-sm">
+              <div className="font-pixel text-[10px] uppercase tracking-[0.2em] text-accent">
+                Network
+              </div>
+              <p className="mt-2 text-muted">Policy built in.</p>
+            </PixelBox>
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
+      <section className="px-4 pb-20">
+        <div className="max-w-6xl mx-auto">
+          <PixelHeading as="h2" tone="site" className="mb-10 text-center">
+            Built For <span className="text-accent">Sandbox-As-Tool</span>
+          </PixelHeading>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            {runtimeCapabilities.map((item) => (
+              <PixelCard key={item.title} header={item.title} scale="md" accent>
+                <p className="text-muted">{item.body}</p>
+              </PixelCard>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 pb-20">
+        <div className="max-w-6xl mx-auto grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
+          <PixelCard header="How Sandbox0 is structured" scale="lg" accent>
+            <div className="space-y-4 text-muted">
+              <p>
+                Sandbox0 gives agents isolated runtimes as tools. The agent
+                stays in your application, while Sandbox0 provides the
+                environment that executes code, serves apps, manages files, and
+                applies network policy.
+              </p>
+              <p>
+                Templates describe the runtime environment. Volumes add durable
+                storage for the outputs, caches, and working state that tool
+                calls produce over time.
+              </p>
+              <p>
+                In the common single-cluster deployment, `internal-gateway` and
+                `manager` are the core services. `procd` runs inside each
+                sandbox pod and handles process execution, file operations, and
+                volume mount workflows.
+              </p>
+            </div>
+          </PixelCard>
+
+          <div className="grid gap-6">
+            {platformSections.map((item) => (
+              <PixelCard key={item.title} header={item.title} scale="md">
+                <p className="text-muted">{item.body}</p>
+              </PixelCard>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-4 pb-20">
+        <div className="max-w-6xl mx-auto grid gap-6 lg:grid-cols-3">
+          <PixelCard header="Typical workflow" scale="md" accent>
+            <p className="text-muted">
+              Your agent selects a template, claims a sandbox, runs tool calls
+              such as bash or Python, and attaches volumes when the work needs
+              to persist.
+            </p>
+          </PixelCard>
+          <PixelCard header="Storage model" scale="md">
+            <p className="text-muted">
+              Volumes are first-class. They hold the persistent data produced by
+              tool execution instead of forcing every sandbox interaction to be
+              ephemeral.
+            </p>
+          </PixelCard>
+          <PixelCard header="Deployment target" scale="md">
+            <p className="text-muted">
+              Sandbox0 is designed for enterprise self-hosting in your own
+              regional Kubernetes environment, with clear control plane and data
+              plane separation.
+            </p>
+          </PixelCard>
+        </div>
+      </section>
+
       <section className="py-20 px-4 border-t border-foreground/10">
-        <div className="max-w-2xl mx-auto text-center">
+        <div className="max-w-3xl mx-auto text-center">
           <PixelHeading as="h2" tone="site" className="mb-6">
-            READY TO BUILD?
+            Start With The Docs
           </PixelHeading>
           <p className="text-muted mb-8">
-            Join developers building the next generation of AI applications.
+            The docs cover architecture, quickstart, sandbox runtime behavior,
+            volume workflows, templates, and self-hosted configuration.
           </p>
-          <PixelButton variant="primary" scale="lg" accent>
-            GET STARTED FREE
+          <PixelButton
+            variant="primary"
+            scale="lg"
+            accent
+            onClick={() => {
+              window.location.href = "/docs/get-started";
+            }}
+          >
+            OPEN GET STARTED
           </PixelButton>
         </div>
       </section>
