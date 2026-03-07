@@ -1373,7 +1373,7 @@ spec:
                             format: int32
                             type: integer
                           defaultSandboxTTL:
-                            default: 5m
+                            default: 0s
                             description: Sandbox
                             type: string
                           httpPort:

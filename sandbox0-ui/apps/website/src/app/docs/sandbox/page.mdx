@@ -47,8 +47,8 @@ Claim a sandbox from a template. The sandbox is created from a pre-warmed pool f
 | Field | Type | Description |
 |-------|------|-------------|
 | `env_vars` | object | Environment variables |
-| `ttl` | integer | Time to live in seconds (soft limit, triggers auto-pause) |
-| `hard_ttl` | integer | Maximum lifetime in seconds (hard limit, triggers deletion) |
+| `ttl` | integer | Time to live in seconds (soft limit, triggers auto-pause; default: `0`, disabled) |
+| `hard_ttl` | integer | Maximum lifetime in seconds (hard limit, triggers deletion; default: `0`, disabled) |
 | `network` | object | Network policy configuration |
 | `webhook` | object | Webhook configuration |
 | `auto_resume` | boolean | Auto-resume when accessed (default: true) |
@@ -68,10 +68,10 @@ The relationship: <code>ttl {'<='} hard_ttl</code>. When <code>ttl</code> expire
 When <code>hard_ttl</code> expires, sandbox is deleted immediately. Both can be extended via the refresh API.
 </Callout>
 
-**Example timeline:**
-- `t=0`: Sandbox created with `ttl=300` (5 min), `hard_ttl=3600` (1 hour)
+**Example timeline (sandbox created with `ttl=300` and `hard_ttl=3600`):**
+- `t=0`: Sandbox created
 - `t=300`: TTL expires → sandbox auto-pauses
-- `t=310`: User calls refresh → sandbox resumes, TTL reset to 300, Hard TTL reset to 3600 (new hard deadline at `t=3910`)
+- `t=310`: User calls refresh → TTL reset to 300, Hard TTL reset to 3600 (new hard deadline at `t=3910`)
 - `t=610`: TTL expires again → sandbox auto-pauses
 - `t=3910`: Hard TTL expires → sandbox deleted
 

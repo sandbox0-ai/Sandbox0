@@ -198,8 +198,8 @@ type ClaimRequest struct {
 // SandboxConfig represents sandbox configuration
 type SandboxConfig struct {
 	EnvVars      map[string]string                 `json:"env_vars,omitempty"`
-	TTL          int32                             `json:"ttl,omitempty"`      // Time-to-live in seconds
-	HardTTL      int32                             `json:"hard_ttl,omitempty"` // Hard time-to-live in seconds (0 disables)
+	TTL          *int32                            `json:"ttl,omitempty"`      // Time-to-live in seconds (0 disables)
+	HardTTL      *int32                            `json:"hard_ttl,omitempty"` // Hard time-to-live in seconds (0 disables)
 	Network      *v1alpha1.TplSandboxNetworkPolicy `json:"network,omitempty"`
 	Webhook      *WebhookConfig                    `json:"webhook,omitempty"`
 	AutoResume   *bool                             `json:"auto_resume,omitempty"`
@@ -210,8 +210,8 @@ type SandboxConfig struct {
 // Unlike SandboxConfig, env_vars and webhook are excluded as they only affect new processes
 // or require restart to take effect.
 type SandboxUpdateConfig struct {
-	TTL          int32                             `json:"ttl,omitempty"`
-	HardTTL      int32                             `json:"hard_ttl,omitempty"`
+	TTL          *int32                            `json:"ttl,omitempty"`
+	HardTTL      *int32                            `json:"hard_ttl,omitempty"`
 	Network      *v1alpha1.TplSandboxNetworkPolicy `json:"network,omitempty"`
 	AutoResume   *bool                             `json:"auto_resume,omitempty"`
 	ExposedPorts []ExposedPortConfig               `json:"exposed_ports,omitempty"`
@@ -220,6 +220,56 @@ type SandboxUpdateConfig struct {
 type ExposedPortConfig struct {
 	Port   int  `json:"port"`
 	Resume bool `json:"resume"`
+}
+
+func int32Ptr(v int32) *int32 {
+	return &v
+}
+
+func cloneSandboxConfig(cfg *SandboxConfig) *SandboxConfig {
+	if cfg == nil {
+		return nil
+	}
+	cloned := *cfg
+	return &cloned
+}
+
+func (s *SandboxService) claimConfigForPersistence(cfg *SandboxConfig) *SandboxConfig {
+	persisted := cloneSandboxConfig(cfg)
+	if persisted == nil {
+		if s.config.DefaultTTL <= 0 {
+			return nil
+		}
+		persisted = &SandboxConfig{}
+	}
+	if persisted.TTL == nil && s.config.DefaultTTL > 0 {
+		persisted.TTL = int32Ptr(int32(s.config.DefaultTTL.Seconds()))
+	}
+	return persisted
+}
+
+func setExpirationAnnotation(annotations map[string]string, now time.Time, ttl *int32) {
+	if annotations == nil {
+		return
+	}
+	if ttl == nil || *ttl <= 0 {
+		delete(annotations, controller.AnnotationExpiresAt)
+		return
+	}
+	expiresAt := now.Add(time.Duration(*ttl) * time.Second)
+	annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
+}
+
+func setHardExpirationAnnotation(annotations map[string]string, now time.Time, hardTTL *int32) {
+	if annotations == nil {
+		return
+	}
+	if hardTTL == nil || *hardTTL <= 0 {
+		delete(annotations, controller.AnnotationHardExpiresAt)
+		return
+	}
+	hardExpiresAt := now.Add(time.Duration(*hardTTL) * time.Second)
+	annotations[controller.AnnotationHardExpiresAt] = hardExpiresAt.Format(time.RFC3339)
 }
 
 // WebhookConfig represents outbound webhook configuration.
@@ -425,21 +475,16 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 		pod.Annotations[controller.AnnotationClaimedAt] = s.clock.Now().Format(time.RFC3339)
 		pod.Annotations[controller.AnnotationClaimType] = "hot"
 
-		// Set expiration time
-		ttl := int32(s.config.DefaultTTL.Seconds())
-		if req.Config != nil && req.Config.TTL > 0 {
-			ttl = req.Config.TTL
-		}
-		expiresAt := s.clock.Now().Add(time.Duration(ttl) * time.Second)
-		pod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
-		if req.Config != nil && req.Config.HardTTL > 0 {
-			hardExpiresAt := s.clock.Now().Add(time.Duration(req.Config.HardTTL) * time.Second)
-			pod.Annotations[controller.AnnotationHardExpiresAt] = hardExpiresAt.Format(time.RFC3339)
+		// Set expiration annotations. Explicit 0 disables TTLs; omitted TTL uses the configured default.
+		persistedConfig := s.claimConfigForPersistence(req.Config)
+		if persistedConfig != nil {
+			setExpirationAnnotation(pod.Annotations, s.clock.Now(), persistedConfig.TTL)
+			setHardExpirationAnnotation(pod.Annotations, s.clock.Now(), persistedConfig.HardTTL)
 		}
 
 		// Serialize config
-		if req.Config != nil {
-			configJSON, marshalErr := json.Marshal(req.Config)
+		if persistedConfig != nil {
+			configJSON, marshalErr := json.Marshal(persistedConfig)
 			if marshalErr != nil {
 				return fmt.Errorf("marshal config: %w", marshalErr)
 			}
@@ -465,7 +510,7 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 		s.logger.Info("Successfully claimed idle pod",
 			zap.String("pod", updatedPod.Name),
 			zap.String("sandboxID", updatedPod.Name),
-			zap.Time("expiresAt", expiresAt),
+			zap.String("expiresAt", updatedPod.Annotations[controller.AnnotationExpiresAt]),
 		)
 
 		claimedPod = updatedPod
@@ -514,21 +559,16 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 		Spec: spec,
 	}
 
-	// Set expiration time
-	ttl := int32(s.config.DefaultTTL.Seconds())
-	if req.Config != nil && req.Config.TTL > 0 {
-		ttl = req.Config.TTL
-	}
-	expiresAt := s.clock.Now().Add(time.Duration(ttl) * time.Second)
-	pod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
-	if req.Config != nil && req.Config.HardTTL > 0 {
-		hardExpiresAt := s.clock.Now().Add(time.Duration(req.Config.HardTTL) * time.Second)
-		pod.Annotations[controller.AnnotationHardExpiresAt] = hardExpiresAt.Format(time.RFC3339)
+	// Set expiration annotations. Explicit 0 disables TTLs; omitted TTL uses the configured default.
+	persistedConfig := s.claimConfigForPersistence(req.Config)
+	if persistedConfig != nil {
+		setExpirationAnnotation(pod.Annotations, s.clock.Now(), persistedConfig.TTL)
+		setHardExpirationAnnotation(pod.Annotations, s.clock.Now(), persistedConfig.HardTTL)
 	}
 
 	// Serialize config
-	if req.Config != nil {
-		configJSON, err := json.Marshal(req.Config)
+	if persistedConfig != nil {
+		configJSON, err := json.Marshal(persistedConfig)
 		if err != nil {
 			return nil, fmt.Errorf("marshal config: %w", err)
 		}
@@ -554,7 +594,7 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 	s.logger.Info("Created new pod for cold start",
 		zap.String("pod", createdPod.Name),
 		zap.String("sandboxID", createdPod.Name),
-		zap.Time("expiresAt", expiresAt),
+		zap.String("expiresAt", createdPod.Annotations[controller.AnnotationExpiresAt]),
 	)
 
 	return createdPod, nil
@@ -858,15 +898,13 @@ func (s *SandboxService) UpdateSandbox(ctx context.Context, sandboxID string, cf
 			}
 		}
 
-		if cfg.TTL > 0 {
+		if cfg.TTL != nil {
 			merged.TTL = cfg.TTL
-			expiresAt := s.clock.Now().Add(time.Duration(cfg.TTL) * time.Second)
-			updatedPod.Annotations[controller.AnnotationExpiresAt] = expiresAt.Format(time.RFC3339)
+			setExpirationAnnotation(updatedPod.Annotations, s.clock.Now(), cfg.TTL)
 		}
-		if cfg.HardTTL > 0 {
+		if cfg.HardTTL != nil {
 			merged.HardTTL = cfg.HardTTL
-			hardExpiresAt := s.clock.Now().Add(time.Duration(cfg.HardTTL) * time.Second)
-			updatedPod.Annotations[controller.AnnotationHardExpiresAt] = hardExpiresAt.Format(time.RFC3339)
+			setHardExpirationAnnotation(updatedPod.Annotations, s.clock.Now(), cfg.HardTTL)
 		}
 		if cfg.AutoResume != nil {
 			merged.AutoResume = cfg.AutoResume
@@ -1301,7 +1339,7 @@ type PausedState struct {
 	Resources map[string]ContainerResources `json:"resources"`
 	// OriginalTTL stores the original TTL (in seconds) set by user or default.
 	// On resume, this TTL is reused to reset the countdown.
-	OriginalTTL int32 `json:"original_ttl,omitempty"`
+	OriginalTTL *int32 `json:"original_ttl,omitempty"`
 }
 
 // ContainerResources stores resource requests/limits for a container.
@@ -1365,10 +1403,10 @@ func (s *SandboxService) PauseSandbox(ctx context.Context, sandboxID string) (*P
 		Resources: s.extractOriginalResources(pod),
 	}
 
-	// Extract original TTL from config annotation
+	// Extract original TTL from config annotation, preserving explicit 0 (disabled).
 	if configJSON := pod.Annotations[controller.AnnotationConfig]; configJSON != "" {
 		var config SandboxConfig
-		if err := json.Unmarshal([]byte(configJSON), &config); err == nil && config.TTL > 0 {
+		if err := json.Unmarshal([]byte(configJSON), &config); err == nil && config.TTL != nil {
 			pausedState.OriginalTTL = config.TTL
 		}
 	}
@@ -1522,14 +1560,12 @@ func (s *SandboxService) ResumeSandbox(ctx context.Context, sandboxID string) (*
 				annotationPod.Annotations = make(map[string]string)
 			}
 
-			// Reset TTL using original TTL (not remaining time)
-			if pausedState.OriginalTTL > 0 {
-				newExpiresAt := s.clock.Now().Add(time.Duration(pausedState.OriginalTTL) * time.Second)
-				annotationPod.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
-			} else {
-				newExpiresAt := s.clock.Now().Add(s.config.DefaultTTL)
-				annotationPod.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
+			// Reset TTL using original TTL (not remaining time). Explicit 0 remains disabled.
+			ttlToRestore := pausedState.OriginalTTL
+			if ttlToRestore == nil && s.config.DefaultTTL > 0 {
+				ttlToRestore = int32Ptr(int32(s.config.DefaultTTL.Seconds()))
 			}
+			setExpirationAnnotation(annotationPod.Annotations, s.clock.Now(), ttlToRestore)
 
 			// Remove pause annotations
 			delete(annotationPod.Annotations, controller.AnnotationPaused)
@@ -1692,44 +1728,42 @@ func (s *SandboxService) RefreshSandbox(ctx context.Context, sandboxID string, r
 		}
 	}
 
-	// Determine the TTL duration
-	var ttlDuration time.Duration
-	if req != nil && req.Duration > 0 {
-		ttlDuration = time.Duration(req.Duration) * time.Second
-	} else {
-		// Use original TTL from config, or default
-		ttlDuration = s.config.DefaultTTL
-		if originalConfig.TTL > 0 {
-			ttlDuration = time.Duration(originalConfig.TTL) * time.Second
-		}
-	}
-
-	// Determine the HardTTL duration
-	var hardTTLDuration time.Duration
-	if originalConfig.HardTTL > 0 {
-		hardTTLDuration = time.Duration(originalConfig.HardTTL) * time.Second
-	}
-
-	// Calculate new expiration times
-	newExpiresAt := s.clock.Now().Add(ttlDuration)
-
 	// Update pod annotation
 	podCopy := pod.DeepCopy()
 	if podCopy.Annotations == nil {
 		podCopy.Annotations = make(map[string]string)
 	}
-	podCopy.Annotations[controller.AnnotationExpiresAt] = newExpiresAt.Format(time.RFC3339)
+	now := s.clock.Now()
+	var ttlDuration time.Duration
 
-	// Also refresh HardTTL if configured
+	// Determine the TTL to apply. Explicit duration enables TTL for that duration; otherwise use original config/default.
+	var ttlToApply *int32
+	if req != nil && req.Duration > 0 {
+		ttlToApply = int32Ptr(req.Duration)
+	} else if originalConfig.TTL != nil {
+		ttlToApply = originalConfig.TTL
+	} else if s.config.DefaultTTL > 0 {
+		ttlToApply = int32Ptr(int32(s.config.DefaultTTL.Seconds()))
+	}
+	if ttlToApply != nil && *ttlToApply > 0 {
+		ttlDuration = time.Duration(*ttlToApply) * time.Second
+	}
+	setExpirationAnnotation(podCopy.Annotations, now, ttlToApply)
+
+	newExpiresAt := parseRFC3339AnnotationTime(podCopy.Annotations, controller.AnnotationExpiresAt)
+
+	// Also refresh HardTTL if configured.
 	var newHardExpiresAt time.Time
-	if hardTTLDuration > 0 {
-		newHardExpiresAt = s.clock.Now().Add(hardTTLDuration)
-		podCopy.Annotations[controller.AnnotationHardExpiresAt] = newHardExpiresAt.Format(time.RFC3339)
+	if originalConfig.HardTTL != nil && *originalConfig.HardTTL > 0 {
+		setHardExpirationAnnotation(podCopy.Annotations, now, originalConfig.HardTTL)
+		newHardExpiresAt = parseRFC3339AnnotationTime(podCopy.Annotations, controller.AnnotationHardExpiresAt)
 		s.logger.Info("Refreshing hard TTL",
 			zap.String("sandboxID", sandboxID),
 			zap.Time("newHardExpiresAt", newHardExpiresAt),
-			zap.Duration("hardTTLDuration", hardTTLDuration),
+			zap.Duration("hardTTLDuration", time.Duration(*originalConfig.HardTTL)*time.Second),
 		)
+	} else {
+		delete(podCopy.Annotations, controller.AnnotationHardExpiresAt)
 	}
 
 	// Apply the update

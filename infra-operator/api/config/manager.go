@@ -72,7 +72,7 @@ type ManagerConfig struct {
 
 	// Sandbox
 	// +optional
-	// +kubebuilder:default="5m"
+	// +kubebuilder:default="0s"
 	DefaultSandboxTTL metav1.Duration `yaml:"default_sandbox_ttl" json:"defaultSandboxTTL"`
 
 	// Netd apply wait
