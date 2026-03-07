@@ -1,0 +1,86 @@
+name: PR Quick Check
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: pr-quick-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick-check:
+    name: quick-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore infra build cache
+        uses: ./.github/actions/restore-infra-build-cache
+        with:
+          cache-key-suffix: pr-amd64
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          install-mode: binary
+          args: --version
+
+      - name: Verify Go formatting
+        shell: bash
+        run: |
+          files="$(git ls-files '*.go')"
+          if [ -z "$files" ]; then
+            exit 0
+          fi
+          unformatted="$(gofmt -l $files)"
+          if [ -n "$unformatted" ]; then
+            echo "Unformatted Go files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Verify go.mod/go.sum are tidy
+        shell: bash
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Verify generated artifacts are up to date
+        shell: bash
+        run: |
+          make proto manifests apispec
+          git diff --exit-code
+
+      - name: Helm lint
+        run: helm lint infra-operator/chart
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          packages="$(go list ./... | grep -Ev '/tests/(e2e|integration)(/|$)')"
+          GOTOOLCHAIN=go1.25.0+auto go test -race -count=1 $packages
+
+      - name: Show git diff on failure
+        if: failure()
+        shell: bash
+        run: |
+          git status --short
+          git diff --stat
