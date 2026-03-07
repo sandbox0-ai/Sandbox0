@@ -167,7 +167,7 @@ helm repo update
 helm install infra-operator sandbox0/infra-operator \
     --namespace sandbox0-system \
     --create-namespace \
-    --version 0.1.0-rc.5
+    --version 0.1.0-rc.11
 ```
 
 Apply the minimal single-cluster sample:
