@@ -179,10 +179,23 @@ kubectl apply -f https://raw.githubusercontent.com/sandbox0-ai/sandbox0/main/inf
 kubectl get sandbox0infra -n sandbox0-system -w
 ```
 
-Get the initial admin password:
+Get the initial admin credentials:
 
 ```bash
-kubectl get secret admin-password -n sandbox0-system -o jsonpath='{.data.password}' | base64 -d
+ADMIN_PASSWORD="$(kubectl get secret admin-password -n sandbox0-system -o jsonpath='{.data.password}' | base64 -d)"
+printf 'username: %s\npassword: %s\n' 'admin@example.com' "$ADMIN_PASSWORD"
+```
+
+Configure the local API URL and create a token:
+
+The local `kind` setup above exposes `internal-gateway` at `http://localhost:30080`.
+
+```bash
+export SANDBOX0_BASE_URL="http://localhost:30080"
+
+s0 auth login
+
+export SANDBOX0_TOKEN="$(s0 apikey create --name test-apikey --role admin --expires-in 30d --raw)"
 ```
 
 ## Production Notes

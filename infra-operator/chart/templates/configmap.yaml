@@ -6,8 +6,8 @@ metadata:
     {{- include "infra-operator.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    imageRepo: {{ .Values.config.imageRepo | default "sandbox0ai/infra" }}
-    imageTag: {{ .Values.config.imageTag | default (.Values.image.tag | default .Chart.AppVersion) }}
+    imageRepo: {{ .Values.image.repository }}
+    imageTag: {{ .Values.image.tag | default .Chart.AppVersion }}
     {{ if .Values.config.imagePullPolicy }}
     imagePullPolicy: {{ .Values.config.imagePullPolicy }}
     {{ end }}

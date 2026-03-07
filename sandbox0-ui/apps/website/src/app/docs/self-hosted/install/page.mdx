@@ -91,13 +91,32 @@ Expected `status.phase` lifecycle:
 2. `Upgrading` (when reconciling changes)
 3. `Ready`
 
-## 3) Initial Admin User
+## 3) Initial Admin Credentials
 
 If `spec.initUser.passwordSecret` is not provided, operator generates `admin-password`.
 
 ```bash
-kubectl get secret admin-password -n sandbox0-system -o jsonpath='{.data.password}' | base64 -d
+ADMIN_PASSWORD="$(kubectl get secret admin-password -n sandbox0-system -o jsonpath='{.data.password}' | base64 -d)"
+printf 'username: %s\npassword: %s\n' 'admin@example.com' "$ADMIN_PASSWORD"
 ```
+
+## 4) Configure the API URL and Create a Token
+
+For the local `kind` setup above, the API endpoint is `http://localhost:30080`.
+
+That is because the `kind` config maps host port `30080`, and the sample `Sandbox0Infra` exposes `internal-gateway` on the same NodePort.
+
+Export the base URL, log in with the initial admin account, then create an API token:
+
+```bash
+export SANDBOX0_BASE_URL="http://localhost:30080"
+
+s0 auth login
+
+export SANDBOX0_TOKEN="$(s0 apikey create --name test-apikey --role admin --expires-in 30d --raw)"
+```
+
+After that, continue with [Get Started](/docs/get-started) to make your first Sandbox0 API request.
 
 ## Next Steps
 
@@ -114,6 +133,6 @@ kubectl get secret admin-password -n sandbox0-system -o jsonpath='{.data.passwor
     href="/docs/get-started"
     cta="Start"
   >
-    Configure your API token and make your first request
+    Use `SANDBOX0_BASE_URL` and `SANDBOX0_TOKEN` to make your first request
   </LinkCard>
 </CardGrid>

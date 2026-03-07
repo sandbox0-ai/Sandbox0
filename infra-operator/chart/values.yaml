@@ -37,8 +37,4 @@ tolerations: []
 affinity: {}
 
 config:
-  # For infra services: edge-gateway, internal-gateway, manager, storage-proxy, etc.
-  imageRepo: "sandbox0ai/infra"
-  # Leave empty so managed components follow the operator image tag by default.
-  imageTag: ""
   imagePullPolicy: ""
