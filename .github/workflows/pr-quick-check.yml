@@ -21,6 +21,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Restore infra build cache
         uses: ./.github/actions/restore-infra-build-cache
@@ -71,7 +73,11 @@ jobs:
         run: helm lint infra-operator/chart
 
       - name: Run golangci-lint
-        run: golangci-lint run ./...
+        shell: bash
+        run: |
+          base_ref="${{ github.event.pull_request.base.ref }}"
+          git fetch --no-tags origin "${base_ref}" --depth=1
+          golangci-lint run --new-from-rev="origin/${base_ref}" ./...
 
       - name: Run unit tests
         shell: bash
