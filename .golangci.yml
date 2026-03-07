@@ -1,0 +1,58 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -QF1003
+        - -QF1008
+        - -S1009
+        - -S1011
+        - -S1017
+        - -S1021
+  exclusions:
+    rules:
+      - linters:
+          - staticcheck
+        text: "ST1000:"
+      - linters:
+          - staticcheck
+        text: "ST1003:"
+      - linters:
+          - staticcheck
+        text: "ST1020:"
+      - linters:
+          - staticcheck
+        text: "ST1021:"
+      - path: (^|/)tests/e2e/
+        linters:
+          - staticcheck
+        text: "ST1001:"
+      - path: (^|/)infra-operator/internal/controller/suite_test\\.go$
+        linters:
+          - staticcheck
+        text: "ST1001:"
+      - path: (^|/)k8s-plugin/deviceplugin\\.go$
+        linters:
+          - staticcheck
+        text: "SA1019:"
+      - path: (^|/)manager/pkg/controller/.*_test\\.go$
+        linters:
+          - staticcheck
+        text: "SA1019:"
+      - path: (^|/)manager/pkg/registry/aws\\.go$
+        linters:
+          - staticcheck
+        text: "SA1019:"
+      - path: (^|/)manager/procd/pkg/volume/manager\\.go$
+        linters:
+          - staticcheck
+        text: "SA1019:"
