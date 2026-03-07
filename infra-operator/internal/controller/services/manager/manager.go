@@ -266,6 +266,7 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 	}
 
 	cfg.TemplateStoreEnabled = templateStoreEnabledByInternalGateway(infra)
+	cfg.NetworkPolicyProvider = resolveNetworkPolicyProvider(infra)
 
 	if infra.Spec.Cluster != nil && infra.Spec.Cluster.ID != "" {
 		cfg.DefaultClusterId = infra.Spec.Cluster.ID
@@ -388,4 +389,11 @@ func templateStoreEnabledByInternalGateway(infra *infrav1alpha1.Sandbox0Infra) b
 		mode = "internal"
 	}
 	return mode != "internal"
+}
+
+func resolveNetworkPolicyProvider(infra *infrav1alpha1.Sandbox0Infra) string {
+	if infrav1alpha1.IsNetdEnabled(infra) {
+		return "netd"
+	}
+	return "noop"
 }

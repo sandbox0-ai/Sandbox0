@@ -1,8 +1,11 @@
 package http
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -38,6 +41,20 @@ type Server struct {
 	publicRootDomain string
 	publicRegionID   string
 }
+
+type claimSandboxCapabilityRequest struct {
+	Config *struct {
+		Network json.RawMessage `json:"network"`
+	} `json:"config"`
+}
+
+type updateSandboxCapabilityRequest struct {
+	Config *struct {
+		Network json.RawMessage `json:"network"`
+	} `json:"config"`
+}
+
+type capabilityBodyInspector func(target any) bool
 
 // TemplateReconciler exposes minimal reconcile controls for template syncing.
 type TemplateReconciler interface {
@@ -119,13 +136,13 @@ func (s *Server) setupRoutes() {
 		sandboxes := v1.Group("/sandboxes")
 		{
 			sandboxes.GET("", s.listSandboxes)
-			sandboxes.POST("", s.claimSandbox)
+			sandboxes.POST("", s.requireNetworkPolicyInBody(func() any { return &claimSandboxCapabilityRequest{} }), s.claimSandbox)
 			sandboxes.GET("/:id", s.getSandbox)
-			sandboxes.PUT("/:id", s.updateSandbox)
+			sandboxes.PUT("/:id", s.requireNetworkPolicyInBody(func() any { return &updateSandboxCapabilityRequest{} }), s.updateSandbox)
 			sandboxes.GET("/:id/status", s.getSandboxStatus)
 			sandboxes.GET("/:id/stats", s.getSandboxStats)
-			sandboxes.GET("/:id/network", s.getNetworkPolicy)
-			sandboxes.PUT("/:id/network", s.updateNetworkPolicy)
+			sandboxes.GET("/:id/network", s.requireNetworkPolicyCapability(), s.getNetworkPolicy)
+			sandboxes.PUT("/:id/network", s.requireNetworkPolicyCapability(), s.updateNetworkPolicy)
 			sandboxes.GET("/:id/exposed-ports", s.getExposedPorts)
 			sandboxes.PUT("/:id/exposed-ports", s.updateExposedPorts)
 			sandboxes.DELETE("/:id/exposed-ports", s.clearExposedPorts)
@@ -138,6 +155,7 @@ func (s *Server) setupRoutes() {
 
 		// Template management (public API)
 		templates := v1.Group("/templates")
+		templates.Use(s.requireTemplateStoreCapability())
 		{
 			templates.GET("", s.listTemplates)
 			templates.GET("/:id", s.getTemplate)
@@ -147,6 +165,7 @@ func (s *Server) setupRoutes() {
 		}
 
 		registry := v1.Group("/registry")
+		registry.Use(s.requireRegistryCapability())
 		{
 			registry.POST("/credentials", s.getRegistryCredentials)
 		}
@@ -322,4 +341,106 @@ func (s *Server) extractAuthToken(r *http.Request) string {
 	}
 
 	return ""
+}
+
+func (s *Server) requireNetworkPolicyCapability() gin.HandlerFunc {
+	return s.requireCapability(func() bool {
+		return s.sandboxService != nil && s.sandboxService.SupportsNetworkPolicy()
+	}, "network policy is unavailable in this deployment")
+}
+
+func (s *Server) requireNetworkPolicyInBody(newRequest func() any) gin.HandlerFunc {
+	return s.requireCapabilityInBody(
+		newRequest,
+		func(target any) bool { return requestContainsNetworkPolicy(target, nil) },
+		func() bool { return s.sandboxService != nil && s.sandboxService.SupportsNetworkPolicy() },
+		"network policy is unavailable in this deployment",
+	)
+}
+
+func (s *Server) requireTemplateStoreCapability() gin.HandlerFunc {
+	return s.requireCapability(func() bool {
+		return s.templateHandler != nil
+	}, "template store is disabled")
+}
+
+func (s *Server) requireRegistryCapability() gin.HandlerFunc {
+	return s.requireCapability(func() bool {
+		return s.registryService != nil
+	}, "registry provider is not configured")
+}
+
+func (s *Server) requireCapability(enabled func() bool, message string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if enabled != nil && enabled() {
+			c.Next()
+			return
+		}
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, message)
+		c.Abort()
+	}
+}
+
+func (s *Server) requireCapabilityInBody(
+	newRequest func() any,
+	inspector capabilityBodyInspector,
+	enabled func() bool,
+	message string,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bodyBytes, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			spec.JSONError(c, http.StatusBadRequest, spec.CodeBadRequest, "failed to read request body")
+			c.Abort()
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+		target := newRequest()
+		if !requestBodyRequiresCapability(target, bodyBytes, inspector) {
+			c.Next()
+			return
+		}
+		if enabled != nil && enabled() {
+			c.Next()
+			return
+		}
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, message)
+		c.Abort()
+	}
+}
+
+func requestBodyRequiresCapability(target any, body []byte, inspector capabilityBodyInspector) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		return false
+	}
+	if inspector == nil {
+		return false
+	}
+	return inspector(target)
+}
+
+func requestContainsNetworkPolicy(target any, _ []byte) bool {
+	switch req := target.(type) {
+	case *claimSandboxCapabilityRequest:
+		if req == nil || req.Config == nil {
+			return false
+		}
+		return rawMessagePresent(req.Config.Network)
+	case *updateSandboxCapabilityRequest:
+		if req == nil || req.Config == nil {
+			return false
+		}
+		return rawMessagePresent(req.Config.Network)
+	default:
+		return false
+	}
+}
+
+func rawMessagePresent(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	return len(raw) > 0 && !bytes.Equal(raw, []byte("null"))
 }

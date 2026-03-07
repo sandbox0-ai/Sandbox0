@@ -509,30 +509,55 @@ func (s *Server) readinessCheck(c *gin.Context) {
 }
 
 func (s *Server) managerUpstreamMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if strings.TrimSpace(s.cfg.ManagerURL) != "" && s.proxy2Mgr != nil && s.managerClient != nil {
-			c.Next()
-			return
-		}
-
-		s.logger.Error("Manager upstream not configured",
-			zap.String("manager_url", s.cfg.ManagerURL),
-		)
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "manager upstream not configured", "manager_url is empty")
-	}
+	return s.requireUpstream(
+		func() bool {
+			return strings.TrimSpace(s.cfg.ManagerURL) != "" && s.proxy2Mgr != nil && s.managerClient != nil
+		},
+		func() []zap.Field {
+			return []zap.Field{zap.String("manager_url", s.cfg.ManagerURL)}
+		},
+		"Manager upstream not configured",
+		"manager upstream not configured",
+		"manager_url is empty",
+	)
 }
 
 func (s *Server) storageProxyUpstreamMiddleware() gin.HandlerFunc {
+	return s.requireUpstream(
+		func() bool {
+			return strings.TrimSpace(s.cfg.StorageProxyURL) != "" && s.proxy2sp != nil
+		},
+		func() []zap.Field {
+			return []zap.Field{zap.String("storage_proxy_url", s.cfg.StorageProxyURL)}
+		},
+		"Storage-proxy upstream not configured",
+		"storage-proxy upstream not configured",
+		"storage_proxy_url is empty",
+	)
+}
+
+func (s *Server) requireUpstream(
+	ready func() bool,
+	logFields func() []zap.Field,
+	logMessage string,
+	clientMessage string,
+	detail any,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if strings.TrimSpace(s.cfg.StorageProxyURL) != "" && s.proxy2sp != nil {
+		if ready != nil && ready() {
 			c.Next()
 			return
 		}
 
-		s.logger.Error("Storage-proxy upstream not configured",
-			zap.String("storage_proxy_url", s.cfg.StorageProxyURL),
-		)
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "storage-proxy upstream not configured", "storage_proxy_url is empty")
+		if s.logger != nil {
+			fields := []zap.Field(nil)
+			if logFields != nil {
+				fields = logFields()
+			}
+			s.logger.Error(logMessage, fields...)
+		}
+		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, clientMessage, detail)
+		c.Abort()
 	}
 }
 

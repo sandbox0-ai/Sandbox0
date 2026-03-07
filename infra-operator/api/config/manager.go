@@ -75,6 +75,11 @@ type ManagerConfig struct {
 	// +kubebuilder:default="0s"
 	DefaultSandboxTTL metav1.Duration `yaml:"default_sandbox_ttl" json:"defaultSandboxTTL"`
 
+	// NetworkPolicyProvider selects the dataplane integration used to enforce sandbox network policy.
+	// +optional
+	// +kubebuilder:default="noop"
+	NetworkPolicyProvider string `yaml:"network_policy_provider" json:"-"`
+
 	// Netd apply wait
 	// +optional
 	// +kubebuilder:default="30s"

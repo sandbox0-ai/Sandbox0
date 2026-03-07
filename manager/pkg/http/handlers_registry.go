@@ -13,10 +13,6 @@ import (
 
 // getRegistryCredentials returns short-lived registry credentials for uploads.
 func (s *Server) getRegistryCredentials(c *gin.Context) {
-	if s.registryService == nil {
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "registry provider is not configured")
-		return
-	}
 	claims := internalauth.ClaimsFromContext(c.Request.Context())
 	teamID := ""
 	if claims != nil {

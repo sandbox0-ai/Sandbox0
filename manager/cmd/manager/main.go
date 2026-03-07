@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -187,14 +188,25 @@ func main() {
 	// Create network policy service for building policy annotations
 	networkPolicyService := service.NewNetworkPolicyService(logger)
 
-	networkProvider := network.NewNetdProvider(podInformer, podLister, network.NetdProviderConfig{
-		ApplyTimeout: cfg.NetdPolicyApplyTimeout.Duration,
-		PollInterval: cfg.NetdPolicyApplyPollInterval.Duration,
-	}, logger)
-	logger.Info("Network provider set to netd",
-		zap.Duration("applyTimeout", cfg.NetdPolicyApplyTimeout.Duration),
-		zap.Duration("pollInterval", cfg.NetdPolicyApplyPollInterval.Duration),
-	)
+	networkProviderName := strings.TrimSpace(strings.ToLower(cfg.NetworkPolicyProvider))
+	networkProvider := network.NewNoopProvider()
+	switch networkProviderName {
+	case "", "noop":
+		logger.Info("Network provider set to noop")
+	case "netd":
+		networkProvider = network.NewNetdProvider(podInformer, podLister, network.NetdProviderConfig{
+			ApplyTimeout: cfg.NetdPolicyApplyTimeout.Duration,
+			PollInterval: cfg.NetdPolicyApplyPollInterval.Duration,
+		}, logger)
+		logger.Info("Network provider set to netd",
+			zap.Duration("applyTimeout", cfg.NetdPolicyApplyTimeout.Duration),
+			zap.Duration("pollInterval", cfg.NetdPolicyApplyPollInterval.Duration),
+		)
+	default:
+		logger.Warn("Unknown network policy provider, falling back to noop",
+			zap.String("provider", cfg.NetworkPolicyProvider),
+		)
+	}
 
 	// Initialize internal auth generator for procd communication
 	var internalTokenGenerator service.TokenGenerator

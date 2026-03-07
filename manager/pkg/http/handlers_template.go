@@ -16,46 +16,26 @@ import (
 
 // listTemplates lists all templates.
 func (s *Server) listTemplates(c *gin.Context) {
-	if s.templateHandler == nil {
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "template store is disabled")
-		return
-	}
 	s.templateHandler.ListTemplates(c)
 }
 
 // getTemplate gets a template by ID.
 func (s *Server) getTemplate(c *gin.Context) {
-	if s.templateHandler == nil {
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "template store is disabled")
-		return
-	}
 	s.templateHandler.GetTemplate(c)
 }
 
 // createTemplate creates a new template.
 func (s *Server) createTemplate(c *gin.Context) {
-	if s.templateHandler == nil {
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "template store is disabled")
-		return
-	}
 	s.templateHandler.CreateTemplate(c)
 }
 
 // updateTemplate updates an existing template.
 func (s *Server) updateTemplate(c *gin.Context) {
-	if s.templateHandler == nil {
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "template store is disabled")
-		return
-	}
 	s.templateHandler.UpdateTemplate(c)
 }
 
 // deleteTemplate deletes a template.
 func (s *Server) deleteTemplate(c *gin.Context) {
-	if s.templateHandler == nil {
-		spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "template store is disabled")
-		return
-	}
 	s.templateHandler.DeleteTemplate(c)
 }
 

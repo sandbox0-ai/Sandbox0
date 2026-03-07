@@ -50,11 +50,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 
 	config := &apiconfig.NetdConfig{}
 	runtimeClassName := (*string)(nil)
+	nodeSelector := map[string]string(nil)
+	tolerations := []corev1.Toleration(nil)
 	if infra.Spec.Services != nil && infra.Spec.Services.Netd != nil && infra.Spec.Services.Netd.Config != nil {
 		config = infra.Spec.Services.Netd.Config
 	}
 	if infra.Spec.Services != nil && infra.Spec.Services.Netd != nil {
 		runtimeClassName = infra.Spec.Services.Netd.RuntimeClassName
+		nodeSelector = infra.Spec.Services.Netd.NodeSelector
+		tolerations = infra.Spec.Services.Netd.Tolerations
 	}
 	if config.NodeName == "" {
 		config.NodeName = "${NODE_NAME}"
@@ -159,6 +163,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, infra *infrav1alpha1.Sandbox
 					RuntimeClassName:   runtimeClassName,
 					HostNetwork:        true,
 					DNSPolicy:          corev1.DNSClusterFirstWithHostNet,
+					NodeSelector:       nodeSelector,
+					Tolerations:        tolerations,
 					Containers: []corev1.Container{
 						{
 							Name:            "netd",

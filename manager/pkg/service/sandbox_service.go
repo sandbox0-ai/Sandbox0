@@ -174,6 +174,11 @@ func NewSandboxService(
 	}
 }
 
+// SupportsNetworkPolicy reports whether this deployment has an active network policy provider.
+func (s *SandboxService) SupportsNetworkPolicy() bool {
+	return s != nil && s.networkProvider != nil && s.networkProvider.Name() != "noop"
+}
+
 // SetProcdClient overrides the procd client (used by tests).
 func (s *SandboxService) SetProcdClient(client *ProcdClient) {
 	if client == nil {

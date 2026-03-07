@@ -793,6 +793,14 @@ type NetdServiceConfig struct {
 	// Use a host-compatible runtime such as runc. Do not run netd on gVisor or Kata.
 	// +optional
 	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+	// NodeSelector constrains netd onto a specific node set.
+	// On GKE with gVisor sandboxes, use this to place netd onto the sandbox nodes
+	// while leaving RuntimeClassName unset so netd still uses the default host runtime.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations allow netd to run on tainted sandbox nodes.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
 	// Config contains netd specific configuration
 	// +optional
 	// +kubebuilder:default={}
