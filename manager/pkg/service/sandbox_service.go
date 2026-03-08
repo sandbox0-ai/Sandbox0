@@ -431,8 +431,8 @@ func (s *SandboxService) claimIdlePod(ctx context.Context, template *v1alpha1.Sa
 	var claimedPod *corev1.Pod
 	err := retry.OnError(claimIdlePodBackoff, k8serrors.IsConflict, func() error {
 		// Get all idle pods for this template
-		pods, listErr := s.podLister.Pods(template.ObjectMeta.Namespace).List(labels.SelectorFromSet(map[string]string{
-			controller.LabelTemplateID: template.ObjectMeta.Name,
+		pods, listErr := s.podLister.Pods(template.Namespace).List(labels.SelectorFromSet(map[string]string{
+			controller.LabelTemplateID: template.Name,
 			controller.LabelPoolType:   controller.PoolTypeIdle,
 		}))
 		if listErr != nil {
@@ -547,9 +547,9 @@ func (s *SandboxService) createNewPod(ctx context.Context, template *v1alpha1.Sa
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
-			Namespace: template.ObjectMeta.Namespace,
+			Namespace: template.Namespace,
 			Labels: map[string]string{
-				controller.LabelTemplateID: template.ObjectMeta.Name,
+				controller.LabelTemplateID: template.Name,
 				controller.LabelPoolType:   controller.PoolTypeActive,
 				controller.LabelSandboxID:  podName,
 			},
@@ -1188,8 +1188,7 @@ func (s *SandboxService) podToSandbox(ctx context.Context, pod *corev1.Pod, sand
 	claimedAt := parseRFC3339AnnotationTime(pod.Annotations, controller.AnnotationClaimedAt)
 	expiresAt := parseRFC3339AnnotationTime(pod.Annotations, controller.AnnotationExpiresAt)
 	hardExpiresAt := parseRFC3339AnnotationTime(pod.Annotations, controller.AnnotationHardExpiresAt)
-	var createdAt time.Time
-	createdAt = pod.CreationTimestamp.Time
+	createdAt := pod.CreationTimestamp.Time
 
 	internalAddr, err := s.prodAddress(ctx, pod)
 	if err != nil {

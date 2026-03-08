@@ -260,8 +260,8 @@ func (op *Operator) syncHandler(ctx context.Context, key string) error {
 // updateTemplateStatus updates the status of a SandboxTemplate
 func (op *Operator) updateTemplateStatus(ctx context.Context, template *v1alpha1.SandboxTemplate) error {
 	// Get idle pods
-	idlePods, err := op.podLister.Pods(template.ObjectMeta.Namespace).List(labels.SelectorFromSet(map[string]string{
-		LabelTemplateID: template.ObjectMeta.Name,
+	idlePods, err := op.podLister.Pods(template.Namespace).List(labels.SelectorFromSet(map[string]string{
+		LabelTemplateID: template.Name,
 		LabelPoolType:   PoolTypeIdle,
 	}))
 	if err != nil {
@@ -269,8 +269,8 @@ func (op *Operator) updateTemplateStatus(ctx context.Context, template *v1alpha1
 	}
 
 	// Get active pods
-	activePods, err := op.podLister.Pods(template.ObjectMeta.Namespace).List(labels.SelectorFromSet(map[string]string{
-		LabelTemplateID: template.ObjectMeta.Name,
+	activePods, err := op.podLister.Pods(template.Namespace).List(labels.SelectorFromSet(map[string]string{
+		LabelTemplateID: template.Name,
 		LabelPoolType:   PoolTypeActive,
 	}))
 	if err != nil {
@@ -314,7 +314,7 @@ func (op *Operator) updateTemplateStatus(ctx context.Context, template *v1alpha1
 	if shouldPublish && op.statsPublisher != nil {
 		if err := op.statsPublisher.PublishTemplateStats(ctx, template, idleCount, activeCount); err != nil {
 			op.logger.Warn("Failed to publish template stats",
-				zap.String("template", template.ObjectMeta.Name),
+				zap.String("template", template.Name),
 				zap.Error(err),
 			)
 		}
@@ -332,7 +332,7 @@ func (op *Operator) updateTemplateStatus(ctx context.Context, template *v1alpha1
 		// Note: In a real implementation, we should use a status subresource update
 		// For now, we'll just log the status
 		op.logger.Info("Template status updated",
-			zap.String("template", template.ObjectMeta.Name),
+			zap.String("template", template.Name),
 			zap.Int32("idle", idleCount),
 			zap.Int32("active", activeCount),
 		)
@@ -388,7 +388,7 @@ func (op *Operator) computeConditions(template *v1alpha1.SandboxTemplate, idleCo
 
 func (op *Operator) handleTemplateAdd(obj any) {
 	template := obj.(*v1alpha1.SandboxTemplate)
-	op.logger.Info("Template added", zap.String("name", template.ObjectMeta.Name))
+	op.logger.Info("Template added", zap.String("name", template.Name))
 	op.enqueueTemplate(template)
 }
 
@@ -396,7 +396,7 @@ func (op *Operator) handleTemplateUpdate(oldObj, newObj any) {
 	oldTemplate := oldObj.(*v1alpha1.SandboxTemplate)
 	newTemplate := newObj.(*v1alpha1.SandboxTemplate)
 
-	if oldTemplate.ObjectMeta.ResourceVersion == newTemplate.ObjectMeta.ResourceVersion {
+	if oldTemplate.ResourceVersion == newTemplate.ResourceVersion {
 		return
 	}
 
@@ -419,7 +419,7 @@ func (op *Operator) handleTemplateDelete(obj any) {
 		}
 	}
 
-	op.logger.Info("Template deleted", zap.String("name", template.ObjectMeta.Name))
+	op.logger.Info("Template deleted", zap.String("name", template.Name))
 	// Cleanup is handled by owner references
 }
 

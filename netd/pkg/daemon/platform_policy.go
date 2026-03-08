@@ -101,9 +101,7 @@ func (s *platformPolicyState) rebuild() {
 			allowedCIDRs = append(allowedCIDRs, svc.ClusterIP)
 		}
 		if ep := endpoints[key]; ep != nil {
-			for _, addr := range ep.Addresses {
-				allowedCIDRs = append(allowedCIDRs, addr)
-			}
+			allowedCIDRs = append(allowedCIDRs, ep.Addresses...)
 		}
 	}
 
@@ -185,7 +183,7 @@ func normalizeCIDRInputs(values []string, logger *zap.Logger) []string {
 		if value == "" {
 			continue
 		}
-		cidr := value
+		var cidr string
 		if !strings.Contains(value, "/") {
 			if ip := net.ParseIP(value); ip != nil {
 				cidr = ip.String() + "/32"
@@ -196,14 +194,14 @@ func normalizeCIDRInputs(values []string, logger *zap.Logger) []string {
 				continue
 			}
 		} else {
-			_, netCIDR, err := net.ParseCIDR(value)
-			if err != nil || netCIDR == nil {
+			_, parsedCIDR, err := net.ParseCIDR(value)
+			if err != nil || parsedCIDR == nil {
 				if logger != nil {
 					logger.Warn("Ignoring invalid platform CIDR", zap.String("value", value))
 				}
 				continue
 			}
-			cidr = netCIDR.String()
+			cidr = parsedCIDR.String()
 		}
 		if _, ok := seen[cidr]; ok {
 			continue

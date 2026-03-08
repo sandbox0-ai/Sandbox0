@@ -102,7 +102,7 @@ func (r *Sandbox0InfraReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Handle deletion
-	if !infra.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !infra.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, infra)
 	}
 

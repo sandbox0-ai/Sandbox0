@@ -195,11 +195,6 @@ func (m *iptablesManager) flushCustomChain(ctx context.Context) error {
 	return m.ipt.ClearChain(mangleTable, chainName)
 }
 
-func (m *iptablesManager) appendCustomRule(ctx context.Context, args ...string) error {
-	_ = ctx
-	return m.ipt.Append(mangleTable, chainName, args...)
-}
-
 func normalizeIPs(values []string) []string {
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}

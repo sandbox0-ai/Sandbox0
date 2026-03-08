@@ -29,8 +29,6 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-const dialect = "pgx"
-
 // Options configures the migrator behavior.
 type Options struct {
 	// Logger is an optional logger for migration output.

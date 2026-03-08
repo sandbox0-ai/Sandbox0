@@ -1,0 +1,65 @@
+name: PR E2E
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: pr-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      KIND_CLUSTER_NAME: sandbox0-pr-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare infra environment
+        uses: ./.github/actions/prepare-infra
+        with:
+          infra-dir: .
+          kind-config: tests/e2e/kind-config.yaml
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          cache-key-suffix: pr-amd64
+
+      - name: Run PR E2E
+        env:
+          E2E_USE_EXISTING_CLUSTER: "true"
+          E2E_CLUSTER_NAME: ${{ env.KIND_CLUSTER_NAME }}
+        run: make test-e2e
+
+      - name: Dump cluster state on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== pods ==="
+          kubectl get pods -A -o wide || true
+          echo "=== sandbox0-system events ==="
+          kubectl -n sandbox0-system get events --sort-by=.lastTimestamp || true
+          echo "=== infra-operator events ==="
+          kubectl -n infra-operator get events --sort-by=.lastTimestamp || true
+          echo "=== infra-operator logs ==="
+          kubectl -n infra-operator logs deploy/infra-operator --all-containers --tail=-1 || true
+          kind export logs "${RUNNER_TEMP}/kind-logs" --name "${KIND_CLUSTER_NAME}" || true
+
+      - name: Upload kind logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-e2e-kind-logs
+          path: ${{ runner.temp }}/kind-logs
+          if-no-files-found: ignore
+
+      - name: Cleanup Kind cluster
+        if: always()
+        run: kind delete cluster --name "${KIND_CLUSTER_NAME}" || true

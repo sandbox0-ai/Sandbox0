@@ -174,9 +174,7 @@ func (m *Manager) DeleteContext(id string) error {
 		return ErrContextNotFound
 	}
 
-	if err := ctx.Stop(); err != nil {
-		// Log but continue with deletion
-	}
+	_ = ctx.Stop()
 
 	delete(m.contexts, id)
 	return nil

@@ -254,12 +254,6 @@ func requestLogger(logger *zap.Logger) gin.HandlerFunc {
 			return
 		}
 
-		// Start timer
-		start := c.Request.Context().Value("start")
-		if start == nil {
-			start = c.Request.Context()
-		}
-
 		// Process request
 		c.Next()
 

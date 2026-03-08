@@ -165,13 +165,6 @@ func (c *CMD) context() context.Context {
 	return ctx
 }
 
-func (c *CMD) cancelFunc() context.CancelFunc {
-	c.mu.RLock()
-	cancel := c.cancel
-	c.mu.RUnlock()
-	return cancel
-}
-
 func (c *CMD) setContext(ctx context.Context, cancel context.CancelFunc) {
 	c.mu.Lock()
 	c.ctx = ctx

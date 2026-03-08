@@ -119,7 +119,7 @@ func (cc *CleanupController) runCleanup(ctx context.Context) error {
 	for _, template := range templates {
 		if err := cc.cleanupExpired(ctx, template); err != nil {
 			cc.logger.Error("Failed to cleanup expired sandbox",
-				zap.String("template", template.ObjectMeta.Name),
+				zap.String("template", template.Name),
 				zap.Error(err),
 			)
 		}
@@ -131,8 +131,8 @@ func (cc *CleanupController) runCleanup(ctx context.Context) error {
 // cleanupExpired cleans up expired active pods
 func (cc *CleanupController) cleanupExpired(ctx context.Context, template *v1alpha1.SandboxTemplate) error {
 	// Get all active pods for this template
-	pods, err := cc.podLister.Pods(template.ObjectMeta.Namespace).List(labels.SelectorFromSet(map[string]string{
-		LabelTemplateID: template.ObjectMeta.Name,
+	pods, err := cc.podLister.Pods(template.Namespace).List(labels.SelectorFromSet(map[string]string{
+		LabelTemplateID: template.Name,
 		LabelPoolType:   PoolTypeActive,
 	}))
 	if err != nil {
@@ -235,7 +235,7 @@ func (cc *CleanupController) cleanupExpired(ctx context.Context, template *v1alp
 
 	if expiredCount > 0 {
 		cc.logger.Info("Cleaned up expired pods",
-			zap.String("template", template.ObjectMeta.Name),
+			zap.String("template", template.Name),
 			zap.Int("count", expiredCount),
 		)
 	}

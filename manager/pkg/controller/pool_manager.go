@@ -82,8 +82,8 @@ func NewPoolManager(
 // ReconcilePool reconciles the idle pool for a template
 func (pm *PoolManager) ReconcilePool(ctx context.Context, template *v1alpha1.SandboxTemplate) error {
 	pm.logger.Info("Reconciling pool",
-		zap.String("template", template.ObjectMeta.Name),
-		zap.String("namespace", template.ObjectMeta.Namespace),
+		zap.String("template", template.Name),
+		zap.String("namespace", template.Namespace),
 		zap.Int32("minIdle", template.Spec.Pool.MinIdle),
 	)
 
@@ -112,13 +112,13 @@ func (pm *PoolManager) ReconcilePool(ctx context.Context, template *v1alpha1.San
 	// 4. Check if replicas match minIdle
 	if rs.Spec.Replicas == nil || *rs.Spec.Replicas != template.Spec.Pool.MinIdle {
 		pm.logger.Info("Updating ReplicaSet replicas",
-			zap.String("template", template.ObjectMeta.Name),
+			zap.String("template", template.Name),
 			zap.Int32("current", getInt32Value(rs.Spec.Replicas)),
 			zap.Int32("desired", template.Spec.Pool.MinIdle),
 		)
 
 		rs.Spec.Replicas = &template.Spec.Pool.MinIdle
-		_, err = pm.k8sClient.AppsV1().ReplicaSets(template.ObjectMeta.Namespace).Update(ctx, rs, metav1.UpdateOptions{})
+		_, err = pm.k8sClient.AppsV1().ReplicaSets(template.Namespace).Update(ctx, rs, metav1.UpdateOptions{})
 		if err != nil {
 			pm.recorder.Eventf(template, corev1.EventTypeWarning, "ReplicaSetUpdateFailed",
 				"Failed to update ReplicaSet: %v", err)
@@ -143,7 +143,7 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 		return nil, fmt.Errorf("ensure procd config secret: %w", err)
 	}
 	// Try to get existing ReplicaSet
-	rs, err := pm.replicaSetLister.ReplicaSets(template.ObjectMeta.Namespace).Get(rsName)
+	rs, err := pm.replicaSetLister.ReplicaSets(template.Namespace).Get(rsName)
 	if err == nil {
 		return rs, nil
 	}
@@ -166,9 +166,9 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 	rs = &appsv1.ReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rsName,
-			Namespace: template.ObjectMeta.Namespace,
+			Namespace: template.Namespace,
 			Labels: map[string]string{
-				LabelTemplateID: template.ObjectMeta.Name,
+				LabelTemplateID: template.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(template, v1alpha1.SchemeGroupVersion.WithKind("SandboxTemplate")),
@@ -178,7 +178,7 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 			Replicas: &template.Spec.Pool.MinIdle,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					LabelTemplateID: template.ObjectMeta.Name,
+					LabelTemplateID: template.Name,
 					LabelPoolType:   PoolTypeIdle,
 				},
 			},
@@ -186,7 +186,7 @@ func (pm *PoolManager) getOrCreateReplicaSet(ctx context.Context, template *v1al
 		},
 	}
 
-	rs, err = pm.k8sClient.AppsV1().ReplicaSets(template.ObjectMeta.Namespace).Create(ctx, rs, metav1.CreateOptions{})
+	rs, err = pm.k8sClient.AppsV1().ReplicaSets(template.Namespace).Create(ctx, rs, metav1.CreateOptions{})
 	if err != nil {
 		pm.recorder.Eventf(template, corev1.EventTypeWarning, "ReplicaSetCreateFailed",
 			"Failed to create ReplicaSet: %v", err)
@@ -205,7 +205,7 @@ func (pm *PoolManager) buildPodTemplate(template *v1alpha1.SandboxTemplate, rest
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
-				LabelTemplateID: template.ObjectMeta.Name,
+				LabelTemplateID: template.Name,
 				LabelPoolType:   PoolTypeIdle,
 			},
 			Annotations: map[string]string{
@@ -242,7 +242,7 @@ func (pm *PoolManager) reconcileReplicaSetTemplate(
 	pm.recorder.Eventf(template, corev1.EventTypeNormal, "ReplicaSetTemplateUpdated",
 		"Updated ReplicaSet pod template hash to %s", desiredTemplateHash)
 	pm.logger.Info("Updated ReplicaSet pod template hash",
-		zap.String("template", template.ObjectMeta.Name),
+		zap.String("template", template.Name),
 		zap.String("hash", desiredTemplateHash),
 	)
 	return updatedRS, nil
@@ -275,7 +275,7 @@ func (pm *PoolManager) drainStaleIdlePods(ctx context.Context, template *v1alpha
 		pm.recorder.Eventf(template, corev1.EventTypeNormal, "StaleIdlePodsDrained",
 			"Drained %d stale idle pod(s) with outdated template hash", drained)
 		pm.logger.Info("Drained stale idle pods",
-			zap.String("template", template.ObjectMeta.Name),
+			zap.String("template", template.Name),
 			zap.Int("count", drained),
 			zap.String("desiredHash", desiredTemplateHash),
 		)

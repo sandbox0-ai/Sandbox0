@@ -79,9 +79,7 @@ func buildContainers(template *SandboxTemplate) []corev1.Container {
 		buildContainer(&template.Spec.MainContainer, template),
 	}
 
-	for i := range template.Spec.Sidecars {
-		containers = append(containers, template.Spec.Sidecars[i])
-	}
+	containers = append(containers, template.Spec.Sidecars...)
 	return containers
 }
 

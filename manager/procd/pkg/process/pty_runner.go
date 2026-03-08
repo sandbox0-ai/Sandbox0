@@ -171,11 +171,12 @@ func (r *PTYRunner) monitorProcess() {
 
 	duration := time.Since(r.base.StartTime())
 
-	if exitCode == 0 {
+	switch exitCode {
+	case 0:
 		r.base.SetState(ProcessStateStopped)
-	} else if exitCode == -1 || exitCode == 137 {
+	case -1, 137:
 		r.base.SetState(ProcessStateKilled)
-	} else {
+	default:
 		r.base.SetState(ProcessStateCrashed)
 	}
 

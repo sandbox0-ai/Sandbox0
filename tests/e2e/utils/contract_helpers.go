@@ -35,15 +35,18 @@ func ValidateRequestExample(t ContractT, method, path, contentType string, paylo
 		t.Fatalf("resolve operation: %v", err)
 	}
 	if operation.RequestBody == nil || operation.RequestBody.Value == nil {
-		if payload == nil {
+		if isEmptyPayload(payload) {
 			return
 		}
 		t.Fatalf("request body not defined for %s %s", strings.ToUpper(method), path)
 	}
 
 	body := operation.RequestBody.Value
-	if body.Required && payload == nil {
+	if body.Required && isEmptyPayload(payload) {
 		t.Fatalf("request body is required for %s %s", strings.ToUpper(method), path)
+	}
+	if !body.Required && isEmptyPayload(payload) {
+		return
 	}
 
 	ct := normalizeContentType(contentType)
@@ -83,7 +86,7 @@ func ValidateResponseExample(t ContractT, method, path string, status int, conte
 	}
 
 	ct := normalizeContentType(contentType)
-	if responseRef.Value.Content == nil || len(responseRef.Value.Content) == 0 {
+	if len(responseRef.Value.Content) == 0 {
 		if isEmptyPayload(payload) {
 			return
 		}

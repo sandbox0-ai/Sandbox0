@@ -147,9 +147,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 
 		code := spec.CodeBadRequest
-		if status == http.StatusForbidden {
+		switch status {
+		case http.StatusForbidden:
 			code = spec.CodeForbidden
-		} else if status == http.StatusConflict {
+		case http.StatusConflict:
 			code = spec.CodeConflict
 		}
 		spec.JSONError(c, status, code, err.Error())
