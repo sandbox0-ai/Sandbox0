@@ -8,25 +8,17 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-1f8f5f?style=for-the-badge" alt="License" /></a>
 </p>
 
-Sandbox0 is a Kubernetes-native sandbox runtime for AI agents and interactive workloads that need a real `bash` environment, durable workspace state, and private deployment boundaries.
+Sandbox0 is a general-purpose sandbox for building AI Agents. You can set any Docker image as a custom template image.
 
-Modern AI agents need more than a disposable container or a toy code interpreter. They need to run shell commands, install dependencies, keep working directories warm across turns, persist workspace data across restarts, and manage interactive runtimes such as shells, language interpreters, database consoles, and custom REPLs through one consistent runtime layer.
+Key features of Sandbox0:
+- Hot Sandbox Pool: Pre-creates idle Pods for millisecond-level startup times.
+- Persistent Storage: Persistent Volumes based on JuiceFS, supporting snapshot/restore/fork.
+- Network Control: netd implements node-level L4/L7 policy enforcement.
+- Process Management: procd acts as the sandbox's PID=1, supporting REPL processes requiring session persistence (e.g., bash, python, node, redis-cli) and one-time Cmd processes.
+- Self-hosting Friendly: Complete private deployment solution.
+- Modular Installation: From a minimal mode with only 2 services to a single-cluster full mode, and multi-cluster horizontal scaling.
 
-Sandbox0 is built for that operational reality. It combines warm sandbox pools, in-pod process management, persistent volumes with snapshot workflows, node-level network enforcement, and runtime-agnostic deployment choices. Through template-level `runtimeClassName`, teams can use a standard Kubernetes runtime in development and move to stricter isolation such as gVisor or Kata in production. The result is an agent runtime that feels closer to a reusable machine than a throwaway container.
-
-Some enterprise capabilities are protected by built-in license-based feature gates for operators running Sandbox0 in production environments.
-
-## Why It Exists
-
-Most teams hit the same wall when they try to ship AI agents on top of containers:
-
-- Cold starts are too slow for agent loops that need sub-second to low-second feedback.
-- A plain container is not enough when the agent needs `bash`, long-lived processes, REPL sessions, database and cache CLIs, and file operations in one environment.
-- Filesystem state disappears as soon as the pod is recycled, which breaks multi-turn workflows and human handoff.
-- Network and tenant isolation become fragile once many agents and users share a cluster.
-- The operational model collapses under real production requirements such as private deployment, regional isolation, and upgrades.
-
-Sandbox0 is built to solve those problems as one system, not as a pile of disconnected components.
+It can serve as an E2B alternative, suitable for general agents, coding agents, browser agents, and other scenarios.
 
 ## What Makes It Different
 
@@ -39,14 +31,6 @@ Sandbox0 is built to solve those problems as one system, not as a pile of discon
 - Runtime-agnostic sandboxing via template `runtimeClassName`, so the same system can run on a standard Kubernetes runtime in development and move to stronger isolation such as gVisor or Kata in production.
 - A deployment model that scales from a simple single-cluster setup to multi-cluster regional routing with `edge-gateway` and `scheduler`.
 - Operator-first lifecycle management, so installation, reconciliation, and upgrades follow a repeatable Kubernetes-native path instead of bespoke scripts.
-
-## Built For
-
-- Coding agents that need a real shell, writable filesystem, package installs, REPL sessions, and multi-step task execution.
-- Agent products that need durable workspaces, checkpoints, and generated artifacts to survive across turns, retries, and pod replacement.
-- Browser automation and interactive runtimes where startup delay is directly visible to end users.
-- Internal developer platforms that want reusable sandbox templates and persistent workspaces without building the infrastructure layer from scratch.
-- Enterprise or regional deployments that need private control over storage, networking, and cluster topology.
 
 ### Architecture
 

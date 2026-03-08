@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "/Users/huangzhihao/sandbox0/workspace/infra/infra-operator/chart/crds/infra.sandbox0.ai_sandbox0infras.yaml",
+  "generatedFrom": "/Users/huangzhihao/sandbox0/workspace/sandbox0/infra-operator/chart/crds/infra.sandbox0.ai_sandbox0infras.yaml",
   "sections": [
     {
       "key": "spec.database",
@@ -2431,7 +2431,7 @@
           "path": "spec.services.manager.config.defaultSandboxTTL",
           "type": "string",
           "required": false,
-          "default": "5m",
+          "default": "0s",
           "description": "Sandbox"
         },
         {
@@ -3390,6 +3390,12 @@
           "description": "TLSSecret specifies the TLS secret name"
         },
         {
+          "path": "spec.services.netd.nodeSelector",
+          "type": "object",
+          "required": false,
+          "description": "NodeSelector constrains netd onto a specific node set. On GKE with gVisor sandboxes, use this to place netd onto the sandbox nodes while leaving RuntimeClassName unset so netd still uses the default host runtime."
+        },
+        {
           "path": "spec.services.netd.replicas",
           "type": "integer",
           "required": false,
@@ -3439,6 +3445,12 @@
           "description": "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
         },
         {
+          "path": "spec.services.netd.runtimeClassName",
+          "type": "string",
+          "required": false,
+          "description": "RuntimeClassName specifies the Kubernetes runtime class for the netd daemonset. Use a host-compatible runtime such as runc. Do not run netd on gVisor or Kata."
+        },
+        {
           "path": "spec.services.netd.service",
           "type": "object",
           "required": false,
@@ -3457,6 +3469,48 @@
           "required": false,
           "default": "ClusterIP",
           "description": "Type specifies the service type"
+        },
+        {
+          "path": "spec.services.netd.tolerations",
+          "type": "array\u003cobject\u003e",
+          "required": false,
+          "description": "Tolerations allow netd to run on tainted sandbox nodes."
+        },
+        {
+          "path": "spec.services.netd.tolerations[]",
+          "type": "object",
+          "required": false,
+          "description": "The pod this Toleration is attached to tolerates any taint that matches the triple \u003ckey,value,effect\u003e using the matching operator \u003coperator\u003e."
+        },
+        {
+          "path": "spec.services.netd.tolerations[].effect",
+          "type": "string",
+          "required": false,
+          "description": "Effect indicates the taint effect to match. Empty means match all taint effects. When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute."
+        },
+        {
+          "path": "spec.services.netd.tolerations[].key",
+          "type": "string",
+          "required": false,
+          "description": "Key is the taint key that the toleration applies to. Empty means match all taint keys. If the key is empty, operator must be Exists; this combination means to match all values and all keys."
+        },
+        {
+          "path": "spec.services.netd.tolerations[].operator",
+          "type": "string",
+          "required": false,
+          "description": "Operator represents a key's relationship to the value. Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal. Exists is equivalent to wildcard for value, so that a pod can tolerate all taints of a particular category. Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators)."
+        },
+        {
+          "path": "spec.services.netd.tolerations[].tolerationSeconds",
+          "type": "integer",
+          "required": false,
+          "description": "TolerationSeconds represents the period of time the toleration (which must be of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default, it is not set, which means tolerate the taint forever (do not evict). Zero and negative values will be treated as 0 (evict immediately) by the system."
+        },
+        {
+          "path": "spec.services.netd.tolerations[].value",
+          "type": "string",
+          "required": false,
+          "description": "Value is the taint value the toleration matches to. If the operator is Exists, the value should be empty, otherwise just a regular string."
         }
       ]
     }
