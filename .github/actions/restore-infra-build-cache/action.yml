@@ -31,7 +31,6 @@ runs:
       with:
         path: |
           ~/.cache/go-build
-          ~/go/pkg/mod
           ${{ inputs.infra-dir }}/bin
         key: infra-build-${{ runner.os }}-${{ inputs.cache-key-suffix }}
         restore-keys: |
