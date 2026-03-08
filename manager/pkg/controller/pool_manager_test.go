@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sandbox0-ai/sandbox0/manager/pkg/apis/sandbox0/v1alpha1"
@@ -107,6 +109,53 @@ func TestDrainStaleIdlePodsUsesDeletePreconditions(t *testing.T) {
 	assert.Equal(t, 1, deleteActions)
 }
 
+func TestDrainStaleIdlePodsSkipsClaimedActivePods(t *testing.T) {
+	template := &v1alpha1.SandboxTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "template-a",
+			Namespace: "default",
+		},
+	}
+
+	activePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "active-old",
+			Namespace:       "default",
+			UID:             types.UID("uid-active"),
+			ResourceVersion: "21",
+			Labels: map[string]string{
+				LabelTemplateID: "template-a",
+				LabelPoolType:   PoolTypeActive,
+			},
+			Annotations: map[string]string{
+				AnnotationTemplateSpecHash: "old-hash",
+			},
+		},
+	}
+
+	client := fake.NewSimpleClientset(activePod)
+	podIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	require.NoError(t, podIndexer.Add(activePod))
+	podLister := corelisters.NewPodLister(podIndexer)
+
+	deleteActions := 0
+	client.PrependReactor("delete", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		deleteActions++
+		return false, nil, nil
+	})
+
+	pm := &PoolManager{
+		k8sClient: client,
+		podLister: podLister,
+		recorder:  record.NewFakeRecorder(10),
+		logger:    zap.NewNop(),
+	}
+
+	err := pm.drainStaleIdlePods(context.Background(), template, "new-hash")
+	require.NoError(t, err)
+	assert.Equal(t, 0, deleteActions)
+}
+
 func TestReconcileReplicaSetTemplateUpdatesHash(t *testing.T) {
 	template := &v1alpha1.SandboxTemplate{
 		ObjectMeta: metav1.ObjectMeta{
@@ -148,4 +197,51 @@ func TestReconcileReplicaSetTemplateUpdatesHash(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, updated.Spec.Template.Annotations)
 	assert.Equal(t, "new-hash", updated.Spec.Template.Annotations[AnnotationTemplateSpecHash])
+}
+
+func TestTemplateSpecHashIncludesManagerInjectedPlacement(t *testing.T) {
+	template := &v1alpha1.SandboxTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "template-a",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.SandboxTemplateSpec{
+			MainContainer: v1alpha1.ContainerSpec{
+				Image: "busybox:latest",
+			},
+		},
+	}
+
+	configA := writeManagerConfig(t, `
+manager_image: sandbox0/manager:test
+sandbox_pod_placement:
+  node_selector:
+    sandbox0.ai/node-role: sandbox-a
+`)
+	t.Setenv("CONFIG_PATH", configA)
+
+	hashA, err := templateSpecHash(template)
+	require.NoError(t, err)
+
+	configB := writeManagerConfig(t, `
+manager_image: sandbox0/manager:test
+sandbox_pod_placement:
+  node_selector:
+    sandbox0.ai/node-role: sandbox-b
+`)
+	t.Setenv("CONFIG_PATH", configB)
+
+	hashB, err := templateSpecHash(template)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, hashA, hashB)
+}
+
+func writeManagerConfig(t *testing.T, contents string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	err := os.WriteFile(path, []byte(contents), 0o600)
+	require.NoError(t, err)
+	return path
 }

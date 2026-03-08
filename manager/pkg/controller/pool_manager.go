@@ -321,7 +321,8 @@ func (pm *PoolManager) deleteStaleIdlePodWithRetry(ctx context.Context, namespac
 }
 
 func templateSpecHash(template *v1alpha1.SandboxTemplate) (string, error) {
-	b, err := json.Marshal(template.Spec)
+	podSpec := v1alpha1.BuildPodSpec(template, true)
+	b, err := json.Marshal(podSpec)
 	if err != nil {
 		return "", err
 	}
