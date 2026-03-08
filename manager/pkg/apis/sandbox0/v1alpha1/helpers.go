@@ -190,6 +190,12 @@ func buildContainer(spec *ContainerSpec, template *SandboxTemplate) corev1.Conta
 	for k, v := range template.Spec.EnvVars {
 		envVars = append(envVars, corev1.EnvVar{Name: k, Value: v})
 	}
+	sort.Slice(envVars, func(i, j int) bool {
+		if envVars[i].Name != envVars[j].Name {
+			return envVars[i].Name < envVars[j].Name
+		}
+		return envVars[i].Value < envVars[j].Value
+	})
 	for _, ev := range spec.Env {
 		envVars = append(envVars, corev1.EnvVar{Name: ev.Name, Value: ev.Value})
 	}
