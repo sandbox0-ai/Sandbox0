@@ -4,17 +4,21 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 const contentTypeBinary = "application/octet-stream"
 
 func (s *Session) CreateDirectory(ctx context.Context, t ContractT, sandboxID, dirPath string, recursive bool) (int, error) {
-	specPath := "/api/v1/sandboxes/{id}/files/{path}"
-	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files/" + dirPath + "?mkdir=true"
+	specPath := "/api/v1/sandboxes/{id}/files"
+	query := url.Values{}
+	query.Set("path", dirPath)
+	query.Set("mkdir", "true")
 	if recursive {
-		requestPath += "&recursive=true"
+		query.Set("recursive", "true")
 	}
+	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files?" + query.Encode()
 	status, body, err := s.doRawSpecRequest(t, ctx, http.MethodPost, specPath, requestPath, nil, contentTypeBinary, defaultContentType, true)
 	if err != nil {
 		return status, err
@@ -29,8 +33,8 @@ func (s *Session) WriteFile(ctx context.Context, t ContractT, sandboxID, filePat
 	if strings.TrimSpace(contentType) == "" {
 		contentType = contentTypeBinary
 	}
-	specPath := "/api/v1/sandboxes/{id}/files/{path}"
-	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files/" + filePath
+	specPath := "/api/v1/sandboxes/{id}/files"
+	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files?path=" + url.QueryEscape(filePath)
 	status, body, err := s.doRawSpecRequest(t, ctx, http.MethodPost, specPath, requestPath, content, contentType, defaultContentType, true)
 	if err != nil {
 		return status, err
@@ -42,8 +46,8 @@ func (s *Session) WriteFile(ctx context.Context, t ContractT, sandboxID, filePat
 }
 
 func (s *Session) ReadFile(ctx context.Context, t ContractT, sandboxID, filePath string) ([]byte, int, error) {
-	specPath := "/api/v1/sandboxes/{id}/files/{path}"
-	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files/" + filePath
+	specPath := "/api/v1/sandboxes/{id}/files"
+	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files?path=" + url.QueryEscape(filePath)
 	status, body, err := s.doRawSpecRequest(t, ctx, http.MethodGet, specPath, requestPath, nil, "", contentTypeBinary, true)
 	if err != nil {
 		return nil, status, err
@@ -55,8 +59,8 @@ func (s *Session) ReadFile(ctx context.Context, t ContractT, sandboxID, filePath
 }
 
 func (s *Session) ListFiles(ctx context.Context, t ContractT, sandboxID, dirPath string) ([]byte, int, error) {
-	specPath := "/api/v1/sandboxes/{id}/files/{path}"
-	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files/" + dirPath + "?list=true"
+	specPath := "/api/v1/sandboxes/{id}/files/list"
+	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files/list?path=" + url.QueryEscape(dirPath)
 	status, body, err := s.doRawSpecRequest(t, ctx, http.MethodGet, specPath, requestPath, nil, "", defaultContentType, true)
 	if err != nil {
 		return nil, status, err
