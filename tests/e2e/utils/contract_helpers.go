@@ -42,8 +42,11 @@ func ValidateRequestExample(t ContractT, method, path, contentType string, paylo
 	}
 
 	body := operation.RequestBody.Value
-	if body.Required && payload == nil {
+	if body.Required && isEmptyPayload(payload) {
 		t.Fatalf("request body is required for %s %s", strings.ToUpper(method), path)
+	}
+	if !body.Required && isEmptyPayload(payload) {
+		return
 	}
 
 	ct := normalizeContentType(contentType)
