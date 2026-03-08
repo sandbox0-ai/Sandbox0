@@ -70,12 +70,6 @@ func (m *mockDB) setOffset(d time.Duration) {
 	m.mu.Unlock()
 }
 
-func (m *mockDB) setDelay(d time.Duration) {
-	m.mu.Lock()
-	m.delay = d
-	m.mu.Unlock()
-}
-
 func (m *mockDB) setError(err error) {
 	m.mu.Lock()
 	m.err = err

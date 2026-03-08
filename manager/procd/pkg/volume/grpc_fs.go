@@ -315,7 +315,7 @@ func (fs *grpcFS) Create(cancel <-chan struct{}, input *fuse.CreateIn, name stri
 		return grpcToFuse(err)
 	}
 	setEntryOut(&out.EntryOut, resp.Inode, resp.Attr, fs.cacheTTL)
-	out.OpenOut.Fh = resp.HandleId
+	out.Fh = resp.HandleId
 	return fuse.OK
 }
 

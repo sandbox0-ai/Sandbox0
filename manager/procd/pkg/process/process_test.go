@@ -311,7 +311,7 @@ func TestProcessConfig_Defaults(t *testing.T) {
 	}
 
 	// Empty slices and maps should be nil or empty
-	if config.Command != nil && len(config.Command) > 0 {
+	if len(config.Command) > 0 {
 		t.Error("Command should be empty or nil")
 	}
 

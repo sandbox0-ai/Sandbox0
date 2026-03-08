@@ -148,7 +148,7 @@ func (r *REPL) ResizeTerminal(size process.PTYSize) error {
 	if !r.IsRunning() {
 		return process.ErrProcessNotRunning
 	}
-	return r.BaseProcess.ResizePTY(size)
+	return r.ResizePTY(size)
 }
 
 // Config returns the REPL configuration.
@@ -217,8 +217,8 @@ func (r *REPL) scheduleStartupReady() {
 		if !r.IsRunning() {
 			return
 		}
-		r.BaseProcess.SignalInputReady()
-		r.BaseProcess.PublishOutput(process.ProcessOutput{
+		r.SignalInputReady()
+		r.PublishOutput(process.ProcessOutput{
 			Source: process.OutputSourcePrompt,
 		})
 	}()

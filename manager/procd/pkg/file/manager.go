@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"syscall"
 	"time"
 )
@@ -37,7 +36,6 @@ const MaxFileSize = 100 * 1024 * 1024 // 100MB
 
 // Manager handles file system operations.
 type Manager struct {
-	mu              sync.RWMutex
 	rootPath        string
 	watcherMgr      *WatcherManager
 	allowExecutable bool

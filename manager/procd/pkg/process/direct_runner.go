@@ -146,11 +146,12 @@ func (r *DirectRunner) monitorProcess() {
 	stdoutPreview := truncatePreview(r.stdout.Bytes(), 2048)
 	stderrPreview := truncatePreview(r.stderr.Bytes(), 2048)
 
-	if exitCode == 0 {
+	switch exitCode {
+	case 0:
 		r.base.SetState(ProcessStateStopped)
-	} else if exitCode == -1 || exitCode == 137 {
+	case -1, 137:
 		r.base.SetState(ProcessStateKilled)
-	} else {
+	default:
 		r.base.SetState(ProcessStateCrashed)
 	}
 
@@ -188,10 +189,11 @@ func (w *directRunnerOutputWriter) Write(p []byte) (int, error) {
 		Data:   payload,
 	})
 
-	if w.source == OutputSourceStdout {
+	switch w.source {
+	case OutputSourceStdout:
 		atomic.AddInt64(&w.runner.stdoutBytes, int64(len(p)))
 		atomic.AddInt64(&w.runner.stdoutChunks, 1)
-	} else if w.source == OutputSourceStderr {
+	case OutputSourceStderr:
 		atomic.AddInt64(&w.runner.stderrBytes, int64(len(p)))
 		atomic.AddInt64(&w.runner.stderrChunks, 1)
 	}

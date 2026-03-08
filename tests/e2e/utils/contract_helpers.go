@@ -83,7 +83,7 @@ func ValidateResponseExample(t ContractT, method, path string, status int, conte
 	}
 
 	ct := normalizeContentType(contentType)
-	if responseRef.Value.Content == nil || len(responseRef.Value.Content) == 0 {
+	if len(responseRef.Value.Content) == 0 {
 		if isEmptyPayload(payload) {
 			return
 		}

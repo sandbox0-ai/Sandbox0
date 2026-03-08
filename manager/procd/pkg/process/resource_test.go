@@ -378,13 +378,6 @@ func TestProcfsReader_ReadCPUStats(t *testing.T) {
 	}
 
 	// Verify stats are reasonable
-	if stats.UserTime < 0 {
-		t.Errorf("ReadCPUStats() UserTime = %d, want >= 0", stats.UserTime)
-	}
-	if stats.SystemTime < 0 {
-		t.Errorf("ReadCPUStats() SystemTime = %d, want >= 0", stats.SystemTime)
-	}
-
 	// StartTime should be positive (ticks since boot)
 	if stats.StartTime <= 0 {
 		t.Errorf("ReadCPUStats() StartTime = %d, want > 0", stats.StartTime)
@@ -646,8 +639,8 @@ func TestCgroupReader_ReadContainerCPUStats(t *testing.T) {
 	}
 
 	// Verify stats are reasonable
-	if stats.UsageTotal < 0 {
-		t.Errorf("ReadContainerCPUStats() UsageTotal = %d, want >= 0", stats.UsageTotal)
+	if stats.UsageTotal == 0 {
+		t.Log("ReadContainerCPUStats() UsageTotal is zero")
 	}
 }
 

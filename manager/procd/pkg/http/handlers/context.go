@@ -649,9 +649,7 @@ func parseSignal(value string) (syscall.Signal, error) {
 	}
 
 	upper := strings.ToUpper(trimmed)
-	if strings.HasPrefix(upper, "SIG") {
-		upper = strings.TrimPrefix(upper, "SIG")
-	}
+	upper = strings.TrimPrefix(upper, "SIG")
 
 	switch upper {
 	case "INT":
