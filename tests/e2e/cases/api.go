@@ -1,7 +1,6 @@
 package cases
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -100,13 +99,4 @@ func claimSandboxEventually(env *framework.ScenarioEnv, session *e2eutils.Sessio
 		return err
 	}).WithTimeout(2 * time.Minute).WithPolling(3 * time.Second).Should(Succeed())
 	return resp
-}
-
-func expectListedFiles(body []byte) {
-	var resp apispec.SuccessFileListResponse
-	Expect(json.Unmarshal(body, &resp)).To(Succeed())
-	Expect(resp.Success).To(BeTrue())
-	Expect(resp.Data).NotTo(BeNil())
-	Expect(resp.Data.Entries).NotTo(BeNil())
-	Expect(*resp.Data.Entries).NotTo(BeEmpty())
 }

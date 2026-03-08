@@ -2,10 +2,13 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/sandbox0-ai/sandbox0/pkg/apispec"
 )
 
 const contentTypeBinary = "application/octet-stream"
@@ -58,7 +61,7 @@ func (s *Session) ReadFile(ctx context.Context, t ContractT, sandboxID, filePath
 	return body, status, nil
 }
 
-func (s *Session) ListFiles(ctx context.Context, t ContractT, sandboxID, dirPath string) ([]byte, int, error) {
+func (s *Session) ListFiles(ctx context.Context, t ContractT, sandboxID, dirPath string) (*apispec.SuccessFileListResponse, int, error) {
 	specPath := "/api/v1/sandboxes/{id}/files/list"
 	requestPath := "/api/v1/sandboxes/" + sandboxID + "/files/list?path=" + url.QueryEscape(dirPath)
 	status, body, err := s.doRawSpecRequest(t, ctx, http.MethodGet, specPath, requestPath, nil, "", defaultContentType, true)
@@ -68,5 +71,12 @@ func (s *Session) ListFiles(ctx context.Context, t ContractT, sandboxID, dirPath
 	if status != http.StatusOK {
 		return nil, status, fmt.Errorf("list files failed with status %d: %s", status, formatAPIError(body))
 	}
-	return body, status, nil
+	var resp apispec.SuccessFileListResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, status, fmt.Errorf("decode list files response: %w", err)
+	}
+	if !resp.Success {
+		return nil, status, fmt.Errorf("list files response indicates failure")
+	}
+	return &resp, status, nil
 }
