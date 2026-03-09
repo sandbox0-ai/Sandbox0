@@ -62,7 +62,8 @@ func main() {
 		fail(err)
 	}
 
-	crdPath := filepath.Join(repoRoot, "infra-operator", "chart", "crds", "infra.sandbox0.ai_sandbox0infras.yaml")
+	crdRelativePath := filepath.Join("infra-operator", "chart", "crds", "infra.sandbox0.ai_sandbox0infras.yaml")
+	crdPath := filepath.Join(repoRoot, crdRelativePath)
 	outPath := filepath.Join(repoRoot, "sandbox0-ui", "apps", "website", "src", "generated", "docs", "sandbox0infra-schema.json")
 
 	data, err := os.ReadFile(crdPath)
@@ -83,7 +84,7 @@ func main() {
 		fail(err)
 	}
 
-	out := outputDoc{GeneratedFrom: filepath.ToSlash(crdPath)}
+	out := outputDoc{GeneratedFrom: filepath.ToSlash(crdRelativePath)}
 	for _, sec := range sectionSpecs {
 		node, err := lookupPath(specNode, strings.TrimPrefix(sec.Key, "spec."))
 		if err != nil {

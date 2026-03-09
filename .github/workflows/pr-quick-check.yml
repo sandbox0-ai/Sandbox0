@@ -22,6 +22,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sandbox0-ui/package-lock.json
+
       - name: Restore infra build cache
         uses: ./.github/actions/restore-infra-build-cache
         with:
@@ -60,6 +72,17 @@ jobs:
         run: |
           make proto manifests apispec
           git diff --exit-code
+
+      - name: Install website dependencies
+        run: npm ci --prefix sandbox0-ui
+
+      - name: Verify docs bundle generation
+        shell: bash
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          SANDBOX0_DOCS_VERSION=pr-check npm run build:docs-bundle --prefix sandbox0-ui
+          test -f sandbox0-ui/apps/website/dist/docs-bundles/sandbox0-docs-bundle-pr-check.tar.gz
+          test -f sandbox0-ui/apps/website/dist/docs-bundles/sandbox0-docs-bundle-pr-check.tar.gz.sha256
 
       - name: Verify go.mod/go.sum are tidy
         shell: bash

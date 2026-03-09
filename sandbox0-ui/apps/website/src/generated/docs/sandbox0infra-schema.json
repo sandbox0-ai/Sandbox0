@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "/Users/huangzhihao/sandbox0/workspace/sandbox0/infra-operator/chart/crds/infra.sandbox0.ai_sandbox0infras.yaml",
+  "generatedFrom": "infra-operator/chart/crds/infra.sandbox0.ai_sandbox0infras.yaml",
   "sections": [
     {
       "key": "spec.database",
