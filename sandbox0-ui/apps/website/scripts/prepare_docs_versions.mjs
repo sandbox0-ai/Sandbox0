@@ -83,7 +83,7 @@ async function readJson(filePath) {
 /**
  * @param {string} repo
  * @param {string} token
- * @returns {Promise<Array<{ tag_name: string; prerelease: boolean; draft: boolean }>>}
+ * @returns {Promise<Array<{ tag_name: string; prerelease: boolean; draft: boolean; assets?: Array<{ name?: string }> }>>}
  */
 async function fetchGithubReleases(repo, token) {
   const releases = [];
@@ -133,7 +133,7 @@ async function fetchGithubReleases(repo, token) {
 }
 
 /**
- * @param {Array<{ tag_name: string; prerelease: boolean }>} releases
+ * @param {Array<{ tag_name: string; prerelease: boolean; assets?: Array<{ name?: string }> }>} releases
  * @param {DocsVersionsManifest} fallbackManifest
  * @returns {DocsVersionsManifest}
  */
@@ -141,7 +141,7 @@ function buildManifest(releases, fallbackManifest) {
   const actualVersions = releases
     .map((release) => {
       const id = normalizeReleaseTag(release.tag_name);
-      if (!id) {
+      if (!id || !hasDocsBundleAsset(release)) {
         return null;
       }
 
@@ -195,6 +195,17 @@ function buildManifest(releases, fallbackManifest) {
     defaultVersion: "latest",
     versions,
   };
+}
+
+/**
+ * @param {{ tag_name: string; assets?: Array<{ name?: string }> }} release
+ * @returns {boolean}
+ */
+function hasDocsBundleAsset(release) {
+  const expectedAssetName = `sandbox0-docs-${release.tag_name}.tar.gz`;
+  return Array.isArray(release.assets)
+    ? release.assets.some((asset) => asset?.name === expectedAssetName)
+    : false;
 }
 
 /**
