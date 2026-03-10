@@ -1,0 +1,111 @@
+{
+  "defaultPage": "get-started",
+  "sections": [
+    {
+      "label": "GET STARTED",
+      "slug": "get-started",
+      "pages": [
+        {
+          "slug": "",
+          "title": "Overview"
+        },
+        {
+          "slug": "concepts",
+          "title": "Concepts"
+        }
+      ]
+    },
+    {
+      "label": "SANDBOX",
+      "slug": "sandbox",
+      "pages": [
+        {
+          "slug": "",
+          "title": "Overview"
+        },
+        {
+          "slug": "contexts",
+          "title": "Contexts"
+        },
+        {
+          "slug": "files",
+          "title": "Files"
+        },
+        {
+          "slug": "network",
+          "title": "Network"
+        },
+        {
+          "slug": "ports",
+          "title": "Ports"
+        },
+        {
+          "slug": "webhooks",
+          "title": "Webhooks"
+        }
+      ]
+    },
+    {
+      "label": "TEMPLATE",
+      "slug": "template",
+      "pages": [
+        {
+          "slug": "",
+          "title": "Overview"
+        },
+        {
+          "slug": "images",
+          "title": "Custom Images"
+        },
+        {
+          "slug": "pool",
+          "title": "Warm Pool"
+        },
+        {
+          "slug": "configuration",
+          "title": "Configuration"
+        }
+      ]
+    },
+    {
+      "label": "VOLUME",
+      "slug": "volume",
+      "pages": [
+        {
+          "slug": "",
+          "title": "Overview"
+        },
+        {
+          "slug": "mounts",
+          "title": "Mounts"
+        },
+        {
+          "slug": "snapshots",
+          "title": "Snapshots"
+        },
+        {
+          "slug": "fork",
+          "title": "Fork"
+        }
+      ]
+    },
+    {
+      "label": "SELF-HOSTED",
+      "slug": "self-hosted",
+      "pages": [
+        {
+          "slug": "",
+          "title": "Overview"
+        },
+        {
+          "slug": "install",
+          "title": "Install"
+        },
+        {
+          "slug": "configuration",
+          "title": "Configuration"
+        }
+      ]
+    }
+  ]
+}

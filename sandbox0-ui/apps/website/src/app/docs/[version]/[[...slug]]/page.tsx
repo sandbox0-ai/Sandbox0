@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { docsPageSlugs, renderDocsPage } from "@/app/docs/content";
+import { defaultDocsPageSlug, docsPageSlugs, renderDocsPage } from "@/app/docs/content";
 import {
   DOCS_DEFAULT_VERSION,
   getRenderedDocsVersions,
@@ -34,11 +34,11 @@ export default async function VersionedDocsPage({
   }
 
   if (resolvedParams.version === DOCS_DEFAULT_VERSION && slug.length === 0) {
-    redirect(`/docs/${DOCS_DEFAULT_VERSION}/get-started`);
+    redirect(`/docs/${DOCS_DEFAULT_VERSION}/${defaultDocsPageSlug}`);
   }
 
   if (resolvedParams.version !== DOCS_DEFAULT_VERSION && slug.length === 0) {
-    redirect(`/docs/${resolvedParams.version}/get-started`);
+    redirect(`/docs/${resolvedParams.version}/${defaultDocsPageSlug}`);
   }
 
   return renderDocsPage(slug);
