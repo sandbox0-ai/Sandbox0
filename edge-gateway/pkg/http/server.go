@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,10 +13,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
 	registryprovider "github.com/sandbox0-ai/sandbox0/manager/pkg/registry"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/apikey"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/public"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
@@ -32,7 +34,8 @@ type Server struct {
 	router          *gin.Engine
 	cfg             *config.EdgeGatewayConfig
 	pool            *pgxpool.Pool
-	repo            *db.Repository
+	identityRepo    *identity.Repository
+	apiKeyRepo      *apikey.Repository
 	igRouter        *proxy.Router
 	schedulerRouter *proxy.Router // Optional: proxy to scheduler for templates
 	authMiddleware  *middleware.AuthMiddleware
@@ -54,7 +57,7 @@ type Server struct {
 	// Auth components
 	builtinProvider *builtin.Provider
 	oidcManager     *oidc.Manager
-	jwtIssuer       *jwt.Issuer
+	jwtIssuer       *authn.Issuer
 }
 
 // NewServer creates a new HTTP server
@@ -73,14 +76,16 @@ func NewServer(
 	router := gin.New()
 
 	// Create repository
-	repo := db.NewRepository(pool)
+	identityRepo := identity.NewRepository(pool)
+	apiKeyRepo := apikey.NewRepository(pool)
 	registryProvider, err := registryprovider.NewProvider(cfg.Registry, nil, logger)
 	if err != nil {
 		logger.Warn("Registry provider disabled", zap.Error(err))
 	}
 	oidcConfigured := config.HasEnabledOIDCProviders(cfg.OIDCProviders)
 	schedulerConfigured := cfg.SchedulerEnabled && cfg.SchedulerURL != ""
-	enterpriseFeaturesEnabled := oidcConfigured || schedulerConfigured
+	selfHostedAuthEnabled := edgeAuthModeUsesSelfHostedIdentity(cfg.AuthMode)
+	enterpriseFeaturesEnabled := schedulerConfigured || (selfHostedAuthEnabled && oidcConfigured)
 
 	licenseEntitlements := licensing.NewStaticEntitlements()
 	if enterpriseFeaturesEnabled {
@@ -90,9 +95,9 @@ func NewServer(
 		licenseEntitlements = licensing.LoadFileEntitlements(cfg.LicenseFile)
 	}
 
-	// Keep OIDC endpoints consistent when OIDC is not configured.
+	// Keep self-hosted auth endpoints consistent when OIDC is not configured.
 	publicEntitlements := licensing.NewStaticEntitlements(licensing.FeatureSSO)
-	if oidcConfigured {
+	if selfHostedAuthEnabled && oidcConfigured {
 		publicEntitlements = licenseEntitlements
 	}
 
@@ -145,26 +150,36 @@ func NewServer(
 	})
 
 	// Initialize JWT issuer
-	jwtIssuer := jwt.NewIssuer(cfg.JWTIssuer, cfg.JWTSecret, cfg.JWTAccessTokenTTL.Duration, cfg.JWTRefreshTokenTTL.Duration)
+	jwtIssuer := authn.NewIssuer(cfg.JWTIssuer, cfg.JWTSecret, cfg.JWTAccessTokenTTL.Duration, cfg.JWTRefreshTokenTTL.Duration)
 
 	// Create middleware
-	authMiddleware := middleware.NewAuthMiddleware(repo, cfg.JWTSecret, jwtIssuer, logger)
+	authMiddlewareOptions := []middleware.AuthMiddlewareOption(nil)
+	if !selfHostedAuthEnabled {
+		authMiddlewareOptions = append(authMiddlewareOptions, middleware.WithJWTValidationMode(middleware.JWTValidationModeRegion))
+		if strings.TrimSpace(cfg.RegionID) != "" {
+			authMiddlewareOptions = append(authMiddlewareOptions, middleware.WithRequiredRegionID(cfg.RegionID))
+		}
+	}
+	authMiddleware := middleware.NewAuthMiddleware(apiKeyRepo, cfg.JWTSecret, jwtIssuer, logger, authMiddlewareOptions...)
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst, cfg.RateLimitCleanupInterval.Duration, logger)
 	requestLogger := middleware.NewRequestLogger(logger)
 
 	// Initialize built-in auth provider
-	builtinProvider := builtin.NewProvider(repo, &cfg.BuiltInAuth, cfg.DefaultTeamName)
+	var builtinProvider *builtin.Provider
+	if selfHostedAuthEnabled {
+		builtinProvider = builtin.NewProvider(identityRepo, &cfg.BuiltInAuth, cfg.DefaultTeamName)
+	}
 
 	// Initialize OIDC manager
-	if oidcConfigured {
+	if selfHostedAuthEnabled && oidcConfigured {
 		if err := licenseEntitlements.Require(licensing.FeatureSSO); err != nil {
 			return nil, fmt.Errorf("enterprise SSO feature is required when OIDC providers are configured: %w", err)
 		}
 	}
 
 	var oidcManager *oidc.Manager
-	if oidcConfigured {
-		oidcManager, err = oidc.NewManager(ctx, &cfg.GatewayConfig, repo, logger)
+	if selfHostedAuthEnabled && oidcConfigured {
+		oidcManager, err = oidc.NewManager(ctx, &cfg.GatewayConfig, identityRepo, logger)
 		if err != nil {
 			logger.Warn("Failed to initialize OIDC manager", zap.Error(err))
 			// Continue without OIDC support
@@ -172,7 +187,7 @@ func NewServer(
 	}
 
 	// Ensure initial user exists (for self-hosted deployments)
-	if cfg.BuiltInAuth.Enabled && cfg.BuiltInAuth.InitUser != nil {
+	if selfHostedAuthEnabled && cfg.BuiltInAuth.Enabled && cfg.BuiltInAuth.InitUser != nil {
 		if err := builtinProvider.EnsureInitUser(ctx); err != nil {
 			logger.Warn("Failed to ensure init user", zap.Error(err))
 		}
@@ -182,7 +197,8 @@ func NewServer(
 		router:                 router,
 		cfg:                    cfg,
 		pool:                   pool,
-		repo:                   repo,
+		identityRepo:           identityRepo,
+		apiKeyRepo:             apiKeyRepo,
 		igRouter:               igRouter,
 		schedulerRouter:        schedulerRouter,
 		authMiddleware:         authMiddleware,
@@ -222,15 +238,7 @@ func (s *Server) setupRoutes() {
 	// Metrics endpoint
 	s.router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	public.RegisterRoutes(s.router, public.Deps{
-		Repo:            s.repo,
-		AuthMiddleware:  s.authMiddleware,
-		BuiltinProvider: s.builtinProvider,
-		OIDCManager:     s.oidcManager,
-		Entitlements:    s.entitlements,
-		JWTIssuer:       s.jwtIssuer,
-		Logger:          s.logger,
-	})
+	s.setupPublicRoutes()
 
 	// ===== API Proxy Routes =====
 	// These routes proxy to internal-gateway (or scheduler for templates) after authentication
@@ -275,6 +283,26 @@ func (s *Server) setupRoutes() {
 
 	// Host-based public exposure fallback (non-/api paths).
 	s.router.NoRoute(s.proxyPublicExposureNoRoute)
+}
+
+func (s *Server) setupPublicRoutes() {
+	deps := public.Deps{
+		IdentityRepo:    s.identityRepo,
+		APIKeyRepo:      s.apiKeyRepo,
+		AuthMiddleware:  s.authMiddleware,
+		BuiltinProvider: s.builtinProvider,
+		OIDCManager:     s.oidcManager,
+		Entitlements:    s.entitlements,
+		JWTIssuer:       s.jwtIssuer,
+		Logger:          s.logger,
+	}
+
+	if edgeAuthModeUsesSelfHostedIdentity(s.cfg.AuthMode) {
+		public.RegisterRoutes(s.router, deps)
+		return
+	}
+
+	public.RegisterAPIKeyRoutes(s.router, deps)
 }
 
 // injectInternalToken adds internal auth token to forwarded requests (default: internal-gateway)
@@ -378,4 +406,25 @@ func (s *Server) readinessCheck(c *gin.Context) {
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
 	})
+}
+
+const (
+	edgeAuthModeSelfHosted      = "self_hosted"
+	edgeAuthModeFederatedGlobal = "federated_global"
+)
+
+func normalizeEdgeAuthMode(mode string) string {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	switch mode {
+	case "", edgeAuthModeSelfHosted:
+		return edgeAuthModeSelfHosted
+	case edgeAuthModeFederatedGlobal:
+		return edgeAuthModeFederatedGlobal
+	default:
+		return edgeAuthModeSelfHosted
+	}
+}
+
+func edgeAuthModeUsesSelfHostedIdentity(mode string) bool {
+	return normalizeEdgeAuthMode(mode) == edgeAuthModeSelfHosted
 }

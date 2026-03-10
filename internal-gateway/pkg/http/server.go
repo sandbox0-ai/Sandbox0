@@ -17,10 +17,11 @@ import (
 	"github.com/sandbox0-ai/sandbox0/internal-gateway/pkg/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/auth"
 	"github.com/sandbox0-ai/sandbox0/pkg/cache"
+	gatewayapikey "github.com/sandbox0-ai/sandbox0/pkg/gateway/apikey"
 	gatewaybuiltin "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
-	gatewayjwt "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
 	gatewayoidc "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
-	gatewaydb "github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	gatewayauthn "github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
+	gatewayidentity "github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	gatewaymiddleware "github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/public"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
@@ -42,12 +43,13 @@ type Server struct {
 	authMiddleware      *middleware.InternalAuthMiddleware
 	publicAuth          *gatewaymiddleware.AuthMiddleware
 	compositeAuth       *middleware.CompositeAuthMiddleware
-	publicRepo          *gatewaydb.Repository
+	publicIdentityRepo  *gatewayidentity.Repository
+	publicAPIKeyRepo    *gatewayapikey.Repository
 	rateLimiter         *gatewaymiddleware.RateLimiter
 	externalLimiter     *middleware.ExternalRateLimiter
 	publicBuiltin       *gatewaybuiltin.Provider
 	publicOIDC          *gatewayoidc.Manager
-	publicJWT           *gatewayjwt.Issuer
+	publicJWT           *gatewayauthn.Issuer
 	requestLogger       *middleware.RequestLogger
 	logger              *zap.Logger
 	internalAuthGen     *internalauth.Generator
@@ -173,7 +175,8 @@ func NewServer(
 		CleanupInterval: 1 * time.Minute, // Cleanup expired entries every minute
 	})
 
-	var publicRepo *gatewaydb.Repository
+	var publicIdentityRepo *gatewayidentity.Repository
+	var publicAPIKeyRepo *gatewayapikey.Repository
 	var publicAuth *gatewaymiddleware.AuthMiddleware
 	var compositeAuth *middleware.CompositeAuthMiddleware
 	var rateLimiter *gatewaymiddleware.RateLimiter
@@ -181,14 +184,15 @@ func NewServer(
 	var publicBuiltin *gatewaybuiltin.Provider
 	var publicOIDC *gatewayoidc.Manager
 	entitlements := licensing.NewStaticEntitlements(licensing.FeatureSSO)
-	var publicJWT *gatewayjwt.Issuer
+	var publicJWT *gatewayauthn.Issuer
 
 	if pool != nil {
-		publicRepo = gatewaydb.NewRepository(pool)
+		publicIdentityRepo = gatewayidentity.NewRepository(pool)
+		publicAPIKeyRepo = gatewayapikey.NewRepository(pool)
 	}
 
 	if publicAuthEnabled {
-		if publicRepo == nil {
+		if publicIdentityRepo == nil || publicAPIKeyRepo == nil {
 			return nil, fmt.Errorf("public auth requires database connection")
 		}
 
@@ -198,9 +202,13 @@ func NewServer(
 			OIDCStateTTL:             cfg.OIDCStateTTL,
 			OIDCStateCleanupInterval: cfg.OIDCStateCleanupInterval,
 			BaseURL:                  cfg.BaseURL,
+			RegionID:                 cfg.RegionID,
+			PublicExposureEnabled:    cfg.PublicExposureEnabled,
+			PublicRootDomain:         cfg.PublicRootDomain,
+			PublicRegionID:           cfg.PublicRegionID,
 		}
 
-		builtinProvider := gatewaybuiltin.NewProvider(publicRepo, &cfg.BuiltInAuth, cfg.DefaultTeamName)
+		builtinProvider := gatewaybuiltin.NewProvider(publicIdentityRepo, &cfg.BuiltInAuth, cfg.DefaultTeamName)
 		oidcConfigured := config.HasEnabledOIDCProviders(cfg.OIDCProviders)
 		if oidcConfigured {
 			if err := licensing.RequireLicenseFile(cfg.LicenseFile); err != nil {
@@ -214,7 +222,7 @@ func NewServer(
 
 		var oidcManager *gatewayoidc.Manager
 		if oidcConfigured {
-			oidcManager, err = gatewayoidc.NewManager(context.Background(), edgeCfg, publicRepo, logger)
+			oidcManager, err = gatewayoidc.NewManager(context.Background(), edgeCfg, publicIdentityRepo, logger)
 			if err != nil {
 				logger.Warn("Failed to initialize OIDC manager", zap.Error(err))
 			}
@@ -225,9 +233,9 @@ func NewServer(
 			}
 		}
 
-		jwtIssuer := gatewayjwt.NewIssuer(cfg.JWTIssuer, cfg.JWTSecret, cfg.JWTAccessTokenTTL.Duration, cfg.JWTRefreshTokenTTL.Duration)
+		jwtIssuer := gatewayauthn.NewIssuer(cfg.JWTIssuer, cfg.JWTSecret, cfg.JWTAccessTokenTTL.Duration, cfg.JWTRefreshTokenTTL.Duration)
 
-		publicAuth = gatewaymiddleware.NewAuthMiddleware(publicRepo, cfg.JWTSecret, jwtIssuer, logger)
+		publicAuth = gatewaymiddleware.NewAuthMiddleware(publicAPIKeyRepo, cfg.JWTSecret, jwtIssuer, logger)
 		compositeAuth = middleware.NewCompositeAuthMiddleware(authMiddleware, publicAuth, logger)
 		rateLimiter = gatewaymiddleware.NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst, cfg.RateLimitCleanupInterval.Duration, logger)
 		externalLimiter = middleware.NewExternalRateLimiter(rateLimiter)
@@ -245,7 +253,8 @@ func NewServer(
 		authMiddleware:      authMiddleware,
 		publicAuth:          publicAuth,
 		compositeAuth:       compositeAuth,
-		publicRepo:          publicRepo,
+		publicIdentityRepo:  publicIdentityRepo,
+		publicAPIKeyRepo:    publicAPIKeyRepo,
 		rateLimiter:         rateLimiter,
 		externalLimiter:     externalLimiter,
 		publicBuiltin:       publicBuiltin,
@@ -289,7 +298,8 @@ func (s *Server) setupRoutes() {
 
 	if authModeEnabled(s.cfg.AuthMode, authModePublic) {
 		public.RegisterRoutes(s.router, public.Deps{
-			Repo:            s.publicRepo,
+			IdentityRepo:    s.publicIdentityRepo,
+			APIKeyRepo:      s.publicAPIKeyRepo,
 			AuthMiddleware:  s.publicAuth,
 			BuiltinProvider: s.publicBuiltin,
 			OIDCManager:     s.publicOIDC,
@@ -484,8 +494,8 @@ func (s *Server) healthCheck(c *gin.Context) {
 }
 
 func (s *Server) readinessCheck(c *gin.Context) {
-	if authModeEnabled(s.cfg.AuthMode, authModePublic) && s.publicRepo != nil {
-		if err := s.publicRepo.Pool().Ping(c.Request.Context()); err != nil {
+	if authModeEnabled(s.cfg.AuthMode, authModePublic) && s.publicIdentityRepo != nil {
+		if err := s.publicIdentityRepo.Pool().Ping(c.Request.Context()); err != nil {
 			spec.JSONError(c, http.StatusServiceUnavailable, spec.CodeUnavailable, "database unavailable", gin.H{
 				"status": "not ready",
 			})

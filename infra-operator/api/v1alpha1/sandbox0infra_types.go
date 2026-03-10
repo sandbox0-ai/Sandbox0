@@ -961,7 +961,7 @@ type IngressConfig struct {
 }
 
 // PublicExposureConfig defines public URL exposure configuration for sandboxes.
-// Host format: <exposureLabel>.<regionID>.<rootDomain>
+// Host format: <exposureLabel>.<regionLabel>.<rootDomain>
 type PublicExposureConfig struct {
 	// Enabled enables public exposure routing
 	// +optional
@@ -973,7 +973,8 @@ type PublicExposureConfig struct {
 	// +kubebuilder:default="sandbox0.app"
 	RootDomain string `json:"rootDomain,omitempty"`
 
-	// RegionID is the region identifier used in public URLs
+	// RegionID is the DNS-safe region label used in public URLs.
+	// It is not the canonical multi-region tenancy identifier.
 	// +optional
 	// +kubebuilder:default="aws-us-east-1"
 	RegionID string `json:"regionId,omitempty"`

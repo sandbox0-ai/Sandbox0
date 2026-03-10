@@ -2,6 +2,7 @@ package internalgateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -165,5 +166,140 @@ func TestInternalGatewayIntegration_PublicAuthAPIKey(t *testing.T) {
 	resp, _ := doGatewayRequestWithBearer(t, env.server.Client(), http.MethodGet, env.server.URL+"/api/v1/templates", keyValue, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected ok, got %d", resp.StatusCode)
+	}
+}
+
+func TestInternalGatewayIntegration_PublicAuthUserResponseIncludesDefaultTeamHomeRegion(t *testing.T) {
+	dbPool, repo, _ := newGatewayTestDB(t)
+
+	keys := gatewayKeyPair{}
+	keys.privateKey, keys.publicKey = writeInternalGatewayKeys(t)
+
+	managerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(managerServer.Close)
+
+	env := newGatewayPublicTestEnv(t, managerServer.URL, "", dbPool, "test-jwt-secret", "internal-gateway", keys)
+
+	user := &gatewaydb.User{
+		Email:         "me-user@example.com",
+		Name:          "Me User",
+		PasswordHash:  "x",
+		EmailVerified: true,
+		IsAdmin:       false,
+	}
+	ctx := context.Background()
+	team, _, err := repo.CreateUserWithDefaultTeam(ctx, user, "Me Team")
+	if err != nil {
+		t.Fatalf("create user/team: %v", err)
+	}
+	if _, err := dbPool.Exec(ctx, `UPDATE teams SET home_region_id = $2 WHERE id = $1`, team.ID, "aws/us-east-1"); err != nil {
+		t.Fatalf("set team home region: %v", err)
+	}
+
+	issuer := gatewayjwt.NewIssuer("internal-gateway", "test-jwt-secret", time.Minute, time.Hour)
+	tokens, err := issuer.IssueTokenPair(user.ID, team.ID, "admin", user.Email, user.Name, user.IsAdmin)
+	if err != nil {
+		t.Fatalf("issue token pair: %v", err)
+	}
+
+	resp, _ := doGatewayRequestWithBearer(t, env.server.Client(), http.MethodGet, env.server.URL+"/users/me", tokens.AccessToken, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected ok, got %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Data struct {
+			DefaultTeam struct {
+				ID           string  `json:"id"`
+				HomeRegionID *string `json:"home_region_id"`
+			} `json:"default_team"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.DefaultTeam.ID != team.ID {
+		t.Fatalf("expected default team %q, got %q", team.ID, body.Data.DefaultTeam.ID)
+	}
+	if body.Data.DefaultTeam.HomeRegionID == nil || *body.Data.DefaultTeam.HomeRegionID != "aws/us-east-1" {
+		t.Fatalf("expected home region aws/us-east-1, got %#v", body.Data.DefaultTeam.HomeRegionID)
+	}
+}
+
+func TestInternalGatewayIntegration_PublicAuthTeamsAcceptHomeRegionID(t *testing.T) {
+	dbPool, repo, _ := newGatewayTestDB(t)
+
+	keys := gatewayKeyPair{}
+	keys.privateKey, keys.publicKey = writeInternalGatewayKeys(t)
+
+	managerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(managerServer.Close)
+
+	env := newGatewayPublicTestEnv(t, managerServer.URL, "", dbPool, "test-jwt-secret", "internal-gateway", keys)
+
+	user := &gatewaydb.User{
+		Email:         "team-admin@example.com",
+		Name:          "Team Admin",
+		PasswordHash:  "x",
+		EmailVerified: true,
+		IsAdmin:       false,
+	}
+	ctx := context.Background()
+	team, _, err := repo.CreateUserWithDefaultTeam(ctx, user, "Admin Team")
+	if err != nil {
+		t.Fatalf("create user/team: %v", err)
+	}
+
+	issuer := gatewayjwt.NewIssuer("internal-gateway", "test-jwt-secret", time.Minute, time.Hour)
+	tokens, err := issuer.IssueTokenPair(user.ID, team.ID, "admin", user.Email, user.Name, user.IsAdmin)
+	if err != nil {
+		t.Fatalf("issue token pair: %v", err)
+	}
+
+	resp, _ := doGatewayRequestWithBearer(t, env.server.Client(), http.MethodPost, env.server.URL+"/teams", tokens.AccessToken, map[string]any{
+		"name":           "Regional Team",
+		"home_region_id": "aws/us-east-1",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected created, got %d", resp.StatusCode)
+	}
+
+	var createBody struct {
+		Data struct {
+			ID           string  `json:"id"`
+			HomeRegionID *string `json:"home_region_id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if createBody.Data.HomeRegionID == nil || *createBody.Data.HomeRegionID != "aws/us-east-1" {
+		t.Fatalf("expected created team home region aws/us-east-1, got %#v", createBody.Data.HomeRegionID)
+	}
+
+	updateResp, _ := doGatewayRequestWithBearer(t, env.server.Client(), http.MethodPut, env.server.URL+"/teams/"+createBody.Data.ID, tokens.AccessToken, map[string]any{
+		"home_region_id": "aws/us-west-2",
+	})
+	defer updateResp.Body.Close()
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected ok, got %d", updateResp.StatusCode)
+	}
+
+	var updateBody struct {
+		Data struct {
+			HomeRegionID *string `json:"home_region_id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(updateResp.Body).Decode(&updateBody); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updateBody.Data.HomeRegionID == nil || *updateBody.Data.HomeRegionID != "aws/us-west-2" {
+		t.Fatalf("expected updated team home region aws/us-west-2, got %#v", updateBody.Data.HomeRegionID)
 	}
 }

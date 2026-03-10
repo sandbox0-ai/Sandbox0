@@ -55,8 +55,13 @@ type GatewayConfig struct {
 	// +kubebuilder:default="http://localhost:8080"
 	BaseURL string `yaml:"base_url" json:"baseUrl"`
 
+	// RegionID is the canonical region identifier used by tenancy and routing
+	// contracts, for example "aws/us-east-1".
+	// +optional
+	RegionID string `yaml:"region_id" json:"regionId"`
+
 	// Public exposure host routing configuration.
-	// Host format is fixed as: <exposureLabel>.<region>.<rootDomain>
+	// Host format is fixed as: <exposureLabel>.<regionLabel>.<rootDomain>
 	// These fields are injected by infra-operator from Sandbox0Infra.Spec.PublicExposure
 	// +optional
 	// +kubebuilder:default=true
@@ -64,6 +69,8 @@ type GatewayConfig struct {
 	// +optional
 	// +kubebuilder:default="sandbox0.app"
 	PublicRootDomain string `yaml:"public_root_domain" json:"-"`
+	// PublicRegionID is the DNS-safe region label used in exposure hosts,
+	// for example "aws-us-east-1". It is not the canonical region identifier.
 	// +optional
 	// +kubebuilder:default="aws-us-east-1"
 	PublicRegionID string `yaml:"public_region_id" json:"-"`

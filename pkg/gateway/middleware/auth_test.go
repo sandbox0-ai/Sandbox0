@@ -59,6 +59,66 @@ func TestAuthMiddleware_JWTRefreshTokenRejected(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_JWTRegionTokenAcceptedForMatchingRegion(t *testing.T) {
+	t.Setenv("GIN_MODE", "release")
+
+	issuer := gatewayjwt.NewIssuer("global-directory", "test-secret", time.Minute, time.Hour)
+	regionToken, _, err := issuer.IssueRegionToken("user-1", "team-1", "admin", "aws/us-east-1", false, time.Minute)
+	if err != nil {
+		t.Fatalf("issue region token: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/templates", nil)
+	req.Header.Set("Authorization", "Bearer "+regionToken)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = req
+
+	middleware := NewAuthMiddleware(
+		nil,
+		"test-secret",
+		issuer,
+		zap.NewNop(),
+		WithJWTValidationMode(JWTValidationModeRegion),
+		WithRequiredRegionID("aws/us-east-1"),
+	)
+	authCtx, err := middleware.AuthenticateRequest(ctx)
+	if err != nil {
+		t.Fatalf("authenticate request: %v", err)
+	}
+	if authCtx.UserID != "user-1" || authCtx.TeamID != "team-1" {
+		t.Fatalf("unexpected auth context: user=%s team=%s", authCtx.UserID, authCtx.TeamID)
+	}
+}
+
+func TestAuthMiddleware_JWTRegionTokenRejectedForWrongRegion(t *testing.T) {
+	t.Setenv("GIN_MODE", "release")
+
+	issuer := gatewayjwt.NewIssuer("global-directory", "test-secret", time.Minute, time.Hour)
+	regionToken, _, err := issuer.IssueRegionToken("user-1", "team-1", "admin", "aws/us-west-2", false, time.Minute)
+	if err != nil {
+		t.Fatalf("issue region token: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/templates", nil)
+	req.Header.Set("Authorization", "Bearer "+regionToken)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+	ctx.Request = req
+
+	middleware := NewAuthMiddleware(
+		nil,
+		"test-secret",
+		issuer,
+		zap.NewNop(),
+		WithJWTValidationMode(JWTValidationModeRegion),
+		WithRequiredRegionID("aws/us-east-1"),
+	)
+	if _, err := middleware.AuthenticateRequest(ctx); err == nil {
+		t.Fatal("expected region mismatch to be rejected")
+	}
+}
+
 func TestAuthMiddleware_RequireJWTAuth(t *testing.T) {
 	t.Setenv("GIN_MODE", "release")
 

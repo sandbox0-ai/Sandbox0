@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"go.uber.org/zap"
 )
 
@@ -26,7 +26,7 @@ type StateData struct {
 type Manager struct {
 	providers       map[string]*Provider
 	providerOrder   []string
-	repo            *db.Repository
+	repo            *identity.Repository
 	baseURL         string
 	defaultTeamName string
 	stateTTL        time.Duration
@@ -39,7 +39,7 @@ type Manager struct {
 }
 
 // NewManager creates a new OIDC manager
-func NewManager(ctx context.Context, cfg *config.GatewayConfig, repo *db.Repository, logger *zap.Logger) (*Manager, error) {
+func NewManager(ctx context.Context, cfg *config.GatewayConfig, repo *identity.Repository, logger *zap.Logger) (*Manager, error) {
 	m := &Manager{
 		providers:       make(map[string]*Provider),
 		providerOrder:   make([]string, 0),
@@ -148,7 +148,7 @@ func (m *Manager) ValidateState(state string) (*StateData, error) {
 }
 
 // HandleCallback processes an OIDC callback
-func (m *Manager) HandleCallback(ctx context.Context, providerID, code, state string) (*db.User, string, error) {
+func (m *Manager) HandleCallback(ctx context.Context, providerID, code, state string) (*identity.User, string, error) {
 	// Validate state
 	stateData, err := m.ValidateState(state)
 	if err != nil {
@@ -195,23 +195,23 @@ func (m *Manager) HandleCallback(ctx context.Context, providerID, code, state st
 }
 
 // findOrCreateUser finds an existing user or creates a new one
-func (m *Manager) findOrCreateUser(ctx context.Context, provider *Provider, userInfo *UserInfo) (*db.User, error) {
+func (m *Manager) findOrCreateUser(ctx context.Context, provider *Provider, userInfo *UserInfo) (*identity.User, error) {
 	// Check if identity already exists
-	identity, err := m.repo.GetUserIdentityByProviderSubject(ctx, provider.ID(), userInfo.Subject)
+	identityRecord, err := m.repo.GetUserIdentityByProviderSubject(ctx, provider.ID(), userInfo.Subject)
 	if err == nil {
 		// Identity exists, get the user
-		user, err := m.repo.GetUserByID(ctx, identity.UserID)
+		user, err := m.repo.GetUserByID(ctx, identityRecord.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("get user: %w", err)
 		}
 
 		// Update claims
-		_ = m.repo.UpdateUserIdentityClaims(ctx, identity.ID, userInfo.RawClaims)
+		_ = m.repo.UpdateUserIdentityClaims(ctx, identityRecord.ID, userInfo.RawClaims)
 
 		return user, nil
 	}
 
-	if !errors.Is(err, db.ErrIdentityNotFound) {
+	if !errors.Is(err, identity.ErrIdentityNotFound) {
 		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
@@ -219,19 +219,19 @@ func (m *Manager) findOrCreateUser(ctx context.Context, provider *Provider, user
 	user, err := m.repo.GetUserByEmail(ctx, userInfo.Email)
 	if err == nil {
 		// User exists, link identity
-		identity := &db.UserIdentity{
+		identityRecord := &identity.UserIdentity{
 			UserID:    user.ID,
 			Provider:  provider.ID(),
 			Subject:   userInfo.Subject,
 			RawClaims: userInfo.RawClaims,
 		}
-		if err := m.repo.CreateUserIdentity(ctx, identity); err != nil {
+		if err := m.repo.CreateUserIdentity(ctx, identityRecord); err != nil {
 			m.logger.Warn("Failed to link identity", zap.Error(err))
 		}
 		return user, nil
 	}
 
-	if !errors.Is(err, db.ErrUserNotFound) {
+	if !errors.Is(err, identity.ErrUserNotFound) {
 		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 
@@ -241,7 +241,7 @@ func (m *Manager) findOrCreateUser(ctx context.Context, provider *Provider, user
 	}
 
 	// Create new user
-	user = &db.User{
+	user = &identity.User{
 		Email:         userInfo.Email,
 		Name:          userInfo.Name,
 		AvatarURL:     userInfo.Picture,
@@ -258,13 +258,13 @@ func (m *Manager) findOrCreateUser(ctx context.Context, provider *Provider, user
 	}
 
 	// Create identity
-	identity = &db.UserIdentity{
+	identityRecord = &identity.UserIdentity{
 		UserID:    user.ID,
 		Provider:  provider.ID(),
 		Subject:   userInfo.Subject,
 		RawClaims: userInfo.RawClaims,
 	}
-	if err := m.repo.CreateUserIdentity(ctx, identity); err != nil {
+	if err := m.repo.CreateUserIdentity(ctx, identityRecord); err != nil {
 		m.logger.Warn("Failed to create identity", zap.Error(err))
 	}
 

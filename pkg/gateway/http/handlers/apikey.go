@@ -6,7 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/apikey"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"go.uber.org/zap"
@@ -14,15 +15,17 @@ import (
 
 // APIKeyHandler handles API key endpoints
 type APIKeyHandler struct {
-	repo   *db.Repository
-	logger *zap.Logger
+	keys     *apikey.Repository
+	identity *identity.Repository
+	logger   *zap.Logger
 }
 
 // NewAPIKeyHandler creates a new API key handler
-func NewAPIKeyHandler(repo *db.Repository, logger *zap.Logger) *APIKeyHandler {
+func NewAPIKeyHandler(keys *apikey.Repository, identityRepo *identity.Repository, logger *zap.Logger) *APIKeyHandler {
 	return &APIKeyHandler{
-		repo:   repo,
-		logger: logger,
+		keys:     keys,
+		identity: identityRepo,
+		logger:   logger,
 	}
 }
 
@@ -35,13 +38,13 @@ func (h *APIKeyHandler) ListAPIKeys(c *gin.Context) {
 	}
 
 	// Get keys for the current team or user
-	var keys []*db.APIKey
+	var keys []*apikey.APIKey
 	var err error
 
 	if authCtx.TeamID != "" {
-		keys, err = h.repo.GetAPIKeysByTeamID(c.Request.Context(), authCtx.TeamID)
+		keys, err = h.keys.GetAPIKeysByTeamID(c.Request.Context(), authCtx.TeamID)
 	} else {
-		keys, err = h.repo.GetAPIKeysByUserID(c.Request.Context(), authCtx.UserID)
+		keys, err = h.keys.GetAPIKeysByUserID(c.Request.Context(), authCtx.UserID)
 	}
 
 	if err != nil {
@@ -114,7 +117,7 @@ func (h *APIKeyHandler) CreateAPIKey(c *gin.Context) {
 	}
 
 	// Create API key
-	key, keyValue, err := h.repo.CreateAPIKey(
+	key, keyValue, err := h.keys.CreateAPIKey(
 		c.Request.Context(),
 		authCtx.TeamID,
 		authCtx.UserID,
@@ -155,9 +158,9 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	keyID := c.Param("id")
 
 	// Get the key to verify ownership
-	key, err := h.repo.GetAPIKeyByID(c.Request.Context(), keyID)
+	key, err := h.keys.GetAPIKeyByID(c.Request.Context(), keyID)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
+		if errors.Is(err, apikey.ErrNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "API key not found")
 			return
 		}
@@ -169,14 +172,14 @@ func (h *APIKeyHandler) DeleteAPIKey(c *gin.Context) {
 	// Verify the key belongs to the user's team
 	if key.TeamID != authCtx.TeamID {
 		// Check if user is member of the key's team
-		_, err := h.repo.GetTeamMember(c.Request.Context(), key.TeamID, authCtx.UserID)
+		_, err := h.identity.GetTeamMember(c.Request.Context(), key.TeamID, authCtx.UserID)
 		if err != nil {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not authorized to delete this API key")
 			return
 		}
 	}
 
-	if err := h.repo.DeleteAPIKey(c.Request.Context(), keyID); err != nil {
+	if err := h.keys.DeleteAPIKey(c.Request.Context(), keyID); err != nil {
 		h.logger.Error("Failed to delete API key", zap.Error(err))
 		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to delete API key")
 		return
@@ -196,9 +199,9 @@ func (h *APIKeyHandler) DeactivateAPIKey(c *gin.Context) {
 	keyID := c.Param("id")
 
 	// Get the key to verify ownership
-	key, err := h.repo.GetAPIKeyByID(c.Request.Context(), keyID)
+	key, err := h.keys.GetAPIKeyByID(c.Request.Context(), keyID)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
+		if errors.Is(err, apikey.ErrNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "API key not found")
 			return
 		}
@@ -209,14 +212,14 @@ func (h *APIKeyHandler) DeactivateAPIKey(c *gin.Context) {
 
 	// Verify the key belongs to the user's team
 	if key.TeamID != authCtx.TeamID {
-		_, err := h.repo.GetTeamMember(c.Request.Context(), key.TeamID, authCtx.UserID)
+		_, err := h.identity.GetTeamMember(c.Request.Context(), key.TeamID, authCtx.UserID)
 		if err != nil {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not authorized to deactivate this API key")
 			return
 		}
 	}
 
-	if err := h.repo.DeactivateAPIKey(c.Request.Context(), keyID); err != nil {
+	if err := h.keys.DeactivateAPIKey(c.Request.Context(), keyID); err != nil {
 		h.logger.Error("Failed to deactivate API key", zap.Error(err))
 		spec.JSONError(c, http.StatusInternalServerError, spec.CodeInternal, "failed to deactivate API key")
 		return

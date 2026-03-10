@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"go.uber.org/zap"
@@ -13,19 +13,20 @@ import (
 
 // UserResponse is the API response for a user (without sensitive fields)
 type UserResponse struct {
-	ID            string    `json:"id"`
-	Email         string    `json:"email"`
-	Name          string    `json:"name"`
-	AvatarURL     string    `json:"avatar_url,omitempty"`
-	DefaultTeamID *string   `json:"default_team_id,omitempty"`
-	EmailVerified bool      `json:"email_verified"`
-	IsAdmin       bool      `json:"is_admin"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string         `json:"id"`
+	Email         string         `json:"email"`
+	Name          string         `json:"name"`
+	AvatarURL     string         `json:"avatar_url,omitempty"`
+	DefaultTeamID *string        `json:"default_team_id,omitempty"`
+	DefaultTeam   *identity.Team `json:"default_team,omitempty"`
+	EmailVerified bool           `json:"email_verified"`
+	IsAdmin       bool           `json:"is_admin"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
-// NewUserResponse creates a UserResponse from a db.User
-func NewUserResponse(u *db.User) *UserResponse {
+// NewUserResponse creates a UserResponse from an identity.User.
+func NewUserResponse(u *identity.User) *UserResponse {
 	if u == nil {
 		return nil
 	}
@@ -35,6 +36,7 @@ func NewUserResponse(u *db.User) *UserResponse {
 		Name:          u.Name,
 		AvatarURL:     u.AvatarURL,
 		DefaultTeamID: u.DefaultTeamID,
+		DefaultTeam:   u.DefaultTeam,
 		EmailVerified: u.EmailVerified,
 		IsAdmin:       u.IsAdmin,
 		CreatedAt:     u.CreatedAt,
@@ -44,12 +46,12 @@ func NewUserResponse(u *db.User) *UserResponse {
 
 // UserHandler handles user endpoints
 type UserHandler struct {
-	repo   *db.Repository
+	repo   *identity.Repository
 	logger *zap.Logger
 }
 
 // NewUserHandler creates a new user handler
-func NewUserHandler(repo *db.Repository, logger *zap.Logger) *UserHandler {
+func NewUserHandler(repo *identity.Repository, logger *zap.Logger) *UserHandler {
 	return &UserHandler{
 		repo:   repo,
 		logger: logger,

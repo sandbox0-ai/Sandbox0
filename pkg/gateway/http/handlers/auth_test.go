@@ -13,41 +13,41 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/sandbox0/pkg/auth"
 	gatewayjwt "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"go.uber.org/zap"
 )
 
 type mockAuthRepository struct {
-	users         map[string]*db.User
-	refreshTokens map[string]*db.RefreshToken
+	users         map[string]*identity.User
+	refreshTokens map[string]*identity.RefreshToken
 	createCalls   int
 }
 
 func newMockAuthRepository() *mockAuthRepository {
 	return &mockAuthRepository{
-		users:         map[string]*db.User{},
-		refreshTokens: map[string]*db.RefreshToken{},
+		users:         map[string]*identity.User{},
+		refreshTokens: map[string]*identity.RefreshToken{},
 	}
 }
 
-func (m *mockAuthRepository) CreateRefreshToken(_ context.Context, token *db.RefreshToken) error {
+func (m *mockAuthRepository) CreateRefreshToken(_ context.Context, token *identity.RefreshToken) error {
 	copyToken := *token
 	m.refreshTokens[token.TokenHash] = &copyToken
 	m.createCalls++
 	return nil
 }
 
-func (m *mockAuthRepository) ValidateRefreshToken(_ context.Context, tokenHash string) (*db.RefreshToken, error) {
+func (m *mockAuthRepository) ValidateRefreshToken(_ context.Context, tokenHash string) (*identity.RefreshToken, error) {
 	token, ok := m.refreshTokens[tokenHash]
 	if !ok {
-		return nil, db.ErrTokenNotFound
+		return nil, identity.ErrTokenNotFound
 	}
 	if token.Revoked {
-		return nil, db.ErrTokenRevoked
+		return nil, identity.ErrTokenRevoked
 	}
 	if time.Now().After(token.ExpiresAt) {
-		return nil, db.ErrTokenExpired
+		return nil, identity.ErrTokenExpired
 	}
 	return token, nil
 }
@@ -61,7 +61,7 @@ func (m *mockAuthRepository) RevokeAllUserRefreshTokens(_ context.Context, userI
 	return nil
 }
 
-func (m *mockAuthRepository) GetUserByID(_ context.Context, id string) (*db.User, error) {
+func (m *mockAuthRepository) GetUserByID(_ context.Context, id string) (*identity.User, error) {
 	user, ok := m.users[id]
 	if !ok {
 		return nil, errors.New("user not found")
@@ -69,7 +69,7 @@ func (m *mockAuthRepository) GetUserByID(_ context.Context, id string) (*db.User
 	return user, nil
 }
 
-func (m *mockAuthRepository) GetTeamMember(_ context.Context, _, _ string) (*db.TeamMember, error) {
+func (m *mockAuthRepository) GetTeamMember(_ context.Context, _, _ string) (*identity.TeamMember, error) {
 	return nil, errors.New("team member not found")
 }
 
@@ -78,7 +78,7 @@ func TestAuthHandler_RefreshToken_SucceedsWithPersistedToken(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	repo := newMockAuthRepository()
-	user := &db.User{
+	user := &identity.User{
 		ID:      "user-1",
 		Email:   "user@example.com",
 		Name:    "User",
@@ -91,7 +91,7 @@ func TestAuthHandler_RefreshToken_SucceedsWithPersistedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue initial token pair: %v", err)
 	}
-	if err := repo.CreateRefreshToken(context.Background(), &db.RefreshToken{
+	if err := repo.CreateRefreshToken(context.Background(), &identity.RefreshToken{
 		UserID:    user.ID,
 		TokenHash: gatewayjwt.HashRefreshToken(initialTokens.RefreshToken),
 		ExpiresAt: initialTokens.RefreshExpiresAt,
@@ -139,7 +139,7 @@ func TestAuthHandler_LogoutRevocation_BlocksRefresh(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	repo := newMockAuthRepository()
-	user := &db.User{
+	user := &identity.User{
 		ID:      "user-1",
 		Email:   "user@example.com",
 		Name:    "User",
@@ -152,7 +152,7 @@ func TestAuthHandler_LogoutRevocation_BlocksRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue initial token pair: %v", err)
 	}
-	if err := repo.CreateRefreshToken(context.Background(), &db.RefreshToken{
+	if err := repo.CreateRefreshToken(context.Background(), &identity.RefreshToken{
 		UserID:    user.ID,
 		TokenHash: gatewayjwt.HashRefreshToken(initialTokens.RefreshToken),
 		ExpiresAt: initialTokens.RefreshExpiresAt,
@@ -197,7 +197,7 @@ func TestAuthHandler_RefreshToken_FailsWhenTokenNeverPersisted(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	repo := newMockAuthRepository()
-	user := &db.User{
+	user := &identity.User{
 		ID:      "user-1",
 		Email:   "user@example.com",
 		Name:    "User",

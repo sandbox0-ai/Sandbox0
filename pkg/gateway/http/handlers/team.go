@@ -3,9 +3,10 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"go.uber.org/zap"
@@ -13,12 +14,12 @@ import (
 
 // TeamHandler handles team endpoints
 type TeamHandler struct {
-	repo   *db.Repository
+	repo   *identity.Repository
 	logger *zap.Logger
 }
 
 // NewTeamHandler creates a new team handler
-func NewTeamHandler(repo *db.Repository, logger *zap.Logger) *TeamHandler {
+func NewTeamHandler(repo *identity.Repository, logger *zap.Logger) *TeamHandler {
 	return &TeamHandler{
 		repo:   repo,
 		logger: logger,
@@ -45,8 +46,9 @@ func (h *TeamHandler) ListTeams(c *gin.Context) {
 
 // CreateTeamRequest is the request body for creating a team
 type CreateTeamRequest struct {
-	Name string `json:"name" binding:"required"`
-	Slug string `json:"slug"`
+	Name         string  `json:"name" binding:"required"`
+	Slug         string  `json:"slug"`
+	HomeRegionID *string `json:"home_region_id"`
 }
 
 // CreateTeam creates a new team
@@ -63,14 +65,15 @@ func (h *TeamHandler) CreateTeam(c *gin.Context) {
 		return
 	}
 
-	team := &db.Team{
-		Name:    req.Name,
-		Slug:    req.Slug,
-		OwnerID: &authCtx.UserID,
+	team := &identity.Team{
+		Name:         req.Name,
+		Slug:         req.Slug,
+		OwnerID:      &authCtx.UserID,
+		HomeRegionID: normalizeOptionalString(req.HomeRegionID),
 	}
 
 	if err := h.repo.CreateTeam(c.Request.Context(), team); err != nil {
-		if errors.Is(err, db.ErrTeamAlreadyExists) {
+		if errors.Is(err, identity.ErrTeamAlreadyExists) {
 			spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "team with this slug already exists")
 			return
 		}
@@ -80,7 +83,7 @@ func (h *TeamHandler) CreateTeam(c *gin.Context) {
 	}
 
 	// Add creator as admin member
-	member := &db.TeamMember{
+	member := &identity.TeamMember{
 		TeamID: team.ID,
 		UserID: authCtx.UserID,
 		Role:   "admin",
@@ -105,7 +108,7 @@ func (h *TeamHandler) GetTeam(c *gin.Context) {
 	// Verify user is member of the team
 	_, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
@@ -116,7 +119,7 @@ func (h *TeamHandler) GetTeam(c *gin.Context) {
 
 	team, err := h.repo.GetTeamByID(c.Request.Context(), teamID)
 	if err != nil {
-		if errors.Is(err, db.ErrTeamNotFound) {
+		if errors.Is(err, identity.ErrTeamNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "team not found")
 			return
 		}
@@ -130,8 +133,9 @@ func (h *TeamHandler) GetTeam(c *gin.Context) {
 
 // UpdateTeamRequest is the request body for updating a team
 type UpdateTeamRequest struct {
-	Name string `json:"name"`
-	Slug string `json:"slug"`
+	Name         string  `json:"name"`
+	Slug         string  `json:"slug"`
+	HomeRegionID *string `json:"home_region_id"`
 }
 
 // UpdateTeam updates a team
@@ -147,7 +151,7 @@ func (h *TeamHandler) UpdateTeam(c *gin.Context) {
 	// Verify user is admin of the team
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
@@ -169,7 +173,7 @@ func (h *TeamHandler) UpdateTeam(c *gin.Context) {
 
 	team, err := h.repo.GetTeamByID(c.Request.Context(), teamID)
 	if err != nil {
-		if errors.Is(err, db.ErrTeamNotFound) {
+		if errors.Is(err, identity.ErrTeamNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "team not found")
 			return
 		}
@@ -184,9 +188,12 @@ func (h *TeamHandler) UpdateTeam(c *gin.Context) {
 	if req.Slug != "" {
 		team.Slug = req.Slug
 	}
+	if req.HomeRegionID != nil {
+		team.HomeRegionID = normalizeOptionalString(req.HomeRegionID)
+	}
 
 	if err := h.repo.UpdateTeam(c.Request.Context(), team); err != nil {
-		if errors.Is(err, db.ErrTeamAlreadyExists) {
+		if errors.Is(err, identity.ErrTeamAlreadyExists) {
 			spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "team with this slug already exists")
 			return
 		}
@@ -211,7 +218,7 @@ func (h *TeamHandler) DeleteTeam(c *gin.Context) {
 	// Verify user is owner of the team
 	team, err := h.repo.GetTeamByID(c.Request.Context(), teamID)
 	if err != nil {
-		if errors.Is(err, db.ErrTeamNotFound) {
+		if errors.Is(err, identity.ErrTeamNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "team not found")
 			return
 		}
@@ -247,7 +254,7 @@ func (h *TeamHandler) ListTeamMembers(c *gin.Context) {
 	// Verify user is member of the team
 	_, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
@@ -285,7 +292,7 @@ func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 	// Verify user is admin of the team
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
@@ -308,7 +315,7 @@ func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 	// Find user by email
 	user, err := h.repo.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
-		if errors.Is(err, db.ErrUserNotFound) {
+		if errors.Is(err, identity.ErrUserNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "user not found")
 			return
 		}
@@ -318,14 +325,14 @@ func (h *TeamHandler) AddTeamMember(c *gin.Context) {
 	}
 
 	// Add member
-	newMember := &db.TeamMember{
+	newMember := &identity.TeamMember{
 		TeamID: teamID,
 		UserID: user.ID,
 		Role:   req.Role,
 	}
 
 	if err := h.repo.AddTeamMember(c.Request.Context(), newMember); err != nil {
-		if errors.Is(err, db.ErrAlreadyMember) {
+		if errors.Is(err, identity.ErrAlreadyMember) {
 			spec.JSONError(c, http.StatusConflict, spec.CodeConflict, "user is already a member")
 			return
 		}
@@ -356,7 +363,7 @@ func (h *TeamHandler) UpdateTeamMember(c *gin.Context) {
 	// Verify user is admin of the team
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
@@ -377,7 +384,7 @@ func (h *TeamHandler) UpdateTeamMember(c *gin.Context) {
 	}
 
 	if err := h.repo.UpdateTeamMemberRole(c.Request.Context(), teamID, userID, req.Role); err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "member not found")
 			return
 		}
@@ -387,6 +394,17 @@ func (h *TeamHandler) UpdateTeamMember(c *gin.Context) {
 	}
 
 	spec.JSONSuccess(c, http.StatusOK, gin.H{"message": "member updated"})
+}
+
+func normalizeOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // RemoveTeamMember removes a member from a team
@@ -403,7 +421,7 @@ func (h *TeamHandler) RemoveTeamMember(c *gin.Context) {
 	// Verify user is admin of the team (or removing themselves)
 	member, err := h.repo.GetTeamMember(c.Request.Context(), teamID, authCtx.UserID)
 	if err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusForbidden, spec.CodeForbidden, "not a member of this team")
 			return
 		}
@@ -440,7 +458,7 @@ func (h *TeamHandler) RemoveTeamMember(c *gin.Context) {
 	}
 
 	if err := h.repo.RemoveTeamMember(c.Request.Context(), teamID, userID); err != nil {
-		if errors.Is(err, db.ErrMemberNotFound) {
+		if errors.Is(err, identity.ErrMemberNotFound) {
 			spec.JSONError(c, http.StatusNotFound, spec.CodeNotFound, "member not found")
 			return
 		}

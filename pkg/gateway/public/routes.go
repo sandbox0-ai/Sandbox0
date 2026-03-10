@@ -2,11 +2,12 @@ package public
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/apikey"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/http/handlers"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/licensing"
 	licensinghttp "github.com/sandbox0-ai/sandbox0/pkg/licensing/http"
@@ -14,26 +15,33 @@ import (
 )
 
 type Deps struct {
-	Repo            *db.Repository
+	IdentityRepo    *identity.Repository
+	APIKeyRepo      *apikey.Repository
 	AuthMiddleware  *middleware.AuthMiddleware
 	BuiltinProvider *builtin.Provider
 	OIDCManager     *oidc.Manager
 	Entitlements    licensing.Entitlements
-	JWTIssuer       *jwt.Issuer
+	JWTIssuer       *authn.Issuer
 	Logger          *zap.Logger
 }
 
-func RegisterRoutes(router *gin.Engine, deps Deps) {
+// RegisterRoutes mounts the full self-hosted public surface.
+func RegisterRoutes(router gin.IRouter, deps Deps) {
+	RegisterIdentityRoutes(router, deps)
+	RegisterAPIKeyRoutes(router, deps)
+}
+
+// RegisterIdentityRoutes mounts global identity and team directory routes.
+func RegisterIdentityRoutes(router gin.IRouter, deps Deps) {
 	authHandler := handlers.NewAuthHandler(
-		deps.Repo,
+		deps.IdentityRepo,
 		deps.BuiltinProvider,
 		deps.OIDCManager,
 		deps.JWTIssuer,
 		deps.Logger,
 	)
-	userHandler := handlers.NewUserHandler(deps.Repo, deps.Logger)
-	teamHandler := handlers.NewTeamHandler(deps.Repo, deps.Logger)
-	apiKeyHandler := handlers.NewAPIKeyHandler(deps.Repo, deps.Logger)
+	userHandler := handlers.NewUserHandler(deps.IdentityRepo, deps.Logger)
+	teamHandler := handlers.NewTeamHandler(deps.IdentityRepo, deps.Logger)
 
 	// ===== Public Auth Routes (no authentication required) =====
 	auth := router.Group("/auth")
@@ -96,15 +104,22 @@ func RegisterRoutes(router *gin.Engine, deps Deps) {
 		teams.PUT("/:id/members/:userId", teamHandler.UpdateTeamMember)
 		teams.DELETE("/:id/members/:userId", teamHandler.RemoveTeamMember)
 	}
+}
 
-	// ===== API Key Management Routes =====
-	apiKeys := router.Group("/api-keys")
-	apiKeys.Use(deps.AuthMiddleware.Authenticate())
-	apiKeys.Use(deps.AuthMiddleware.RequireJWTAuth())
-	{
-		apiKeys.GET("", apiKeyHandler.ListAPIKeys)
-		apiKeys.POST("", apiKeyHandler.CreateAPIKey)
-		apiKeys.DELETE("/:id", apiKeyHandler.DeleteAPIKey)
-		apiKeys.POST("/:id/deactivate", apiKeyHandler.DeactivateAPIKey)
+// RegisterAPIKeyRoutes mounts home-region API key management routes.
+func RegisterAPIKeyRoutes(router gin.IRouter, deps Deps) {
+	if deps.APIKeyRepo != nil {
+		apiKeyHandler := handlers.NewAPIKeyHandler(deps.APIKeyRepo, deps.IdentityRepo, deps.Logger)
+
+		// ===== API Key Management Routes =====
+		apiKeys := router.Group("/api-keys")
+		apiKeys.Use(deps.AuthMiddleware.Authenticate())
+		apiKeys.Use(deps.AuthMiddleware.RequireJWTAuth())
+		{
+			apiKeys.GET("", apiKeyHandler.ListAPIKeys)
+			apiKeys.POST("", apiKeyHandler.CreateAPIKey)
+			apiKeys.DELETE("/:id", apiKeyHandler.DeleteAPIKey)
+			apiKeys.POST("/:id/deactivate", apiKeyHandler.DeactivateAPIKey)
+		}
 	}
 }

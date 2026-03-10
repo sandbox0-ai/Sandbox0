@@ -10,9 +10,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"go.uber.org/zap"
@@ -23,24 +23,24 @@ type AuthHandler struct {
 	repo            authRepository
 	builtinProvider *builtin.Provider
 	oidcManager     *oidc.Manager
-	jwtIssuer       *jwt.Issuer
+	jwtIssuer       *authn.Issuer
 	logger          *zap.Logger
 }
 
 type authRepository interface {
-	CreateRefreshToken(ctx context.Context, token *db.RefreshToken) error
-	ValidateRefreshToken(ctx context.Context, tokenHash string) (*db.RefreshToken, error)
+	CreateRefreshToken(ctx context.Context, token *identity.RefreshToken) error
+	ValidateRefreshToken(ctx context.Context, tokenHash string) (*identity.RefreshToken, error)
 	RevokeAllUserRefreshTokens(ctx context.Context, userID string) error
-	GetUserByID(ctx context.Context, id string) (*db.User, error)
-	GetTeamMember(ctx context.Context, teamID, userID string) (*db.TeamMember, error)
+	GetUserByID(ctx context.Context, id string) (*identity.User, error)
+	GetTeamMember(ctx context.Context, teamID, userID string) (*identity.TeamMember, error)
 }
 
 // NewAuthHandler creates a new auth handler
 func NewAuthHandler(
-	repo *db.Repository,
+	repo *identity.Repository,
 	builtinProvider *builtin.Provider,
 	oidcManager *oidc.Manager,
-	jwtIssuer *jwt.Issuer,
+	jwtIssuer *authn.Issuer,
 	logger *zap.Logger,
 ) *AuthHandler {
 	return &AuthHandler{
@@ -204,7 +204,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	tokenHash := jwt.HashRefreshToken(req.RefreshToken)
+	tokenHash := authn.HashRefreshToken(req.RefreshToken)
 	storedToken, err := h.repo.ValidateRefreshToken(c.Request.Context(), tokenHash)
 	if err != nil || storedToken.UserID != claims.UserID {
 		spec.JSONError(c, http.StatusUnauthorized, spec.CodeUnauthorized, "invalid refresh token")
@@ -438,7 +438,7 @@ func (h *AuthHandler) GetAuthProviders(c *gin.Context) {
 	spec.JSONSuccess(c, http.StatusOK, gin.H{"providers": providers})
 }
 
-func (h *AuthHandler) issueAndPersistTokenPair(ctx context.Context, user *db.User, teamID, teamRole string) (*jwt.TokenPair, error) {
+func (h *AuthHandler) issueAndPersistTokenPair(ctx context.Context, user *identity.User, teamID, teamRole string) (*authn.TokenPair, error) {
 	tokens, err := h.jwtIssuer.IssueTokenPair(
 		user.ID,
 		teamID,
@@ -456,10 +456,10 @@ func (h *AuthHandler) issueAndPersistTokenPair(ctx context.Context, user *db.Use
 	return tokens, nil
 }
 
-func (h *AuthHandler) persistRefreshToken(ctx context.Context, userID string, tokens *jwt.TokenPair) error {
-	return h.repo.CreateRefreshToken(ctx, &db.RefreshToken{
+func (h *AuthHandler) persistRefreshToken(ctx context.Context, userID string, tokens *authn.TokenPair) error {
+	return h.repo.CreateRefreshToken(ctx, &identity.RefreshToken{
 		UserID:    userID,
-		TokenHash: jwt.HashRefreshToken(tokens.RefreshToken),
+		TokenHash: authn.HashRefreshToken(tokens.RefreshToken),
 		ExpiresAt: tokens.RefreshExpiresAt,
 	})
 }
@@ -479,7 +479,7 @@ func isLocalReturnURL(raw string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
-func buildCLIReturnURL(raw string, tokens *jwt.TokenPair) (string, error) {
+func buildCLIReturnURL(raw string, tokens *authn.TokenPair) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", err

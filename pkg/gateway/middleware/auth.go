@@ -1,33 +1,75 @@
 package middleware
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/sandbox0-ai/sandbox0/pkg/auth"
-	gatewayjwt "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/jwt"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/apikey"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
 	"go.uber.org/zap"
 )
 
+type apiKeyValidator interface {
+	ValidateAPIKey(ctx context.Context, keyValue string) (*apikey.APIKey, error)
+}
+
+// JWTValidationMode controls which JWT token type the middleware accepts.
+type JWTValidationMode string
+
+const (
+	JWTValidationModeAccess JWTValidationMode = "access"
+	JWTValidationModeRegion JWTValidationMode = "region"
+)
+
+type AuthMiddlewareOption func(*AuthMiddleware)
+
 // AuthMiddleware provides authentication middleware
 type AuthMiddleware struct {
-	repo      *db.Repository
-	jwtIssuer *gatewayjwt.Issuer
-	jwtSecret []byte
-	logger    *zap.Logger
+	apiKeys           apiKeyValidator
+	jwtIssuer         *authn.Issuer
+	jwtSecret         []byte
+	logger            *zap.Logger
+	jwtValidationMode JWTValidationMode
+	requiredRegionID  string
 }
 
 // NewAuthMiddleware creates a new auth middleware
-func NewAuthMiddleware(repo *db.Repository, jwtSecret string, jwtIssuer *gatewayjwt.Issuer, logger *zap.Logger) *AuthMiddleware {
-	return &AuthMiddleware{
-		repo:      repo,
-		jwtIssuer: jwtIssuer,
-		jwtSecret: []byte(jwtSecret),
-		logger:    logger,
+func NewAuthMiddleware(apiKeys apiKeyValidator, jwtSecret string, jwtIssuer *authn.Issuer, logger *zap.Logger, opts ...AuthMiddlewareOption) *AuthMiddleware {
+	m := &AuthMiddleware{
+		apiKeys:           apiKeys,
+		jwtIssuer:         jwtIssuer,
+		jwtSecret:         []byte(jwtSecret),
+		logger:            logger,
+		jwtValidationMode: JWTValidationModeAccess,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(m)
+		}
+	}
+	return m
+}
+
+// WithJWTValidationMode changes the accepted JWT token type.
+func WithJWTValidationMode(mode JWTValidationMode) AuthMiddlewareOption {
+	return func(m *AuthMiddleware) {
+		switch mode {
+		case JWTValidationModeRegion:
+			m.jwtValidationMode = JWTValidationModeRegion
+		default:
+			m.jwtValidationMode = JWTValidationModeAccess
+		}
+	}
+}
+
+// WithRequiredRegionID binds accepted region tokens to a canonical region id.
+func WithRequiredRegionID(regionID string) AuthMiddlewareOption {
+	return func(m *AuthMiddleware) {
+		m.requiredRegionID = strings.TrimSpace(regionID)
 	}
 }
 
@@ -47,7 +89,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 		}
 
 		c.Set("auth_context", authCtx)
-		ctx := auth.WithAuthContext(c.Request.Context(), authCtx)
+		ctx := authn.WithAuthContext(c.Request.Context(), authCtx)
 		c.Request = c.Request.WithContext(ctx)
 
 		c.Next()
@@ -55,7 +97,7 @@ func (m *AuthMiddleware) Authenticate() gin.HandlerFunc {
 }
 
 // AuthenticateRequest validates credentials and returns the auth context.
-func (m *AuthMiddleware) AuthenticateRequest(c *gin.Context) (*auth.AuthContext, error) {
+func (m *AuthMiddleware) AuthenticateRequest(c *gin.Context) (*authn.AuthContext, error) {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		return nil, errors.New("missing authorization header")
@@ -80,48 +122,51 @@ func (m *AuthMiddleware) AuthenticateRequest(c *gin.Context) (*auth.AuthContext,
 }
 
 // authenticateAPIKey validates an API key
-func (m *AuthMiddleware) authenticateAPIKey(c *gin.Context, keyValue string) (*auth.AuthContext, error) {
-	apiKey, err := m.repo.ValidateAPIKey(c.Request.Context(), keyValue)
+func (m *AuthMiddleware) authenticateAPIKey(c *gin.Context, keyValue string) (*authn.AuthContext, error) {
+	if m.apiKeys == nil {
+		return nil, ErrInvalidToken
+	}
+	apiKey, err := m.apiKeys.ValidateAPIKey(c.Request.Context(), keyValue)
 	if err != nil {
 		return nil, err
 	}
 
-	return &auth.AuthContext{
-		AuthMethod:  auth.AuthMethodAPIKey,
+	return &authn.AuthContext{
+		AuthMethod:  authn.AuthMethodAPIKey,
 		TeamID:      apiKey.TeamID,
 		APIKeyID:    apiKey.ID,
-		Permissions: auth.ExpandRolesPermissions(apiKey.Roles),
+		Permissions: authn.ExpandRolesPermissions(apiKey.Roles),
 	}, nil
 }
 
 // authenticateJWT validates a JWT token
-func (m *AuthMiddleware) authenticateJWT(c *gin.Context, tokenString string) (*auth.AuthContext, error) {
+func (m *AuthMiddleware) authenticateJWT(c *gin.Context, tokenString string) (*authn.AuthContext, error) {
 	if len(m.jwtSecret) == 0 {
 		return nil, ErrJWTNotConfigured
 	}
 
 	if m.jwtIssuer != nil {
-		claims, err := m.jwtIssuer.ValidateAccessToken(tokenString)
+		claims, err := m.validateJWT(tokenString)
 		if err != nil {
 			switch {
-			case errors.Is(err, gatewayjwt.ErrJWTNotConfigured):
+			case errors.Is(err, authn.ErrJWTNotConfigured):
 				return nil, ErrJWTNotConfigured
-			case errors.Is(err, gatewayjwt.ErrTokenExpired):
+			case errors.Is(err, authn.ErrTokenExpired):
 				return nil, ErrExpiredToken
-			case errors.Is(err, gatewayjwt.ErrInvalidSigningMethod):
+			case errors.Is(err, authn.ErrInvalidSigningMethod):
 				return nil, ErrInvalidSigningMethod
 			default:
 				return nil, ErrInvalidToken
 			}
 		}
 
-		permissions := auth.ExpandRolePermissions(claims.TeamRole)
+		permissions := authn.ExpandRolePermissions(claims.TeamRole)
 		if claims.IsAdmin {
 			permissions = append(permissions, "*")
 		}
 
-		return &auth.AuthContext{
-			AuthMethod:    auth.AuthMethodJWT,
+		return &authn.AuthContext{
+			AuthMethod:    authn.AuthMethodJWT,
 			TeamID:        claims.TeamID,
 			UserID:        claims.UserID,
 			TeamRole:      claims.TeamRole,
@@ -156,19 +201,88 @@ func (m *AuthMiddleware) authenticateJWT(c *gin.Context, tokenString string) (*a
 	teamRole, _ := claims["team_role"].(string)
 	isAdmin, _ := claims["is_admin"].(bool)
 
-	permissions := auth.ExpandRolePermissions(teamRole)
+	permissions := authn.ExpandRolePermissions(teamRole)
 	if isAdmin {
 		permissions = append(permissions, "*")
 	}
 
-	return &auth.AuthContext{
-		AuthMethod:    auth.AuthMethodJWT,
+	return &authn.AuthContext{
+		AuthMethod:    authn.AuthMethodJWT,
 		TeamID:        teamID,
 		UserID:        userID,
 		TeamRole:      teamRole,
 		IsSystemAdmin: isAdmin,
 		Permissions:   permissions,
 	}, nil
+}
+
+func (m *AuthMiddleware) validateJWT(tokenString string) (*authn.Claims, error) {
+	switch m.jwtValidationMode {
+	case JWTValidationModeRegion:
+		if m.jwtIssuer == nil {
+			return nil, authn.ErrJWTNotConfigured
+		}
+		claims, err := m.jwtIssuer.ValidateRegionToken(tokenString)
+		if err != nil {
+			return nil, err
+		}
+		if expectedIssuer := strings.TrimSpace(m.jwtIssuer.IssuerName()); expectedIssuer != "" && claims.Issuer != expectedIssuer {
+			return nil, authn.ErrInvalidToken
+		}
+		if m.requiredRegionID != "" && strings.TrimSpace(claims.RegionID) != m.requiredRegionID {
+			return nil, authn.ErrInvalidToken
+		}
+		return claims, nil
+	default:
+		if m.jwtIssuer != nil {
+			claims, err := m.jwtIssuer.ValidateAccessToken(tokenString)
+			if err != nil {
+				return nil, err
+			}
+			if expectedIssuer := strings.TrimSpace(m.jwtIssuer.IssuerName()); expectedIssuer != "" && claims.Issuer != expectedIssuer {
+				return nil, authn.ErrInvalidToken
+			}
+			return claims, nil
+		}
+	}
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		// Validate signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, ErrInvalidSigningMethod
+		}
+		return m.jwtSecret, nil
+	})
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+
+	if !token.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	mapClaims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, ErrInvalidToken
+	}
+	if tokenType, _ := mapClaims["token_type"].(string); tokenType != "" && tokenType != "access" {
+		return nil, ErrInvalidToken
+	}
+
+	claims := &authn.Claims{}
+	if issuer, _ := mapClaims["iss"].(string); issuer != "" {
+		claims.Issuer = issuer
+	}
+	if subject, _ := mapClaims["sub"].(string); subject != "" {
+		claims.Subject = subject
+	}
+	claims.TeamID, _ = mapClaims["team_id"].(string)
+	claims.UserID, _ = mapClaims["user_id"].(string)
+	claims.TeamRole, _ = mapClaims["team_role"].(string)
+	claims.RegionID, _ = mapClaims["region_id"].(string)
+	claims.TokenType, _ = mapClaims["token_type"].(string)
+	claims.IsAdmin, _ = mapClaims["is_admin"].(bool)
+	return claims, nil
 }
 
 // RequirePermission returns middleware that checks for a specific permission
@@ -197,7 +311,7 @@ func (m *AuthMiddleware) RequirePermission(permission string) gin.HandlerFunc {
 func (m *AuthMiddleware) RequireJWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authCtx := GetAuthContext(c)
-		if authCtx == nil || authCtx.AuthMethod != auth.AuthMethodJWT || authCtx.UserID == "" {
+		if authCtx == nil || authCtx.AuthMethod != authn.AuthMethodJWT || authCtx.UserID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "this API requires a user access token (human login); API keys are not supported",
 			})
@@ -209,9 +323,9 @@ func (m *AuthMiddleware) RequireJWTAuth() gin.HandlerFunc {
 }
 
 // GetAuthContext extracts auth context from gin context
-func GetAuthContext(c *gin.Context) *auth.AuthContext {
+func GetAuthContext(c *gin.Context) *authn.AuthContext {
 	if v, exists := c.Get("auth_context"); exists {
-		return v.(*auth.AuthContext)
+		return v.(*authn.AuthContext)
 	}
 	return nil
 }

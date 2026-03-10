@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
-	"github.com/sandbox0-ai/sandbox0/pkg/gateway/db"
+	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -21,13 +21,13 @@ var (
 
 // Provider handles built-in email/password authentication
 type Provider struct {
-	repo            *db.Repository
+	repo            *identity.Repository
 	config          *config.BuiltInAuthConfig
 	defaultTeamName string
 }
 
 // NewProvider creates a new built-in auth provider
-func NewProvider(repo *db.Repository, cfg *config.BuiltInAuthConfig, defaultTeamName string) *Provider {
+func NewProvider(repo *identity.Repository, cfg *config.BuiltInAuthConfig, defaultTeamName string) *Provider {
 	return &Provider{
 		repo:            repo,
 		config:          cfg,
@@ -36,14 +36,14 @@ func NewProvider(repo *db.Repository, cfg *config.BuiltInAuthConfig, defaultTeam
 }
 
 // Authenticate validates email and password
-func (p *Provider) Authenticate(ctx context.Context, email, password string) (*db.User, error) {
+func (p *Provider) Authenticate(ctx context.Context, email, password string) (*identity.User, error) {
 	if !p.config.Enabled {
 		return nil, ErrBuiltInAuthDisabled
 	}
 
 	user, err := p.repo.GetUserByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, db.ErrUserNotFound) {
+		if errors.Is(err, identity.ErrUserNotFound) {
 			return nil, ErrInvalidCredentials
 		}
 		return nil, fmt.Errorf("get user: %w", err)
@@ -67,7 +67,7 @@ func (p *Provider) Authenticate(ctx context.Context, email, password string) (*d
 }
 
 // Register creates a new user with email/password
-func (p *Provider) Register(ctx context.Context, email, password, name string) (*db.User, error) {
+func (p *Provider) Register(ctx context.Context, email, password, name string) (*identity.User, error) {
 	if !p.config.Enabled {
 		return nil, ErrBuiltInAuthDisabled
 	}
@@ -86,7 +86,7 @@ func (p *Provider) Register(ctx context.Context, email, password, name string) (
 		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	user := &db.User{
+	user := &identity.User{
 		Email:         email,
 		Name:          name,
 		PasswordHash:  string(passwordHash),
@@ -100,7 +100,7 @@ func (p *Provider) Register(ctx context.Context, email, password, name string) (
 	}
 
 	if _, _, err := p.repo.CreateUserWithDefaultTeam(ctx, user, teamName); err != nil {
-		if errors.Is(err, db.ErrUserAlreadyExists) {
+		if errors.Is(err, identity.ErrUserAlreadyExists) {
 			return nil, ErrEmailAlreadyExists
 		}
 		return nil, fmt.Errorf("create user with team: %w", err)
@@ -177,7 +177,7 @@ func (p *Provider) EnsureInitUser(ctx context.Context) error {
 		return fmt.Errorf("hash password: %w", err)
 	}
 
-	user := &db.User{
+	user := &identity.User{
 		Email:         p.config.InitUser.Email,
 		Name:          p.config.InitUser.Name,
 		PasswordHash:  string(passwordHash),
@@ -186,7 +186,7 @@ func (p *Provider) EnsureInitUser(ctx context.Context) error {
 	}
 
 	if err := p.repo.CreateUser(ctx, user); err != nil {
-		if errors.Is(err, db.ErrUserAlreadyExists) {
+		if errors.Is(err, identity.ErrUserAlreadyExists) {
 			// User already exists, that's fine
 			return nil
 		}
@@ -194,7 +194,7 @@ func (p *Provider) EnsureInitUser(ctx context.Context) error {
 	}
 
 	// Create a default team for the initial user
-	team := &db.Team{
+	team := &identity.Team{
 		Name:    "Default",
 		Slug:    "default",
 		OwnerID: &user.ID,
@@ -205,7 +205,7 @@ func (p *Provider) EnsureInitUser(ctx context.Context) error {
 	}
 
 	// Add user to team
-	member := &db.TeamMember{
+	member := &identity.TeamMember{
 		TeamID: team.ID,
 		UserID: user.ID,
 		Role:   "admin",

@@ -16,6 +16,13 @@ type EdgeGatewayConfig struct {
 	// +kubebuilder:default="self-hosted"
 	Edition string `yaml:"edition" json:"edition"`
 
+	// AuthMode controls how human-facing authentication is handled.
+	// Allowed values: "self_hosted", "federated_global".
+	// +optional
+	// +kubebuilder:validation:Enum=self_hosted;federated_global
+	// +kubebuilder:default="self_hosted"
+	AuthMode string `yaml:"auth_mode" json:"authMode"`
+
 	// Server configuration
 	// +optional
 	// +kubebuilder:default=8080
