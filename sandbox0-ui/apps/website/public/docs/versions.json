@@ -5,12 +5,14 @@
       "id": "latest",
       "label": "Latest",
       "channel": "stable",
-      "target": "next"
+      "target": "next",
+      "listed": true
     },
     {
       "id": "next",
       "label": "Next",
-      "channel": "next"
+      "channel": "next",
+      "listed": true
     }
   ]
 }
