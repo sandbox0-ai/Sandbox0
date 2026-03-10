@@ -10,6 +10,7 @@ const buildConfigPath = path.join(generatedDir, "build-config.json");
 const githubRepo = process.env.DOCS_GITHUB_REPOSITORY || process.env.GITHUB_REPOSITORY || "sandbox0-ai/sandbox0";
 const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 const explicitRenderVersions = parseList(process.env.DOCS_BUILD_VERSIONS);
+const listedReleaseLimit = parsePositiveInt(process.env.DOCS_VERSION_SWITCHER_LIMIT, 12);
 
 /**
  * @typedef {"stable" | "prerelease" | "next"} DocsVersionChannel
@@ -19,6 +20,7 @@ const explicitRenderVersions = parseList(process.env.DOCS_BUILD_VERSIONS);
  *   label: string;
  *   channel: DocsVersionChannel;
  *   target?: string;
+ *   listed?: boolean;
  * }} DocsVersion
  *
  * @typedef {{
@@ -57,6 +59,16 @@ function parseList(value) {
   }
 
   return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+}
+
+/**
+ * @param {string | undefined} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 /**
@@ -142,6 +154,10 @@ function buildManifest(releases, fallbackManifest) {
     .filter(Boolean)
     .sort(compareDocsVersionDesc);
 
+  actualVersions.forEach((version, index) => {
+    version.listed = index < listedReleaseLimit;
+  });
+
   const latestStable = actualVersions.find((version) => version.channel === "stable");
   const includeNext =
     process.env.DOCS_INCLUDE_NEXT === "false"
@@ -156,6 +172,7 @@ function buildManifest(releases, fallbackManifest) {
       label: "Latest",
       channel: "stable",
       target: latestStable?.id ?? "next",
+      listed: true,
     },
     ...(includeNext
       ? [
@@ -163,6 +180,7 @@ function buildManifest(releases, fallbackManifest) {
             id: "next",
             label: "Next",
             channel: "next",
+            listed: true,
           },
         ]
       : []),
@@ -189,12 +207,8 @@ function resolveRenderVersions(manifest, configured) {
     return configured;
   }
 
-  const hasStableRelease = manifest.versions.some(
-    (version) => version.id.startsWith("v") && version.channel === "stable"
-  );
-
   if (process.env.CF_PAGES === "1") {
-    return hasStableRelease ? ["next"] : ["latest", "next"];
+    return ["latest", "next"];
   }
 
   return manifest.versions

@@ -92,9 +92,16 @@ async function main() {
   if (latestTarget?.startsWith("v")) {
     const latestDir = path.join(outDir, "docs", "latest");
     const targetDir = path.join(outDir, "docs", latestTarget);
+    const targetDirExists = await pathExists(targetDir);
 
-    await fs.rm(latestDir, { recursive: true, force: true });
-    await fs.cp(targetDir, latestDir, { recursive: true });
+    if (targetDirExists) {
+      await fs.rm(latestDir, { recursive: true, force: true });
+      await fs.cp(targetDir, latestDir, { recursive: true });
+    } else {
+      console.warn(
+        `latest docs target ${latestTarget} is unavailable; keeping the generated latest docs fallback`
+      );
+    }
   }
 
   console.log("hydrated release docs bundles into out/");
@@ -137,6 +144,19 @@ async function fetchGithubReleases(repo, token) {
   }
 
   return releases;
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<boolean>}
+ */
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 main().catch((error) => {

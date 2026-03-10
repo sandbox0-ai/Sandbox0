@@ -38,15 +38,19 @@ export function DocsVersionSelect() {
     };
   }, []);
 
+  const options = manifest.versions
+    .filter((version) => version.listed !== false || version.id === currentVersion)
+    .map((version) => ({
+      value: version.id,
+      label: version.label,
+    }));
+
   return (
     <div className="pb-8 pt-2">
       <PixelSelect
         ariaLabel="Select documentation version"
         value={currentVersion}
-        options={manifest.versions.map((version) => ({
-          value: version.id,
-          label: version.label,
-        }))}
+        options={options}
         onValueChange={(value) => {
           router.push(`/docs/${value}${contentPath}`);
         }}

@@ -6,6 +6,7 @@ export interface DocsVersion {
   label: string;
   channel: "stable" | "prerelease" | "next";
   target?: string;
+  listed?: boolean;
 }
 
 export interface DocsVersionsManifest {
