@@ -89,7 +89,7 @@ test("updateDefaultTeam sends the selected team to the control plane", async () 
     "access-token",
     "team_2",
     async (input, init) => {
-      assert.equal(String(input), "https://single.example.com/users/me");
+      assert.equal(String(input), "https://single.example.com/tenant/active");
       assert.equal(init?.method, "PUT");
       const headers = new Headers(init?.headers);
       assert.equal(headers.get("authorization"), "Bearer access-token");

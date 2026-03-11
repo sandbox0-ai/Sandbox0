@@ -8,6 +8,7 @@ import type {
   DashboardUser,
 } from "./types";
 import { dashboardAccessTokenCookieName } from "./auth";
+import { createDashboardControlPlaneSDK, resolveSDKErrorMessage } from "./sdk";
 
 export interface SessionAuthInput {
   bearerToken?: string;
@@ -15,154 +16,77 @@ export interface SessionAuthInput {
 
 type FetchLike = typeof fetch;
 
-interface Envelope<T> {
-  data?: T;
-  error?: {
-    message?: string;
-  };
-}
-
-interface TeamListResponse {
-  teams?: Array<{
-    id: string;
-    name: string;
-    slug: string;
-    owner_id?: string | null;
-    home_region_id?: string | null;
-  }>;
-}
-
-interface SandboxListResponse {
-  sandboxes?: Array<{
-    id: string;
-    template_id: string;
-    status: string;
-    paused: boolean;
-    cluster_id?: string | null;
-    created_at: string;
-    expires_at: string;
-  }>;
-}
-
-interface TemplateListResponse {
-  templates?: Array<{
-    template_id: string;
-    scope: string;
-    created_at: string;
-  }>;
-}
-
-interface RegionTokenResponse {
-  region_id: string;
-  edge_gateway_url?: string | null;
-  token: string;
-  expires_at: number;
-}
-
-interface UserResponse {
+function toUser(user: {
   id: string;
   email: string;
   name: string;
-  avatar_url?: string | null;
-  default_team_id?: string | null;
-  email_verified: boolean;
-  is_admin: boolean;
-}
-
-interface ActiveTeamResponse {
-  user_id: string;
-  team_id: string;
-  team_role?: string;
-  home_region_id: string;
-  default_team?: boolean;
-  edge_gateway_url?: string | null;
-}
-
-function joinURL(baseURL: string, path: string): string {
-  const base = new URL(baseURL);
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return new URL(
-    normalizedPath,
-    `${base.toString().replace(/\/$/, "")}/`,
-  ).toString();
-}
-
-async function fetchEnvelope<T>(
-  fetchImpl: FetchLike,
-  baseURL: string,
-  path: string,
-  token: string,
-  init?: RequestInit,
-): Promise<T> {
-  const headers = new Headers(init?.headers ?? {});
-  headers.set("Authorization", `Bearer ${token}`);
-  if (init?.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const response = await fetchImpl(joinURL(baseURL, path), {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
-
-  const payload = (await response
-    .json()
-    .catch(() => null)) as Envelope<T> | null;
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ?? `${path} returned ${response.status}`,
-    );
-  }
-  if (!payload?.data) {
-    throw new Error(`${path} returned an empty response`);
-  }
-  return payload.data;
-}
-
-function toUser(user: UserResponse): DashboardUser {
+  avatarUrl?: string | null;
+  defaultTeamId?: string | null;
+  emailVerified: boolean;
+  isAdmin: boolean;
+}): DashboardUser {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    avatarUrl: user.avatar_url ?? null,
-    defaultTeamID: user.default_team_id ?? null,
-    emailVerified: user.email_verified,
-    isAdmin: user.is_admin,
+    avatarUrl: user.avatarUrl ?? null,
+    defaultTeamID: user.defaultTeamId ?? null,
+    emailVerified: user.emailVerified,
+    isAdmin: user.isAdmin,
   };
 }
 
-function toTeams(data: TeamListResponse | undefined): DashboardTeam[] {
-  return (data?.teams ?? []).map((team) => ({
+function toTeams(
+  teams: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    ownerId?: string | null;
+    homeRegionId?: string | null;
+  }> = [],
+): DashboardTeam[] {
+  return teams.map((team) => ({
     id: team.id,
     name: team.name,
     slug: team.slug,
-    ownerID: team.owner_id ?? null,
-    homeRegionID: team.home_region_id ?? null,
+    ownerID: team.ownerId ?? null,
+    homeRegionID: team.homeRegionId ?? null,
   }));
 }
 
 function toSandboxes(
-  data: SandboxListResponse | undefined,
+  sandboxes: Array<{
+    id: string;
+    templateId: string;
+    status: string;
+    paused: boolean;
+    clusterId?: string | null;
+    createdAt: Date;
+    expiresAt: Date;
+  }> = [],
 ): DashboardSandboxSummary[] {
-  return (data?.sandboxes ?? []).map((sandbox) => ({
+  return sandboxes.map((sandbox) => ({
     id: sandbox.id,
-    templateID: sandbox.template_id,
+    templateID: sandbox.templateId,
     status: sandbox.status,
     paused: sandbox.paused,
-    clusterID: sandbox.cluster_id ?? null,
-    createdAt: sandbox.created_at,
-    expiresAt: sandbox.expires_at,
+    clusterID: sandbox.clusterId ?? null,
+    createdAt: sandbox.createdAt.toISOString(),
+    expiresAt: sandbox.expiresAt.toISOString(),
   }));
 }
 
 function toTemplates(
-  data: TemplateListResponse | undefined,
+  templates: Array<{
+    templateId: string;
+    scope: string;
+    createdAt: Date;
+  }> = [],
 ): DashboardTemplateSummary[] {
-  return (data?.templates ?? []).map((template) => ({
-    templateID: template.template_id,
+  return templates.map((template) => ({
+    templateID: template.templateId,
     scope: template.scope,
-    createdAt: template.created_at,
+    createdAt: template.createdAt.toISOString(),
   }));
 }
 
@@ -243,39 +167,28 @@ export async function resolveDashboardSession(
     }
 
     try {
-      const user = toUser(
-        await fetchEnvelope<UserResponse>(
-          fetchImpl,
-          baseURL,
-          "/users/me",
-          token,
-        ),
-      );
-      const teams = toTeams(
-        await fetchEnvelope<TeamListResponse>(
-          fetchImpl,
-          baseURL,
-          "/teams",
-          token,
-        ),
-      );
+      const sdk = await createDashboardControlPlaneSDK(baseURL, {
+        token,
+        fetch: fetchImpl,
+      });
+      const [userResponse, teamResponse, sandboxResponse, templateResponse] =
+        await Promise.all([
+          sdk.users.usersMeGet(),
+          sdk.teams.teamsGet(),
+          sdk.sandboxes.apiV1SandboxesGet({ limit: 5 }),
+          sdk.templates.apiV1TemplatesGet(),
+        ]);
+
+      const userData = userResponse.data;
+      if (!userData) {
+        throw new Error("/users/me returned an empty response");
+      }
+
+      const user = toUser(userData);
+      const teams = toTeams(teamResponse.data?.teams);
       const activeTeam = deriveSingleClusterActiveTeam(user, teams, baseURL);
-      const sandboxes = toSandboxes(
-        await fetchEnvelope<SandboxListResponse>(
-          fetchImpl,
-          baseURL,
-          "/api/v1/sandboxes?limit=5",
-          token,
-        ),
-      );
-      const templates = toTemplates(
-        await fetchEnvelope<TemplateListResponse>(
-          fetchImpl,
-          baseURL,
-          "/api/v1/templates",
-          token,
-        ),
-      );
+      const sandboxes = toSandboxes(sandboxResponse.data?.sandboxes);
+      const templates = toTemplates(templateResponse.data?.templates);
 
       return {
         ...baseSession,
@@ -290,9 +203,7 @@ export async function resolveDashboardSession(
     } catch (error) {
       return {
         ...baseSession,
-        errors: [
-          error instanceof Error ? error.message : "failed to resolve session",
-        ],
+        errors: [await resolveSDKErrorMessage(error, "failed to resolve session")],
       };
     }
   }
@@ -306,74 +217,67 @@ export async function resolveDashboardSession(
   }
 
   try {
-    const user = toUser(
-      await fetchEnvelope<UserResponse>(
-        fetchImpl,
-        globalURL,
-        "/users/me",
-        token,
-      ),
-    );
-    const teams = toTeams(
-      await fetchEnvelope<TeamListResponse>(
-        fetchImpl,
-        globalURL,
-        "/teams",
-        token,
-      ),
-    );
-    const activeTeamData = await fetchEnvelope<ActiveTeamResponse>(
-      fetchImpl,
-      globalURL,
-      "/tenant/active",
+    const globalSDK = await createDashboardControlPlaneSDK(globalURL, {
       token,
-    );
+      fetch: fetchImpl,
+    });
+    const [userResponse, teamResponse, activeTeamResponse] = await Promise.all([
+      globalSDK.users.usersMeGet(),
+      globalSDK.teams.teamsGet(),
+      globalSDK.tenant.tenantActiveGet(),
+    ]);
+
+    const userData = userResponse.data;
+    const activeTeamData = activeTeamResponse.data;
+    if (!userData) {
+      throw new Error("/users/me returned an empty response");
+    }
+    if (!activeTeamData) {
+      throw new Error("/tenant/active returned an empty response");
+    }
+
+    const user = toUser(userData);
+    const teams = toTeams(teamResponse.data?.teams);
     const activeTeam: DashboardActiveTeam = {
-      userID: activeTeamData.user_id,
-      teamID: activeTeamData.team_id,
-      teamRole: activeTeamData.team_role,
-      homeRegionID: activeTeamData.home_region_id,
-      defaultTeam: Boolean(activeTeamData.default_team),
-      edgeGatewayURL: activeTeamData.edge_gateway_url ?? null,
+      userID: activeTeamData.userId,
+      teamID: activeTeamData.teamId,
+      teamRole: activeTeamData.teamRole,
+      homeRegionID: activeTeamData.homeRegionId,
+      defaultTeam: Boolean(activeTeamData.defaultTeam),
+      edgeGatewayURL: activeTeamData.edgeGatewayUrl ?? null,
     };
 
     let regionalURL = activeTeam.edgeGatewayURL ?? undefined;
     let regionToken = token;
     if (regionalURL) {
-      const regionTokenData = await fetchEnvelope<RegionTokenResponse>(
-        fetchImpl,
-        globalURL,
-        "/auth/region-token",
-        token,
-        {
-          method: "POST",
-          body: JSON.stringify({ team_id: activeTeam.teamID }),
-        },
-      );
-      regionalURL = regionTokenData.edge_gateway_url ?? regionalURL;
+      const regionTokenResponse = await globalSDK.tenant.authRegionTokenPost({
+        issueRegionTokenRequest: { teamId: activeTeam.teamID },
+      });
+      const regionTokenData = regionTokenResponse.data;
+      if (!regionTokenData) {
+        throw new Error("/auth/region-token returned an empty response");
+      }
+
+      regionalURL = regionTokenData.edgeGatewayUrl ?? regionalURL;
       regionToken = regionTokenData.token;
     }
 
     const sandboxes = regionalURL
-      ? toSandboxes(
-          await fetchEnvelope<SandboxListResponse>(
-            fetchImpl,
-            regionalURL,
-            "/api/v1/sandboxes?limit=5",
-            regionToken,
-          ),
-        )
-      : [];
+      ? await (
+          await createDashboardControlPlaneSDK(regionalURL, {
+            token: regionToken,
+            fetch: fetchImpl,
+          })
+        ).sandboxes.apiV1SandboxesGet({ limit: 5 })
+      : undefined;
     const templates = regionalURL
-      ? toTemplates(
-          await fetchEnvelope<TemplateListResponse>(
-            fetchImpl,
-            regionalURL,
-            "/api/v1/templates",
-            regionToken,
-          ),
-        )
-      : [];
+      ? await (
+          await createDashboardControlPlaneSDK(regionalURL, {
+            token: regionToken,
+            fetch: fetchImpl,
+          })
+        ).templates.apiV1TemplatesGet()
+      : undefined;
 
     return {
       ...baseSession,
@@ -382,15 +286,13 @@ export async function resolveDashboardSession(
       user,
       teams,
       activeTeam,
-      sandboxes,
-      templates,
+      sandboxes: toSandboxes(sandboxes?.data?.sandboxes),
+      templates: toTemplates(templates?.data?.templates),
     };
   } catch (error) {
     return {
       ...baseSession,
-      errors: [
-        error instanceof Error ? error.message : "failed to resolve session",
-      ],
+      errors: [await resolveSDKErrorMessage(error, "failed to resolve session")],
     };
   }
 }

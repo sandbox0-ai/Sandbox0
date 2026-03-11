@@ -1,31 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { resolveDashboardControlPlaneURL } from "./config";
+import { createDashboardControlPlaneSDK, resolveSDKErrorMessage } from "./sdk";
 import type { DashboardAuthProvider, DashboardRuntimeConfig } from "./types";
-
-interface Envelope<T> {
-  data?: T;
-  error?: {
-    message?: string;
-  };
-}
-
-interface AuthProvidersResponse {
-  providers?: Array<{
-    id: string;
-    name: string;
-    type: string;
-  }>;
-}
 
 interface LoginResponse {
   access_token: string;
   refresh_token: string;
   expires_at: number;
-}
-
-interface UserUpdateResponse {
-  id: string;
 }
 
 export const dashboardAccessTokenCookieName = "sandbox0_access_token";
@@ -40,10 +22,16 @@ function joinURL(baseURL: string, path: string): string {
   ).toString();
 }
 
-async function decodeEnvelope<T>(
-  response: Response,
-): Promise<Envelope<T> | null> {
-  return (await response.json().catch(() => null)) as Envelope<T> | null;
+function toLoginResponse(data: {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}): LoginResponse {
+  return {
+    access_token: data.accessToken,
+    refresh_token: data.refreshToken,
+    expires_at: data.expiresAt,
+  };
 }
 
 export function dashboardCookieNames() {
@@ -66,21 +54,11 @@ export async function resolveDashboardAuthProviders(
   }
 
   try {
-    const response = await fetchImpl(joinURL(baseURL, "/auth/providers"), {
-      cache: "no-store",
+    const sdk = await createDashboardControlPlaneSDK(baseURL, {
+      fetch: fetchImpl,
     });
-    const payload = await decodeEnvelope<AuthProvidersResponse>(response);
-    if (!response.ok) {
-      return {
-        providers: [],
-        errors: [
-          payload?.error?.message ??
-            `/auth/providers returned ${response.status}`,
-        ],
-      };
-    }
-
-    const providers = (payload?.data?.providers ?? []).flatMap((provider) => {
+    const response = await sdk.auth.authProvidersGet();
+    const providers = (response.data?.providers ?? []).flatMap((provider) => {
       if (provider.type !== "oidc" && provider.type !== "builtin") {
         return [];
       }
@@ -99,9 +77,10 @@ export async function resolveDashboardAuthProviders(
     return {
       providers: [],
       errors: [
-        error instanceof Error
-          ? error.message
-          : "failed to resolve auth providers",
+        await resolveSDKErrorMessage(
+          error,
+          "failed to resolve auth providers",
+        ),
       ],
     };
   }
@@ -119,27 +98,20 @@ export async function exchangeBuiltinLogin(
   }
 
   try {
-    const response = await fetchImpl(joinURL(baseURL, "/auth/login"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email, password }),
-      cache: "no-store",
+    const sdk = await createDashboardControlPlaneSDK(baseURL, {
+      fetch: fetchImpl,
     });
-    const payload = await decodeEnvelope<LoginResponse>(response);
-    if (!response.ok || !payload?.data) {
-      return {
-        error:
-          payload?.error?.message ?? `/auth/login returned ${response.status}`,
-      };
+    const response = await sdk.auth.authLoginPost({
+      loginRequest: { email, password },
+    });
+    if (!response.data) {
+      return { error: "/auth/login returned an empty response" };
     }
 
-    return { tokens: payload.data };
+    return { tokens: toLoginResponse(response.data) };
   } catch (error) {
     return {
-      error:
-        error instanceof Error ? error.message : "failed to complete login",
+      error: await resolveSDKErrorMessage(error, "failed to complete login"),
     };
   }
 }
@@ -155,28 +127,20 @@ export async function exchangeRefreshToken(
   }
 
   try {
-    const response = await fetchImpl(joinURL(baseURL, "/auth/refresh"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-      cache: "no-store",
+    const sdk = await createDashboardControlPlaneSDK(baseURL, {
+      fetch: fetchImpl,
     });
-    const payload = await decodeEnvelope<LoginResponse>(response);
-    if (!response.ok || !payload?.data) {
-      return {
-        error:
-          payload?.error?.message ??
-          `/auth/refresh returned ${response.status}`,
-      };
+    const response = await sdk.auth.authRefreshPost({
+      refreshRequest: { refreshToken },
+    });
+    if (!response.data) {
+      return { error: "/auth/refresh returned an empty response" };
     }
 
-    return { tokens: payload.data };
+    return { tokens: toLoginResponse(response.data) };
   } catch (error) {
     return {
-      error:
-        error instanceof Error ? error.message : "failed to refresh session",
+      error: await resolveSDKErrorMessage(error, "failed to refresh session"),
     };
   }
 }
@@ -196,31 +160,21 @@ export async function updateDefaultTeam(
   }
 
   try {
-    const response = await fetchImpl(joinURL(baseURL, "/users/me"), {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ default_team_id: teamID }),
-      cache: "no-store",
+    const sdk = await createDashboardControlPlaneSDK(baseURL, {
+      token: accessToken,
+      fetch: fetchImpl,
     });
-    const payload = await decodeEnvelope<UserUpdateResponse>(response);
-    if (!response.ok) {
-      return {
-        ok: false,
-        error:
-          payload?.error?.message ?? `/users/me returned ${response.status}`,
-      };
-    }
+    await sdk.users.tenantActivePut({
+      updateUserRequest: { defaultTeamId: teamID },
+    });
     return { ok: true };
   } catch (error) {
     return {
       ok: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "failed to update default team",
+      error: await resolveSDKErrorMessage(
+        error,
+        "failed to update default team",
+      ),
     };
   }
 }
@@ -242,7 +196,14 @@ export async function exchangeOIDCCallback(
       method: "GET",
       cache: "no-store",
     });
-    const payload = await decodeEnvelope<LoginResponse>(response);
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          data?: LoginResponse;
+          error?: {
+            message?: string;
+          };
+        }
+      | null;
     if (!response.ok || !payload?.data) {
       return {
         error:
@@ -286,7 +247,13 @@ export async function resolveOIDCLoginLocation(
     );
 
     if (response.status < 300 || response.status >= 400) {
-      const payload = await decodeEnvelope<Record<string, never>>(response);
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            error?: {
+              message?: string;
+            };
+          }
+        | null;
       return {
         error:
           payload?.error?.message ??
@@ -321,13 +288,11 @@ export async function forwardLogout(
   }
 
   try {
-    await fetchImpl(joinURL(baseURL, "/auth/logout"), {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      cache: "no-store",
+    const sdk = await createDashboardControlPlaneSDK(baseURL, {
+      token: accessToken,
+      fetch: fetchImpl,
     });
+    await sdk.auth.authLogoutPost();
   } catch {
     // Ignore upstream logout failures and clear browser cookies locally.
   }
@@ -360,17 +325,19 @@ export function clearDashboardAuthCookies(
   response: NextResponse,
   config: DashboardRuntimeConfig,
 ): void {
+  const secure = config.siteURL.startsWith("https://");
+
   response.cookies.set(dashboardAccessTokenCookieName, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: config.siteURL.startsWith("https://"),
+    secure,
     path: config.dashboardBasePath,
     maxAge: 0,
   });
   response.cookies.set(dashboardRefreshTokenCookieName, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: config.siteURL.startsWith("https://"),
+    secure,
     path: config.dashboardBasePath,
     maxAge: 0,
   });
