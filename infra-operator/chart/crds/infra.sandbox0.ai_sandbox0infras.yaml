@@ -385,8 +385,9 @@ spec:
                     type: boolean
                   regionId:
                     default: aws-us-east-1
-                    description: RegionID is the region identifier used in public
-                      URLs
+                    description: |-
+                      RegionID is the DNS-safe region label used in public URLs.
+                      It is not the canonical multi-region tenancy identifier.
                     type: string
                   rootDomain:
                     default: sandbox0.app
@@ -766,6 +767,15 @@ spec:
                         default: {}
                         description: Config contains edge-gateway specific configuration
                         properties:
+                          authMode:
+                            default: self_hosted
+                            description: |-
+                              AuthMode controls how human-facing authentication is handled.
+                              Allowed values: "self_hosted", "federated_global".
+                            enum:
+                            - self_hosted
+                            - federated_global
+                            type: string
                           baseUrl:
                             default: http://localhost:8080
                             description: Base URL for OIDC callbacks
@@ -908,6 +918,11 @@ spec:
                             default: 100
                             description: Rate limiting
                             type: integer
+                          regionId:
+                            description: |-
+                              RegionID is the canonical region identifier used by tenancy and routing
+                              contracts, for example "aws/us-east-1".
+                            type: string
                           schedulerEnabled:
                             description: Scheduler configuration (optional, for multi-cluster
                               mode)
@@ -1194,6 +1209,11 @@ spec:
                             default: 100
                             description: Rate limiting
                             type: integer
+                          regionId:
+                            description: |-
+                              RegionID is the canonical region identifier used by tenancy and routing
+                              contracts, for example "aws/us-east-1".
+                            type: string
                           schedulerPermissions:
                             default:
                             - '*:*'
