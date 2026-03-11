@@ -48,6 +48,7 @@ var sectionSpecs = []sectionSpec{
 	{Key: "spec.cluster", Title: "Cluster"},
 	{Key: "spec.initUser", Title: "Initial Admin User"},
 	{Key: "spec.builtinTemplates", Title: "Builtin Templates"},
+	{Key: "spec.sandboxNodePlacement", Title: "Sandbox Node Placement"},
 	{Key: "spec.services.edgeGateway", Title: "Service: edgeGateway"},
 	{Key: "spec.services.scheduler", Title: "Service: scheduler"},
 	{Key: "spec.services.internalGateway", Title: "Service: internalGateway"},
@@ -83,7 +84,7 @@ func main() {
 		fail(err)
 	}
 
-	out := outputDoc{GeneratedFrom: filepath.ToSlash(crdPath)}
+	out := outputDoc{GeneratedFrom: sourcePathForOutput(repoRoot, crdPath)}
 	for _, sec := range sectionSpecs {
 		node, err := lookupPath(specNode, strings.TrimPrefix(sec.Key, "spec."))
 		if err != nil {
@@ -116,6 +117,17 @@ func main() {
 	}
 
 	fmt.Printf("wrote %s\n", outPath)
+}
+
+func sourcePathForOutput(repoRoot, sourcePath string) string {
+	rel, err := filepath.Rel(repoRoot, sourcePath)
+	if err != nil {
+		return filepath.Base(sourcePath)
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.Base(sourcePath)
+	}
+	return filepath.ToSlash(rel)
 }
 
 func flattenNode(path string, node map[string]any, required bool) []outputEntry {
