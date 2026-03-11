@@ -14,6 +14,7 @@ env:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 jobs:
   prepare-release:
@@ -39,6 +40,42 @@ jobs:
           else
             echo "IS_PRERELEASE=false" >> "$GITHUB_OUTPUT"
           fi
+
+  publish-dashboard-core:
+    name: Publish dashboard-core package
+    runs-on: ubuntu-latest
+    needs: prepare-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update dashboard-core package version
+        working-directory: sandbox0-ui
+        run: npm version ${{ needs.prepare-release.outputs.version }} --workspace @sandbox0/dashboard-core --no-git-tag-version
+
+      - name: Install sandbox0-ui dependencies
+        working-directory: sandbox0-ui
+        run: npm ci
+
+      - name: Lint dashboard-core package
+        working-directory: sandbox0-ui
+        run: npm run lint -w @sandbox0/dashboard-core
+
+      - name: Test dashboard-core package
+        working-directory: sandbox0-ui
+        run: npm run test -w @sandbox0/dashboard-core
+
+      - name: Publish dashboard-core package to npm
+        working-directory: sandbox0-ui
+        run: npm publish -w @sandbox0/dashboard-core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-image:
     name: Publish infra image (${{ matrix.arch }})
