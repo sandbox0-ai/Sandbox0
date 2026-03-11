@@ -59,6 +59,17 @@ jobs:
         working-directory: sandbox0-ui
         run: npm version ${{ needs.prepare-release.outputs.version }} --workspace @sandbox0/dashboard-core --no-git-tag-version
 
+      - name: Check whether dashboard-core version already exists on npm
+        id: dashboard_core_npm
+        run: |
+          VERSION="${{ needs.prepare-release.outputs.version }}"
+          if npm view "@sandbox0/dashboard-core@${VERSION}" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "@sandbox0/dashboard-core@${VERSION} is already published; skipping npm publish."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install sandbox0-ui dependencies
         working-directory: sandbox0-ui
         run: npm ci
@@ -72,6 +83,7 @@ jobs:
         run: npm run test -w @sandbox0/dashboard-core
 
       - name: Publish dashboard-core package to npm
+        if: steps.dashboard_core_npm.outputs.published != 'true'
         working-directory: sandbox0-ui
         run: npm publish -w @sandbox0/dashboard-core
         env:
