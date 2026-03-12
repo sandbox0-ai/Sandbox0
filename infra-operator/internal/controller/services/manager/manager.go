@@ -272,6 +272,9 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 	if infra.Spec.Cluster != nil && infra.Spec.Cluster.ID != "" {
 		cfg.DefaultClusterId = infra.Spec.Cluster.ID
 	}
+	if infra.Spec.Region != "" {
+		cfg.RegionID = infra.Spec.Region
+	}
 
 	cfg.ManagerImage = fmt.Sprintf("%s:%s", imageRepo, imageTag)
 

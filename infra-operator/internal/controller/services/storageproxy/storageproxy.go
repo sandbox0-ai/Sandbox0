@@ -317,6 +317,9 @@ func (r *Reconciler) buildConfig(ctx context.Context, infra *infrav1alpha1.Sandb
 		return nil, err
 	}
 	cfg.MetaURL = metaURL
+	if infra.Spec.Region != "" {
+		cfg.RegionID = infra.Spec.Region
+	}
 
 	storageConfig, err := storage.GetStorageConfig(ctx, r.Resources.Client, infra)
 	if err != nil {

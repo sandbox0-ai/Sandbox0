@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/juicedata/juicefs/pkg/meta"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
+	meteringpkg "github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/naming"
 	obsmetrics "github.com/sandbox0-ai/sandbox0/pkg/observability/metrics"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/db"
@@ -34,6 +35,7 @@ type volumeProvider interface {
 type repository interface {
 	GetSandboxVolume(context.Context, string) (*db.SandboxVolume, error)
 	CreateSandboxVolume(context.Context, *db.SandboxVolume) error
+	CreateSandboxVolumeTx(context.Context, pgx.Tx, *db.SandboxVolume) error
 	ListSnapshotsByVolume(context.Context, string) ([]*db.Snapshot, error)
 	GetSnapshot(context.Context, string) (*db.Snapshot, error)
 	CreateSnapshot(context.Context, *db.Snapshot) error
@@ -45,6 +47,14 @@ type repository interface {
 	CreateSnapshotTx(context.Context, pgx.Tx, *db.Snapshot) error
 	GetSnapshotForUpdate(context.Context, pgx.Tx, string) (*db.Snapshot, error)
 	DeleteSnapshotTx(context.Context, pgx.Tx, string) error
+	DeleteSandboxVolumeTx(context.Context, pgx.Tx, string) error
+}
+
+type meteringRecorder interface {
+	AppendEvent(context.Context, *meteringpkg.Event) error
+	AppendEventTx(context.Context, pgx.Tx, *meteringpkg.Event) error
+	UpsertProducerWatermark(context.Context, string, string, time.Time) error
+	UpsertProducerWatermarkTx(context.Context, pgx.Tx, string, string, time.Time) error
 }
 
 // FlushCoordinator handles distributed flush coordination across storage-proxy instances
@@ -81,6 +91,7 @@ type Manager struct {
 	podID          string
 	metaClient     metaClient // Independent meta client for snapshot operations (no mount required)
 	eventPublisher eventPublisher
+	meteringRepo   meteringRecorder
 	metrics        *obsmetrics.StorageProxyMetrics
 }
 
@@ -127,6 +138,39 @@ func (m *Manager) SetEventPublisher(publisher eventPublisher) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.eventPublisher = publisher
+}
+
+func (m *Manager) SetMeteringRepository(repo meteringRecorder) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.meteringRepo = repo
+}
+
+func (m *Manager) appendMeteringEvent(ctx context.Context, event *meteringpkg.Event) error {
+	if m.meteringRepo == nil || event == nil {
+		return nil
+	}
+	if err := m.meteringRepo.AppendEvent(ctx, event); err != nil {
+		return err
+	}
+	return m.meteringRepo.UpsertProducerWatermark(ctx, event.Producer, event.RegionID, event.OccurredAt)
+}
+
+func (m *Manager) appendMeteringEventTx(ctx context.Context, tx pgx.Tx, event *meteringpkg.Event) error {
+	if m.meteringRepo == nil || event == nil {
+		return nil
+	}
+	if err := m.meteringRepo.AppendEventTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return m.meteringRepo.UpsertProducerWatermarkTx(ctx, tx, event.Producer, event.RegionID, event.OccurredAt)
+}
+
+func (m *Manager) regionID() string {
+	if m.config == nil {
+		return ""
+	}
+	return m.config.RegionID
 }
 
 // SetFlushCoordinator sets the flush coordinator for distributed coordination.
@@ -300,6 +344,9 @@ func (m *Manager) CreateSnapshot(ctx context.Context, req *CreateSnapshotRequest
 			m.logger.WithError(err).Error("Failed to save snapshot metadata, cleaning up")
 			m.deleteSnapshotDir(ctx, snapshotPath)
 			return fmt.Errorf("save snapshot: %w", err)
+		}
+		if err := m.appendMeteringEventTx(ctx, tx, snapshotCreatedEvent(m.regionID(), m.clusterID, snapshot)); err != nil {
+			return fmt.Errorf("append metering event: %w", err)
 		}
 
 		return nil
@@ -488,7 +535,15 @@ func (m *Manager) ForkVolume(ctx context.Context, req *ForkVolumeRequest) (*db.S
 		UpdatedAt:      now,
 	}
 
-	if err := m.repo.CreateSandboxVolume(ctx, newVol); err != nil {
+	if err := m.repo.WithTx(ctx, func(tx pgx.Tx) error {
+		if err := m.repo.CreateSandboxVolumeTx(ctx, tx, newVol); err != nil {
+			return err
+		}
+		if err := m.appendMeteringEventTx(ctx, tx, volumeForkedEvent(m.regionID(), m.clusterID, newVol)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		m.logger.WithError(err).Error("Failed to create forked volume record, cleaning up")
 		m.deleteVolumeDir(ctx, newVolumeID)
 		if metrics != nil {
@@ -654,6 +709,10 @@ func (m *Manager) RestoreSnapshot(ctx context.Context, req *RestoreSnapshotReque
 		}
 	}
 
+	if err := m.appendMeteringEvent(ctx, snapshotRestoredEvent(m.regionID(), m.clusterID, snapshot, req.VolumeID, req.TeamID, req.UserID)); err != nil {
+		return fmt.Errorf("append metering event: %w", err)
+	}
+
 	m.logger.WithFields(logrus.Fields{
 		"volume_id":   req.VolumeID,
 		"snapshot_id": req.SnapshotID,
@@ -727,6 +786,9 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, volumeID, snapshotID, team
 		if err := m.repo.DeleteSnapshotTx(ctx, tx, snapshotID); err != nil {
 			return fmt.Errorf("delete snapshot record: %w", err)
 		}
+		if err := m.appendMeteringEventTx(ctx, tx, snapshotDeletedEvent(m.regionID(), m.clusterID, snapshot)); err != nil {
+			return fmt.Errorf("append metering event: %w", err)
+		}
 
 		return nil
 	})
@@ -775,6 +837,75 @@ func (m *Manager) DeleteSnapshot(ctx context.Context, volumeID, snapshotID, team
 	}).Info("Snapshot deleted successfully")
 
 	return nil
+}
+
+func snapshotCreatedEvent(regionID, clusterID string, snapshot *db.Snapshot) *meteringpkg.Event {
+	return &meteringpkg.Event{
+		EventID:     fmt.Sprintf("snapshot/%s/created/%d", snapshot.ID, snapshot.CreatedAt.UTC().UnixNano()),
+		Producer:    "storage-proxy.snapshot",
+		RegionID:    regionID,
+		EventType:   meteringpkg.EventTypeSnapshotCreated,
+		SubjectType: meteringpkg.SubjectTypeSnapshot,
+		SubjectID:   snapshot.ID,
+		TeamID:      snapshot.TeamID,
+		UserID:      snapshot.UserID,
+		VolumeID:    snapshot.VolumeID,
+		SnapshotID:  snapshot.ID,
+		ClusterID:   clusterID,
+		OccurredAt:  snapshot.CreatedAt,
+	}
+}
+
+func snapshotDeletedEvent(regionID, clusterID string, snapshot *db.Snapshot) *meteringpkg.Event {
+	now := time.Now().UTC()
+	return &meteringpkg.Event{
+		EventID:     fmt.Sprintf("snapshot/%s/deleted/%d", snapshot.ID, now.UnixNano()),
+		Producer:    "storage-proxy.snapshot",
+		RegionID:    regionID,
+		EventType:   meteringpkg.EventTypeSnapshotDeleted,
+		SubjectType: meteringpkg.SubjectTypeSnapshot,
+		SubjectID:   snapshot.ID,
+		TeamID:      snapshot.TeamID,
+		UserID:      snapshot.UserID,
+		VolumeID:    snapshot.VolumeID,
+		SnapshotID:  snapshot.ID,
+		ClusterID:   clusterID,
+		OccurredAt:  now,
+	}
+}
+
+func snapshotRestoredEvent(regionID, clusterID string, snapshot *db.Snapshot, volumeID string, teamID string, userID string) *meteringpkg.Event {
+	now := time.Now().UTC()
+	return &meteringpkg.Event{
+		EventID:     fmt.Sprintf("snapshot/%s/restored/%d", snapshot.ID, now.UnixNano()),
+		Producer:    "storage-proxy.snapshot",
+		RegionID:    regionID,
+		EventType:   meteringpkg.EventTypeSnapshotRestored,
+		SubjectType: meteringpkg.SubjectTypeSnapshot,
+		SubjectID:   snapshot.ID,
+		TeamID:      teamID,
+		UserID:      userID,
+		VolumeID:    volumeID,
+		SnapshotID:  snapshot.ID,
+		ClusterID:   clusterID,
+		OccurredAt:  now,
+	}
+}
+
+func volumeForkedEvent(regionID, clusterID string, volume *db.SandboxVolume) *meteringpkg.Event {
+	return &meteringpkg.Event{
+		EventID:     fmt.Sprintf("volume/%s/forked/%d", volume.ID, volume.CreatedAt.UTC().UnixNano()),
+		Producer:    "storage-proxy.volume",
+		RegionID:    regionID,
+		EventType:   meteringpkg.EventTypeVolumeForked,
+		SubjectType: meteringpkg.SubjectTypeVolume,
+		SubjectID:   volume.ID,
+		TeamID:      volume.TeamID,
+		UserID:      volume.UserID,
+		VolumeID:    volume.ID,
+		ClusterID:   clusterID,
+		OccurredAt:  volume.CreatedAt,
+	}
 }
 
 // Helper functions

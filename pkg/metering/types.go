@@ -1,0 +1,115 @@
+package metering
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+)
+
+const (
+	SchemaName = "metering"
+
+	EventTypeSandboxClaimed    = "sandbox.claimed"
+	EventTypeSandboxPaused     = "sandbox.paused"
+	EventTypeSandboxResumed    = "sandbox.resumed"
+	EventTypeSandboxTerminated = "sandbox.terminated"
+
+	EventTypeVolumeCreated    = "volume.created"
+	EventTypeVolumeDeleted    = "volume.deleted"
+	EventTypeVolumeForked     = "volume.forked"
+	EventTypeSnapshotCreated  = "snapshot.created"
+	EventTypeSnapshotDeleted  = "snapshot.deleted"
+	EventTypeSnapshotRestored = "snapshot.restored"
+
+	WindowTypeSandboxActiveSeconds = "sandbox.active_seconds"
+	WindowTypeSandboxPausedSeconds = "sandbox.paused_seconds"
+	WindowTypeSandboxIngressBytes  = "sandbox.ingress_bytes"
+	WindowTypeSandboxEgressBytes   = "sandbox.egress_bytes"
+
+	WindowUnitSeconds = "seconds"
+	WindowUnitBytes   = "bytes"
+
+	SubjectTypeSandbox  = "sandbox"
+	SubjectTypeVolume   = "volume"
+	SubjectTypeSnapshot = "snapshot"
+)
+
+type Event struct {
+	Sequence    int64           `json:"sequence"`
+	EventID     string          `json:"event_id"`
+	Producer    string          `json:"producer"`
+	RegionID    string          `json:"region_id,omitempty"`
+	EventType   string          `json:"event_type"`
+	SubjectType string          `json:"subject_type"`
+	SubjectID   string          `json:"subject_id"`
+	TeamID      string          `json:"team_id,omitempty"`
+	UserID      string          `json:"user_id,omitempty"`
+	SandboxID   string          `json:"sandbox_id,omitempty"`
+	VolumeID    string          `json:"volume_id,omitempty"`
+	SnapshotID  string          `json:"snapshot_id,omitempty"`
+	TemplateID  string          `json:"template_id,omitempty"`
+	ClusterID   string          `json:"cluster_id,omitempty"`
+	OccurredAt  time.Time       `json:"occurred_at"`
+	RecordedAt  time.Time       `json:"recorded_at"`
+	Data        json.RawMessage `json:"data,omitempty"`
+}
+
+type Status struct {
+	RegionID             string     `json:"region_id,omitempty"`
+	LatestEventSequence  int64      `json:"latest_event_sequence"`
+	LatestWindowSequence int64      `json:"latest_window_sequence"`
+	CompleteBefore       *time.Time `json:"complete_before,omitempty"`
+	ProducerCount        int        `json:"producer_count"`
+}
+
+type ProducerWatermark struct {
+	Producer       string    `json:"producer"`
+	RegionID       string    `json:"region_id,omitempty"`
+	CompleteBefore time.Time `json:"complete_before"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type Window struct {
+	Sequence    int64           `json:"sequence"`
+	WindowID    string          `json:"window_id"`
+	Producer    string          `json:"producer"`
+	RegionID    string          `json:"region_id,omitempty"`
+	WindowType  string          `json:"window_type"`
+	SubjectType string          `json:"subject_type"`
+	SubjectID   string          `json:"subject_id"`
+	TeamID      string          `json:"team_id,omitempty"`
+	UserID      string          `json:"user_id,omitempty"`
+	SandboxID   string          `json:"sandbox_id,omitempty"`
+	VolumeID    string          `json:"volume_id,omitempty"`
+	SnapshotID  string          `json:"snapshot_id,omitempty"`
+	TemplateID  string          `json:"template_id,omitempty"`
+	ClusterID   string          `json:"cluster_id,omitempty"`
+	WindowStart time.Time       `json:"window_start"`
+	WindowEnd   time.Time       `json:"window_end"`
+	Value       int64           `json:"value"`
+	Unit        string          `json:"unit"`
+	RecordedAt  time.Time       `json:"recorded_at"`
+	Data        json.RawMessage `json:"data,omitempty"`
+}
+
+type SandboxProjectionState struct {
+	SandboxID       string     `json:"sandbox_id"`
+	Namespace       string     `json:"namespace"`
+	TeamID          string     `json:"team_id,omitempty"`
+	UserID          string     `json:"user_id,omitempty"`
+	TemplateID      string     `json:"template_id,omitempty"`
+	ClusterID       string     `json:"cluster_id,omitempty"`
+	ClaimedAt       *time.Time `json:"claimed_at,omitempty"`
+	ActiveSince     *time.Time `json:"active_since,omitempty"`
+	Paused          bool       `json:"paused"`
+	PausedAt        *time.Time `json:"paused_at,omitempty"`
+	TerminatedAt    *time.Time `json:"terminated_at,omitempty"`
+	LastObservedAt  time.Time  `json:"last_observed_at"`
+	LastResourceVer string     `json:"last_resource_version,omitempty"`
+}
+
+type EventRecorder interface {
+	AppendEvent(ctx context.Context, event *Event) error
+	AppendWindow(ctx context.Context, window *Window) error
+	UpsertProducerWatermark(ctx context.Context, producer string, regionID string, completeBefore time.Time) error
+}

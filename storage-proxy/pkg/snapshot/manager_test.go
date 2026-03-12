@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/juicedata/juicefs/pkg/meta"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
+	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/naming"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/volume"
@@ -61,6 +62,10 @@ func (r *fakeRepo) CreateSandboxVolume(ctx context.Context, volume *db.SandboxVo
 	}
 	r.volumes[volume.ID] = volume
 	return nil
+}
+
+func (r *fakeRepo) CreateSandboxVolumeTx(ctx context.Context, tx pgx.Tx, volume *db.SandboxVolume) error {
+	return r.CreateSandboxVolume(ctx, volume)
 }
 
 func (r *fakeRepo) ListSnapshotsByVolume(ctx context.Context, volumeID string) ([]*db.Snapshot, error) {
@@ -120,6 +125,11 @@ func (r *fakeRepo) GetSnapshotForUpdate(ctx context.Context, tx pgx.Tx, id strin
 
 func (r *fakeRepo) DeleteSnapshotTx(ctx context.Context, tx pgx.Tx, id string) error {
 	return r.DeleteSnapshot(ctx, id)
+}
+
+func (r *fakeRepo) DeleteSandboxVolumeTx(ctx context.Context, tx pgx.Tx, id string) error {
+	delete(r.volumes, id)
+	return nil
 }
 
 type fakeVolumeProvider struct {
@@ -324,6 +334,39 @@ func (f *fakeMeta) ensurePath(path string) meta.Ino {
 	return f.pathToIno[current]
 }
 
+type fakeMeteringRecorder struct {
+	events     []*metering.Event
+	watermarks []metering.ProducerWatermark
+}
+
+func (f *fakeMeteringRecorder) AppendEvent(_ context.Context, event *metering.Event) error {
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeMeteringRecorder) AppendEventTx(_ context.Context, _ pgx.Tx, event *metering.Event) error {
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeMeteringRecorder) UpsertProducerWatermark(_ context.Context, producer string, regionID string, completeBefore time.Time) error {
+	f.watermarks = append(f.watermarks, metering.ProducerWatermark{
+		Producer:       producer,
+		RegionID:       regionID,
+		CompleteBefore: completeBefore,
+	})
+	return nil
+}
+
+func (f *fakeMeteringRecorder) UpsertProducerWatermarkTx(_ context.Context, _ pgx.Tx, producer string, regionID string, completeBefore time.Time) error {
+	f.watermarks = append(f.watermarks, metering.ProducerWatermark{
+		Producer:       producer,
+		RegionID:       regionID,
+		CompleteBefore: completeBefore,
+	})
+	return nil
+}
+
 func TestListSnapshots_VolumeNotFound(t *testing.T) {
 	repo := newFakeRepo()
 	mgr := newTestManager(repo, nil)
@@ -425,6 +468,9 @@ func TestCreateSnapshot_CreatesVolumePathWhenMissing(t *testing.T) {
 	repo.volumes["vol1"] = &db.SandboxVolume{ID: "vol1", TeamID: "team1", UserID: "user1"}
 
 	mgr := newTestManager(repo, &fakeVolumeProvider{err: errors.New("not mounted")})
+	mgr.config.RegionID = "aws/us-east-1"
+	meteringRecorder := &fakeMeteringRecorder{}
+	mgr.SetMeteringRepository(meteringRecorder)
 	snapshot, err := mgr.CreateSnapshot(context.Background(), &CreateSnapshotRequest{
 		VolumeID:    "vol1",
 		Name:        "snap-1",
@@ -449,6 +495,18 @@ func TestCreateSnapshot_CreatesVolumePathWhenMissing(t *testing.T) {
 
 	if _, ok := repo.snapshots[snapshot.ID]; !ok {
 		t.Fatalf("snapshot metadata not persisted in repository")
+	}
+	if len(meteringRecorder.events) != 1 {
+		t.Fatalf("expected one metering event, got %d", len(meteringRecorder.events))
+	}
+	if meteringRecorder.events[0].EventType != metering.EventTypeSnapshotCreated {
+		t.Fatalf("event type = %q, want %q", meteringRecorder.events[0].EventType, metering.EventTypeSnapshotCreated)
+	}
+	if meteringRecorder.events[0].RegionID != "aws/us-east-1" {
+		t.Fatalf("region_id = %q, want %q", meteringRecorder.events[0].RegionID, "aws/us-east-1")
+	}
+	if len(meteringRecorder.watermarks) != 1 {
+		t.Fatalf("expected one watermark, got %d", len(meteringRecorder.watermarks))
 	}
 }
 
@@ -516,6 +574,9 @@ func TestRestoreSnapshot_RemountTimeout(t *testing.T) {
 	metaClient.ensurePath(volumePath)
 	metaClient.ensurePath(snapshotPath)
 
+	meteringRecorder := &fakeMeteringRecorder{}
+	mgr.SetMeteringRepository(meteringRecorder)
+
 	err = mgr.RestoreSnapshot(context.Background(), &RestoreSnapshotRequest{
 		VolumeID:   "vol1",
 		SnapshotID: "snap1",
@@ -529,6 +590,44 @@ func TestRestoreSnapshot_RemountTimeout(t *testing.T) {
 	}
 	if !volMgr.waitCalled {
 		t.Fatalf("expected WaitForInvalidate to be called")
+	}
+	if len(meteringRecorder.events) != 1 {
+		t.Fatalf("expected one metering event, got %d", len(meteringRecorder.events))
+	}
+	if meteringRecorder.events[0].EventType != metering.EventTypeSnapshotRestored {
+		t.Fatalf("event type = %q, want %q", meteringRecorder.events[0].EventType, metering.EventTypeSnapshotRestored)
+	}
+	if len(meteringRecorder.watermarks) != 1 {
+		t.Fatalf("expected one watermark, got %d", len(meteringRecorder.watermarks))
+	}
+}
+
+func TestDeleteSnapshotRecordsMetering(t *testing.T) {
+	repo := newFakeRepo()
+	repo.snapshots["snap1"] = &db.Snapshot{
+		ID:        "snap1",
+		VolumeID:  "vol1",
+		TeamID:    "team1",
+		UserID:    "user1",
+		CreatedAt: time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC),
+	}
+	mgr := newTestManager(repo, &fakeVolumeProvider{err: errors.New("not mounted")})
+	mgr.config.RegionID = "aws/us-east-1"
+	meteringRecorder := &fakeMeteringRecorder{}
+	mgr.SetMeteringRepository(meteringRecorder)
+
+	err := mgr.DeleteSnapshot(context.Background(), "vol1", "snap1", "team1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(meteringRecorder.events) != 1 {
+		t.Fatalf("expected one metering event, got %d", len(meteringRecorder.events))
+	}
+	if meteringRecorder.events[0].EventType != metering.EventTypeSnapshotDeleted {
+		t.Fatalf("event type = %q, want %q", meteringRecorder.events[0].EventType, metering.EventTypeSnapshotDeleted)
+	}
+	if len(meteringRecorder.watermarks) != 1 {
+		t.Fatalf("expected one watermark, got %d", len(meteringRecorder.watermarks))
 	}
 }
 

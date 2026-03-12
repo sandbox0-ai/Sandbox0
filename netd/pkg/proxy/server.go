@@ -25,6 +25,7 @@ type Server struct {
 	cfg           *config.NetdConfig
 	store         *policy.Store
 	tracker       *conntrack.Tracker
+	usageRecorder UsageRecorder
 	logger        *zap.Logger
 	httpListener  net.Listener
 	httpsListener net.Listener
@@ -34,7 +35,12 @@ type Server struct {
 	exitOnce      sync.Once
 }
 
-func NewServer(cfg *config.NetdConfig, store *policy.Store, tracker *conntrack.Tracker, logger *zap.Logger) (*Server, error) {
+type UsageRecorder interface {
+	RecordEgress(compiled *policy.CompiledPolicy, bytes int64)
+	RecordIngress(compiled *policy.CompiledPolicy, bytes int64)
+}
+
+func NewServer(cfg *config.NetdConfig, store *policy.Store, tracker *conntrack.Tracker, usageRecorder UsageRecorder, logger *zap.Logger) (*Server, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("netd config is nil")
 	}
@@ -66,6 +72,7 @@ func NewServer(cfg *config.NetdConfig, store *policy.Store, tracker *conntrack.T
 		cfg:           cfg,
 		store:         store,
 		tracker:       tracker,
+		usageRecorder: usageRecorder,
 		logger:        logger,
 		httpListener:  httpLn,
 		httpsListener: httpsLn,
@@ -205,14 +212,19 @@ func (s *Server) handleHTTPConn(conn net.Conn) {
 		s.logger.Warn("HTTP upstream dial failed", zap.Error(err))
 		return
 	}
+	upstream = &countingConn{Conn: upstream}
 	defer upstream.Close()
 
 	if err := req.Write(upstream); err != nil {
 		s.logger.Warn("HTTP upstream write failed", zap.Error(err))
 		return
 	}
+	if counter, ok := upstream.(*countingConn); ok {
+		s.recordEgressBytes(p, counter.written)
+		counter.written = 0
+	}
 
-	s.pipe(conn, upstream, reader)
+	s.pipe(conn, upstream, reader, p)
 }
 
 func (s *Server) handleHTTPSConn(conn net.Conn) {
@@ -257,10 +269,11 @@ func (s *Server) handleHTTPSConn(conn net.Conn) {
 		s.logger.Warn("TLS upstream dial failed", zap.Error(err))
 		return
 	}
+	upstream = &countingConn{Conn: upstream}
 	defer upstream.Close()
 
 	reader := io.MultiReader(bytes.NewReader(clientHello.Raw), conn)
-	s.pipeWithReader(conn, upstream, reader)
+	s.pipeWithReader(conn, upstream, reader, p)
 }
 
 func (s *Server) handleUDP(ctx context.Context) {
@@ -353,32 +366,39 @@ func (s *Server) handleUDPDatagram(src *net.UDPAddr, payload []byte, destIP net.
 	defer upstreamConn.Close()
 
 	_ = upstreamConn.SetDeadline(time.Now().Add(s.cfg.ProxyUpstreamTimeout.Duration))
-	if _, err := upstreamConn.Write(payload); err != nil {
+	n, err := upstreamConn.Write(payload)
+	if err != nil {
 		s.logger.Warn("UDP upstream write failed", zap.Error(err))
 		return
 	}
+	s.recordEgressBytes(p, int64(n))
 
 	replyBuf := make([]byte, 64*1024)
-	n, _, err := upstreamConn.ReadFromUDP(replyBuf)
+	n, _, err = upstreamConn.ReadFromUDP(replyBuf)
 	if err != nil {
 		s.logger.Warn("UDP upstream read failed", zap.Error(err))
 		return
 	}
+	s.recordIngressBytes(p, int64(n))
 	_, _ = s.udpConn.WriteToUDP(replyBuf[:n], src)
 }
 
-func (s *Server) pipe(client net.Conn, upstream net.Conn, reader *bufio.Reader) {
-	s.pipeWithReader(client, upstream, reader)
+func (s *Server) pipe(client net.Conn, upstream net.Conn, reader *bufio.Reader, compiled *policy.CompiledPolicy) {
+	s.pipeWithReader(client, upstream, reader, compiled)
 }
 
-func (s *Server) pipeWithReader(client net.Conn, upstream net.Conn, reader io.Reader) {
+func (s *Server) pipeWithReader(client net.Conn, upstream net.Conn, reader io.Reader, compiled *policy.CompiledPolicy) {
+	upstreamCounter := &countingWriter{writer: upstream}
+	clientCounter := &countingWriter{writer: client}
 	errCh := make(chan error, 2)
 	go func() {
-		_, err := io.Copy(upstream, reader)
+		n, err := io.Copy(upstreamCounter, reader)
+		s.recordEgressBytes(compiled, n)
 		errCh <- err
 	}()
 	go func() {
-		_, err := io.Copy(client, upstream)
+		n, err := io.Copy(clientCounter, upstream)
+		s.recordIngressBytes(compiled, n)
 		errCh <- err
 	}()
 	<-errCh
@@ -449,6 +469,39 @@ func (s *Server) recordFlow(srcIP string, dstIP net.IP, dstPort int, proto strin
 		SrcPort: uint16(srcPort),
 		DstPort: uint16(dstPort),
 	})
+}
+
+func (s *Server) recordEgressBytes(compiled *policy.CompiledPolicy, bytes int64) {
+	if s.usageRecorder == nil || bytes <= 0 {
+		return
+	}
+	s.usageRecorder.RecordEgress(compiled, bytes)
+}
+
+func (s *Server) recordIngressBytes(compiled *policy.CompiledPolicy, bytes int64) {
+	if s.usageRecorder == nil || bytes <= 0 {
+		return
+	}
+	s.usageRecorder.RecordIngress(compiled, bytes)
+}
+
+type countingWriter struct {
+	writer io.Writer
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	return c.writer.Write(p)
+}
+
+type countingConn struct {
+	net.Conn
+	written int64
+}
+
+func (c *countingConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	c.written += int64(n)
+	return n, err
 }
 
 type clientHelloInfo struct {

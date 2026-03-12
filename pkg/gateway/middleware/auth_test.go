@@ -192,3 +192,64 @@ func TestAuthMiddleware_RequireJWTAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthMiddleware_RequireSystemAdmin(t *testing.T) {
+	t.Setenv("GIN_MODE", "release")
+
+	tests := []struct {
+		name       string
+		authCtx    *authn.AuthContext
+		wantStatus int
+	}{
+		{
+			name: "system admin allowed",
+			authCtx: &authn.AuthContext{
+				AuthMethod:    authn.AuthMethodJWT,
+				UserID:        "user-1",
+				TeamID:        "team-1",
+				IsSystemAdmin: true,
+			},
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name: "team admin rejected",
+			authCtx: &authn.AuthContext{
+				AuthMethod: authn.AuthMethodJWT,
+				UserID:     "user-1",
+				TeamID:     "team-1",
+				TeamRole:   "admin",
+			},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "missing auth context rejected",
+			authCtx:    nil,
+			wantStatus: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := NewAuthMiddleware(nil, "test-secret", nil, zap.NewNop())
+			engine := gin.New()
+			engine.Use(func(c *gin.Context) {
+				if tt.authCtx != nil {
+					c.Set("auth_context", tt.authCtx)
+				}
+				c.Next()
+			})
+			engine.Use(m.RequireSystemAdmin())
+			engine.GET("/internal/v1/metering/status", func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/internal/v1/metering/status", nil)
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("unexpected status: got %d want %d", rec.Code, tt.wantStatus)
+			}
+		})
+	}
+}

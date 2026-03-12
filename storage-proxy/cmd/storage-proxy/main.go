@@ -15,6 +15,7 @@ import (
 	"github.com/sandbox0-ai/sandbox0/pkg/dbpool"
 	"github.com/sandbox0-ai/sandbox0/pkg/internalauth"
 	"github.com/sandbox0-ai/sandbox0/pkg/k8s"
+	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/migrate"
 	"github.com/sandbox0-ai/sandbox0/pkg/observability"
 	httpobs "github.com/sandbox0-ai/sandbox0/pkg/observability/http"
@@ -98,6 +99,7 @@ func main() {
 
 	// Initialize database connection pool
 	var repo *db.Repository
+	var meteringRepo *metering.Repository
 	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
 		pool, err = initDatabase(context.Background(), cfg.DatabaseURL, cfg, zapLogger, obsProvider)
@@ -110,8 +112,12 @@ func main() {
 		if err := runMigrations(context.Background(), pool, cfg.DatabaseSchema, zapLogger); err != nil {
 			zapLogger.Fatal("Failed to run database migrations", zap.Error(err))
 		}
+		if err := metering.RunMigrations(context.Background(), pool, &zapLoggerAdapter{logger: zapLogger}); err != nil {
+			zapLogger.Fatal("Failed to run metering migrations", zap.Error(err))
+		}
 
 		repo = db.NewRepository(pool)
+		meteringRepo = metering.NewRepository(pool)
 	} else {
 		zapLogger.Warn("DATABASE_URL not set, running without database persistence")
 	}
@@ -263,6 +269,7 @@ func main() {
 	if err != nil {
 		zapLogger.Fatal("Failed to initialize snapshot manager", zap.Error(err))
 	}
+	snapshotMgr.SetMeteringRepository(meteringRepo)
 	if eventBroadcaster != nil {
 		snapshotMgr.SetEventPublisher(eventBroadcaster)
 	}
@@ -273,7 +280,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	httpSrv := httpserver.NewServer(logrusLogger, repo, httpAuthenticator, snapshotMgr)
+	httpSrv := httpserver.NewServer(logrusLogger, repo, meteringRepo, cfg.RegionID, httpAuthenticator, snapshotMgr)
 	httpAddr := fmt.Sprintf("%s:%d", cfg.HTTPAddr, cfg.HTTPPort)
 
 	readTimeout, _ := time.ParseDuration(cfg.HTTPReadTimeout)
@@ -374,6 +381,18 @@ func initDatabase(ctx context.Context, databaseURL string, cfg *config.StoragePr
 	)
 
 	return pool, nil
+}
+
+type zapLoggerAdapter struct {
+	logger *zap.Logger
+}
+
+func (z *zapLoggerAdapter) Printf(format string, args ...any) {
+	z.logger.Info(fmt.Sprintf(format, args...))
+}
+
+func (z *zapLoggerAdapter) Fatalf(format string, args ...any) {
+	z.logger.Fatal(fmt.Sprintf(format, args...))
 }
 
 // runMigrations runs database migrations on startup

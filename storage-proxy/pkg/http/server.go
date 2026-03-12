@@ -1,11 +1,14 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
+	meteringpkg "github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/auth"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/snapshot"
@@ -13,21 +16,49 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+type volumeRepository interface {
+	WithTx(ctx context.Context, fn func(pgx.Tx) error) error
+	CreateSandboxVolumeTx(ctx context.Context, tx pgx.Tx, volume *db.SandboxVolume) error
+	ListSandboxVolumesByTeam(ctx context.Context, teamID string) ([]*db.SandboxVolume, error)
+	GetSandboxVolume(ctx context.Context, id string) (*db.SandboxVolume, error)
+	GetActiveMounts(ctx context.Context, volumeID string, heartbeatTimeout int) ([]*db.VolumeMount, error)
+	DeleteMount(ctx context.Context, volumeID, clusterID, podID string) error
+	DeleteSandboxVolumeTx(ctx context.Context, tx pgx.Tx, id string) error
+}
+
+type meteringWriter interface {
+	AppendEventTx(ctx context.Context, tx pgx.Tx, event *meteringpkg.Event) error
+	UpsertProducerWatermarkTx(ctx context.Context, tx pgx.Tx, producer string, regionID string, completeBefore time.Time) error
+}
+
+type snapshotManager interface {
+	CreateSnapshotSimple(ctx context.Context, req *snapshot.CreateSnapshotRequest) (*db.Snapshot, error)
+	ListSnapshots(ctx context.Context, volumeID, teamID string) ([]*db.Snapshot, error)
+	GetSnapshot(ctx context.Context, volumeID, snapshotID, teamID string) (*db.Snapshot, error)
+	RestoreSnapshot(ctx context.Context, req *snapshot.RestoreSnapshotRequest) error
+	DeleteSnapshot(ctx context.Context, volumeID, snapshotID, teamID string) error
+	ForkVolume(ctx context.Context, req *snapshot.ForkVolumeRequest) (*db.SandboxVolume, error)
+}
+
 // Server provides HTTP management API for health checks and metrics
 type Server struct {
 	logger        *logrus.Logger
 	mux           *http.ServeMux
-	repo          *db.Repository
+	repo          volumeRepository
+	meteringRepo  meteringWriter
+	regionID      string
 	authenticator *auth.HTTPAuthenticator
-	snapshotMgr   *snapshot.Manager
+	snapshotMgr   snapshotManager
 }
 
 // NewServer creates a new HTTP server
-func NewServer(logger *logrus.Logger, repo *db.Repository, authenticator *auth.HTTPAuthenticator, snapshotMgr *snapshot.Manager) *Server {
+func NewServer(logger *logrus.Logger, repo volumeRepository, meteringRepo meteringWriter, regionID string, authenticator *auth.HTTPAuthenticator, snapshotMgr snapshotManager) *Server {
 	s := &Server{
 		logger:        logger,
 		mux:           http.NewServeMux(),
 		repo:          repo,
+		meteringRepo:  meteringRepo,
+		regionID:      regionID,
 		authenticator: authenticator,
 		snapshotMgr:   snapshotMgr,
 	}
@@ -116,4 +147,14 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		"status":    "ready",
 		"timestamp": time.Now().Unix(),
 	})
+}
+
+func (s *Server) appendMeteringEventTx(ctx context.Context, tx pgx.Tx, event *meteringpkg.Event) error {
+	if s.meteringRepo == nil || event == nil {
+		return nil
+	}
+	if err := s.meteringRepo.AppendEventTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return s.meteringRepo.UpsertProducerWatermarkTx(ctx, tx, event.Producer, event.RegionID, event.OccurredAt)
 }

@@ -19,12 +19,14 @@ import (
 	clientset "github.com/sandbox0-ai/sandbox0/manager/pkg/generated/clientset/versioned"
 	"github.com/sandbox0-ai/sandbox0/manager/pkg/generated/informers/externalversions"
 	httpserver "github.com/sandbox0-ai/sandbox0/manager/pkg/http"
+	managermetering "github.com/sandbox0-ai/sandbox0/manager/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/manager/pkg/network"
 	registryprovider "github.com/sandbox0-ai/sandbox0/manager/pkg/registry"
 	"github.com/sandbox0-ai/sandbox0/manager/pkg/service"
 	"github.com/sandbox0-ai/sandbox0/pkg/clock"
 	"github.com/sandbox0-ai/sandbox0/pkg/dbpool"
 	"github.com/sandbox0-ai/sandbox0/pkg/internalauth"
+	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/migrate"
 	"github.com/sandbox0-ai/sandbox0/pkg/observability"
 	obsmetrics "github.com/sandbox0-ai/sandbox0/pkg/observability/metrics"
@@ -117,6 +119,9 @@ func main() {
 	if err := runTemplateMigrations(ctx, pool, logger); err != nil {
 		logger.Fatal("Failed to run template migrations", zap.Error(err))
 	}
+	if err := runMeteringMigrations(ctx, pool, logger); err != nil {
+		logger.Fatal("Failed to run metering migrations", zap.Error(err))
+	}
 
 	// Initialize clock for cross-cluster time synchronization
 	var clk *clock.Clock
@@ -184,6 +189,11 @@ func main() {
 
 	sandboxIndex := service.NewSandboxIndex()
 	podInformer.Informer().AddEventHandler(sandboxIndex.ResourceEventHandler())
+	meteringRepo := metering.NewRepository(pool)
+	lifecycleProjector := managermetering.NewLifecycleProjector(managermetering.NewStore(meteringRepo), cfg.RegionID, cfg.DefaultClusterId)
+	lifecycleProjector.SetLogger(logger)
+	lifecycleProjector.SetMetrics(managerMetrics)
+	podInformer.Informer().AddEventHandler(lifecycleProjector.ResourceEventHandler())
 
 	// Create network policy service for building policy annotations
 	networkPolicyService := service.NewNetworkPolicyService(logger)
@@ -472,6 +482,18 @@ func runTemplateMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.
 	}
 
 	logger.Info("Template migrations completed successfully")
+	return nil
+}
+
+func runMeteringMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) error {
+	logger.Info("Running metering migrations")
+
+	migrateLogger := &zapMigrateLogger{logger: logger}
+	if err := metering.RunMigrations(ctx, pool, migrateLogger); err != nil {
+		return fmt.Errorf("metering migrations: %w", err)
+	}
+
+	logger.Info("Metering migrations completed successfully")
 	return nil
 }
 

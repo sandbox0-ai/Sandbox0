@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
 	gatewayhttp "github.com/sandbox0-ai/sandbox0/internal-gateway/pkg/http"
@@ -162,6 +163,58 @@ func newGatewayTestDB(t *testing.T) (*pgxpool.Pool, *gatewayidentity.Repository,
 	})
 
 	return pool, gatewayidentity.NewRepository(pool), gatewayapikey.NewRepository(pool), schema
+}
+
+func newIsolatedTestDatabasePool(t *testing.T, prefix string) (*pgxpool.Pool, string) {
+	t.Helper()
+
+	ctx := context.Background()
+	dbURL := requireTestDatabaseURL(t)
+	dbName := fmt.Sprintf("%s_%s", prefix, strings.ReplaceAll(uuid.NewString(), "-", ""))
+
+	adminCfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		t.Fatalf("parse test database url: %v", err)
+	}
+	adminPool, err := pgxpool.NewWithConfig(ctx, adminCfg)
+	if err != nil {
+		t.Fatalf("connect admin database: %v", err)
+	}
+
+	quotedDBName := pgx.Identifier{dbName}.Sanitize()
+	if _, err := adminPool.Exec(ctx, "CREATE DATABASE "+quotedDBName); err != nil {
+		adminPool.Close()
+		t.Fatalf("create isolated database: %v", err)
+	}
+
+	testCfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		adminPool.Close()
+		t.Fatalf("parse isolated database url: %v", err)
+	}
+	testCfg.ConnConfig.Database = dbName
+
+	pool, err := pgxpool.NewWithConfig(ctx, testCfg)
+	if err != nil {
+		_, _ = adminPool.Exec(ctx, "DROP DATABASE IF EXISTS "+quotedDBName)
+		adminPool.Close()
+		t.Fatalf("connect isolated database: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		_, _ = adminPool.Exec(ctx, "DROP DATABASE IF EXISTS "+quotedDBName)
+		adminPool.Close()
+		t.Fatalf("ping isolated database: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+		_, _ = adminPool.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", dbName)
+		_, _ = adminPool.Exec(ctx, "DROP DATABASE IF EXISTS "+quotedDBName)
+		adminPool.Close()
+	})
+
+	return pool, dbName
 }
 
 func newTestObservability(t *testing.T, serviceName string) *observability.Provider {

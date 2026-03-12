@@ -9,14 +9,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
 	"github.com/sandbox0-ai/sandbox0/netd/pkg/apply"
 	"github.com/sandbox0-ai/sandbox0/netd/pkg/conntrack"
+	netdmetering "github.com/sandbox0-ai/sandbox0/netd/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/netd/pkg/policy"
 	"github.com/sandbox0-ai/sandbox0/netd/pkg/proxy"
 	"github.com/sandbox0-ai/sandbox0/netd/pkg/redirect"
 	"github.com/sandbox0-ai/sandbox0/netd/pkg/watcher"
+	"github.com/sandbox0-ai/sandbox0/pkg/dbpool"
+	meteringpkg "github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -102,6 +106,30 @@ func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyEx
 	}
 	defer conntrackManager.Close()
 	tracker := conntrack.NewTracker()
+	var usageAggregator *netdmetering.Aggregator
+	var meteringPool *pgxpool.Pool
+	if d.cfg.DatabaseURL != "" {
+		pool, err := dbpool.New(ctx, dbpool.Options{
+			DatabaseURL:     d.cfg.DatabaseURL,
+			DefaultMaxConns: 5,
+			DefaultMinConns: 1,
+		})
+		if err != nil {
+			return fmt.Errorf("create netd database pool: %w", err)
+		}
+		meteringPool = pool
+		defer meteringPool.Close()
+		if err := meteringpkg.RunMigrations(ctx, meteringPool, &zapLoggerAdapter{logger: d.logger}); err != nil {
+			return fmt.Errorf("run metering migrations: %w", err)
+		}
+		usageAggregator = netdmetering.NewAggregator(
+			netdmetering.NewRecorder(meteringpkg.NewRepository(meteringPool)),
+			d.cfg.RegionID,
+			d.cfg.ClusterID,
+			d.cfg.NodeName,
+			d.logger,
+		)
+	}
 	syncTrigger := make(chan struct{}, 1)
 	triggerSync := func() {
 		select {
@@ -162,7 +190,7 @@ func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyEx
 		return err
 	}
 
-	proxyServer, err := proxy.NewServer(d.cfg, policyStore, tracker, d.logger)
+	proxyServer, err := proxy.NewServer(d.cfg, policyStore, tracker, usageAggregator, d.logger)
 	if err != nil {
 		return err
 	}
@@ -215,12 +243,57 @@ func (d *Daemon) runNetd(ctx context.Context, cancel context.CancelFunc, proxyEx
 		}
 	}()
 
+	if usageAggregator != nil {
+		go d.runMeteringFlushLoop(ctx, usageAggregator)
+	}
+
 	select {
 	case <-syncOnce:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (d *Daemon) runMeteringFlushLoop(ctx context.Context, aggregator *netdmetering.Aggregator) {
+	interval := d.cfg.MeteringReportInterval.Duration
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			if err := aggregator.Flush(context.Background()); err != nil {
+				d.logger.Error("Failed to flush netd metering windows during shutdown", zap.Error(err))
+			}
+			return
+		case <-ticker.C:
+			if err := aggregator.Flush(ctx); err != nil {
+				d.logger.Error("Failed to flush netd metering windows", zap.Error(err))
+			}
+		}
+	}
+}
+
+type zapLoggerAdapter struct {
+	logger *zap.Logger
+}
+
+func (l *zapLoggerAdapter) Printf(format string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
+	l.logger.Sugar().Infof(format, args...)
+}
+
+func (l *zapLoggerAdapter) Fatalf(format string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
+	l.logger.Sugar().Errorf(format, args...)
 }
 
 func (d *Daemon) syncRedirect(
