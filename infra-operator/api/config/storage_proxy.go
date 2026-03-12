@@ -107,6 +107,7 @@ type StorageProxyConfig struct {
 	// +kubebuilder:default="/var/lib/storage-proxy/cache"
 	CacheDir         string `yaml:"cache_dir" json:"cacheDir"`
 	DefaultClusterId string `yaml:"default_cluster_id" json:"-"`
+	RegionID         string `yaml:"region_id" json:"-"`
 
 	// Monitoring
 	// +optional

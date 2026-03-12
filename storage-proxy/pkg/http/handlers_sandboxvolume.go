@@ -3,13 +3,16 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"github.com/sandbox0-ai/sandbox0/pkg/internalauth"
+	meteringpkg "github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/db"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/snapshot"
 	"github.com/sandbox0-ai/sandbox0/storage-proxy/pkg/volume"
@@ -82,7 +85,15 @@ func (s *Server) createSandboxVolume(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  time.Now(),
 	}
 
-	if err := s.repo.CreateSandboxVolume(r.Context(), vol); err != nil {
+	if err := s.repo.WithTx(r.Context(), func(tx pgx.Tx) error {
+		if err := s.repo.CreateSandboxVolumeTx(r.Context(), tx, vol); err != nil {
+			return err
+		}
+		if err := s.appendMeteringEventTx(r.Context(), tx, volumeCreatedEvent(s.regionID, vol)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		s.logger.WithError(err).Error("Failed to create sandbox volume")
 		_ = spec.WriteError(w, http.StatusInternalServerError, spec.CodeInternal, "internal server error")
 		return
@@ -221,7 +232,15 @@ func (s *Server) deleteSandboxVolume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// No active mounts, proceed with deletion
-	if err := s.repo.DeleteSandboxVolume(r.Context(), id); err != nil {
+	if err := s.repo.WithTx(r.Context(), func(tx pgx.Tx) error {
+		if err := s.repo.DeleteSandboxVolumeTx(r.Context(), tx, id); err != nil {
+			return err
+		}
+		if err := s.appendMeteringEventTx(r.Context(), tx, volumeDeletedEvent(s.regionID, vol)); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			_ = spec.WriteSuccess(w, http.StatusOK, map[string]bool{"deleted": true})
 			return
@@ -285,4 +304,35 @@ func (s *Server) forkVolume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = spec.WriteSuccess(w, http.StatusCreated, vol)
+}
+
+func volumeCreatedEvent(regionID string, vol *db.SandboxVolume) *meteringpkg.Event {
+	return &meteringpkg.Event{
+		EventID:     fmt.Sprintf("volume/%s/created/%d", vol.ID, vol.CreatedAt.UTC().UnixNano()),
+		Producer:    "storage-proxy.volume",
+		RegionID:    regionID,
+		EventType:   meteringpkg.EventTypeVolumeCreated,
+		SubjectType: meteringpkg.SubjectTypeVolume,
+		SubjectID:   vol.ID,
+		TeamID:      vol.TeamID,
+		UserID:      vol.UserID,
+		VolumeID:    vol.ID,
+		OccurredAt:  vol.CreatedAt,
+	}
+}
+
+func volumeDeletedEvent(regionID string, vol *db.SandboxVolume) *meteringpkg.Event {
+	now := time.Now().UTC()
+	return &meteringpkg.Event{
+		EventID:     fmt.Sprintf("volume/%s/deleted/%d", vol.ID, now.UnixNano()),
+		Producer:    "storage-proxy.volume",
+		RegionID:    regionID,
+		EventType:   meteringpkg.EventTypeVolumeDeleted,
+		SubjectType: meteringpkg.SubjectTypeVolume,
+		SubjectID:   vol.ID,
+		TeamID:      vol.TeamID,
+		UserID:      vol.UserID,
+		VolumeID:    vol.ID,
+		OccurredAt:  now,
+	}
 }

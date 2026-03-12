@@ -258,6 +258,7 @@ func (in *NetdConfig) DeepCopyInto(out *NetdConfig) {
 	}
 	out.EDTHorizon = in.EDTHorizon
 	out.MetricsReportInterval = in.MetricsReportInterval
+	out.MeteringReportInterval = in.MeteringReportInterval
 	out.ShutdownDelay = in.ShutdownDelay
 }
 

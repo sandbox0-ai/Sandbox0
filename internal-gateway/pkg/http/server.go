@@ -26,6 +26,7 @@ import (
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"github.com/sandbox0-ai/sandbox0/pkg/internalauth"
 	"github.com/sandbox0-ai/sandbox0/pkg/licensing"
+	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/observability"
 	httpobs "github.com/sandbox0-ai/sandbox0/pkg/observability/http"
 	"github.com/sandbox0-ai/sandbox0/pkg/proxy"
@@ -51,12 +52,19 @@ type Server struct {
 	publicJWT           *gatewayauthn.Issuer
 	requestLogger       *middleware.RequestLogger
 	logger              *zap.Logger
+	meteringRepo        meteringReader
 	internalAuthGen     *internalauth.Generator
 	procdAuthGen        *internalauth.Generator
 	internalAuthEnabled bool
 	entitlements        licensing.Entitlements
 	sandboxAddrCache    *cache.Cache[string, *url.URL]
 	obsProvider         *observability.Provider
+}
+
+type meteringReader interface {
+	GetStatus(ctx context.Context, fallbackRegionID string) (*metering.Status, error)
+	ListEventsAfter(ctx context.Context, afterSequence int64, limit int) ([]*metering.Event, error)
+	ListWindowsAfter(ctx context.Context, afterSequence int64, limit int) ([]*metering.Window, error)
 }
 
 // NewServer creates a new HTTP server
@@ -243,6 +251,11 @@ func NewServer(
 		publicJWT = jwtIssuer
 	}
 
+	var meteringRepo *metering.Repository
+	if pool != nil {
+		meteringRepo = metering.NewRepository(pool)
+	}
+
 	server := &Server{
 		router:              router,
 		cfg:                 cfg,
@@ -261,6 +274,7 @@ func NewServer(
 		publicJWT:           publicJWT,
 		requestLogger:       requestLogger,
 		logger:              logger,
+		meteringRepo:        meteringRepo,
 		internalAuthGen:     internalAuthGen,
 		procdAuthGen:        procdAuthGen,
 		internalAuthEnabled: internalAuthEnabled,
@@ -435,6 +449,10 @@ func (s *Server) setupRoutes() {
 
 			// Template statistics (→ Manager)
 			internal.GET("/templates/stats", s.getTemplateStats)
+
+			internal.GET("/metering/status", s.getMeteringStatus)
+			internal.GET("/metering/events", s.listMeteringEvents)
+			internal.GET("/metering/windows", s.listMeteringWindows)
 		}
 	}
 

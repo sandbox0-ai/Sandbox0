@@ -96,7 +96,16 @@ func (r *Repository) WithTx(ctx context.Context, fn func(pgx.Tx) error) error {
 
 // CreateSandboxVolume creates a new sandbox volume record
 func (r *Repository) CreateSandboxVolume(ctx context.Context, volume *SandboxVolume) error {
-	_, err := r.pool.Exec(ctx, `
+	return r.createSandboxVolume(ctx, r.pool, volume)
+}
+
+// CreateSandboxVolumeTx creates a new sandbox volume record within a transaction.
+func (r *Repository) CreateSandboxVolumeTx(ctx context.Context, tx pgx.Tx, volume *SandboxVolume) error {
+	return r.createSandboxVolume(ctx, tx, volume)
+}
+
+func (r *Repository) createSandboxVolume(ctx context.Context, db DB, volume *SandboxVolume) error {
+	_, err := db.Exec(ctx, `
 		INSERT INTO sandbox_volumes (
 			id, team_id, user_id,
 			source_volume_id,
@@ -234,7 +243,16 @@ func (r *Repository) ListSandboxVolumesByTeam(ctx context.Context, teamID string
 
 // DeleteSandboxVolume deletes a sandbox volume record
 func (r *Repository) DeleteSandboxVolume(ctx context.Context, id string) error {
-	cmdTag, err := r.pool.Exec(ctx, `
+	return r.deleteSandboxVolume(ctx, r.pool, id)
+}
+
+// DeleteSandboxVolumeTx deletes a sandbox volume record within a transaction.
+func (r *Repository) DeleteSandboxVolumeTx(ctx context.Context, tx pgx.Tx, id string) error {
+	return r.deleteSandboxVolume(ctx, tx, id)
+}
+
+func (r *Repository) deleteSandboxVolume(ctx context.Context, db DB, id string) error {
+	cmdTag, err := db.Exec(ctx, `
 		DELETE FROM sandbox_volumes WHERE id = $1
 	`, id)
 

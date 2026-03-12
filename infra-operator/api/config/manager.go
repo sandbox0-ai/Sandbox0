@@ -22,6 +22,7 @@ type ManagerConfig struct {
 	ManagerImage string `yaml:"manager_image" json:"-"`
 
 	DefaultClusterId string `yaml:"default_cluster_id" json:"-"`
+	RegionID         string `yaml:"region_id" json:"-"`
 	// +optional
 	// +kubebuilder:default=true
 	TemplateStoreEnabled bool `yaml:"template_store_enabled" json:"-"`

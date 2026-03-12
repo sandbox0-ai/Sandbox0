@@ -15,6 +15,9 @@ type ManagerMetrics struct {
 	PodsCleanedTotal     *prometheus.CounterVec
 	ReconcileTotal       *prometheus.CounterVec
 	ReconcileDuration    *prometheus.HistogramVec
+	MeteringEventsTotal  *prometheus.CounterVec
+	MeteringWindowsTotal *prometheus.CounterVec
+	MeteringErrorsTotal  *prometheus.CounterVec
 }
 
 // NewManager registers and returns manager metrics.
@@ -61,5 +64,17 @@ func NewManager(registry prometheus.Registerer) *ManagerMetrics {
 			Help:    "Duration of reconciliation operations",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"template"}),
+		MeteringEventsTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "manager_metering_events_total",
+			Help: "Total number of manager metering lifecycle events attempted",
+		}, []string{"event_type", "result"}),
+		MeteringWindowsTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "manager_metering_windows_total",
+			Help: "Total number of manager metering usage windows attempted",
+		}, []string{"window_type", "result"}),
+		MeteringErrorsTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Name: "manager_metering_errors_total",
+			Help: "Total number of manager metering projector errors",
+		}, []string{"operation"}),
 	}
 }

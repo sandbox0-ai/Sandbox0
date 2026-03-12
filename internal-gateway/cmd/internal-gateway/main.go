@@ -13,6 +13,7 @@ import (
 	"github.com/sandbox0-ai/sandbox0/internal-gateway/pkg/http"
 	"github.com/sandbox0-ai/sandbox0/pkg/dbpool"
 	gatewaymigrations "github.com/sandbox0-ai/sandbox0/pkg/gateway/migrations"
+	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/migrate"
 	"github.com/sandbox0-ai/sandbox0/pkg/observability"
 	"go.uber.org/zap"
@@ -56,12 +57,17 @@ func main() {
 	defer obsProvider.Shutdown(ctx)
 
 	var pool *pgxpool.Pool
-	if isPublicAuthEnabled(cfg.AuthMode) {
+	if strings.TrimSpace(cfg.DatabaseURL) != "" {
 		pool = initDatabase(ctx, cfg, logger, obsProvider)
 		defer pool.Close()
 
 		if err := runMigrations(ctx, pool, logger); err != nil {
 			logger.Fatal("Failed to run database migrations", zap.Error(err))
+		}
+	}
+	if pool != nil {
+		if err := metering.RunMigrations(ctx, pool, &zapLogger{logger: logger}); err != nil {
+			logger.Fatal("Failed to run metering migrations", zap.Error(err))
 		}
 	}
 

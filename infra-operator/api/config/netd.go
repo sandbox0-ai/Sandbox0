@@ -20,6 +20,15 @@ type NetdConfig struct {
 	NodeName string `yaml:"node_name" json:"nodeName"`
 
 	// +optional
+	RegionID string `yaml:"region_id" json:"-"`
+
+	// +optional
+	ClusterID string `yaml:"cluster_id" json:"-"`
+
+	// +optional
+	DatabaseURL string `yaml:"database_url" json:"-"`
+
+	// +optional
 	// +kubebuilder:default="30s"
 	ResyncPeriod metav1.Duration `yaml:"resync_period" json:"resyncPeriod"`
 
@@ -97,6 +106,9 @@ type NetdConfig struct {
 	// +optional
 	// +kubebuilder:default="10s"
 	MetricsReportInterval metav1.Duration `yaml:"metrics_report_interval" json:"metricsReportInterval"`
+	// +optional
+	// +kubebuilder:default="10s"
+	MeteringReportInterval metav1.Duration `yaml:"metering_report_interval" json:"meteringReportInterval"`
 	// +optional
 	AuditLogPath string `yaml:"audit_log_path" json:"auditLogPath"`
 	// +optional
@@ -191,6 +203,9 @@ func applyNetdDefaults(cfg *NetdConfig) {
 	}
 	if cfg.MetricsReportInterval.Duration == 0 {
 		cfg.MetricsReportInterval = metav1.Duration{Duration: 10 * time.Second}
+	}
+	if cfg.MeteringReportInterval.Duration == 0 {
+		cfg.MeteringReportInterval = metav1.Duration{Duration: 10 * time.Second}
 	}
 	if cfg.ShutdownDelay.Duration == 0 {
 		cfg.ShutdownDelay = metav1.Duration{Duration: 2 * time.Second}
