@@ -106,7 +106,12 @@ func Up(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, opts ...O
 
 	// Convert pgx pool to sql.DB
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
+	defer func() {
+		db.Close()
+		if options.Schema != "" {
+			pool.Reset()
+		}
+	}()
 
 	// Set goose base filesystem for embedded migrations
 	if options.BaseFS != nil {
@@ -158,7 +163,12 @@ func Status(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, opts 
 	}
 
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
+	defer func() {
+		db.Close()
+		if options.Schema != "" {
+			pool.Reset()
+		}
+	}()
 
 	// Set goose base filesystem for embedded migrations
 	if options.BaseFS != nil {
@@ -202,7 +212,12 @@ func Down(ctx context.Context, pool *pgxpool.Pool, migrationsDir string, opts ..
 	}
 
 	db := stdlib.OpenDBFromPool(pool)
-	defer db.Close()
+	defer func() {
+		db.Close()
+		if options.Schema != "" {
+			pool.Reset()
+		}
+	}()
 
 	if options.BaseFS != nil {
 		goose.SetBaseFS(options.BaseFS)
