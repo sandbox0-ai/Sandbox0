@@ -36,30 +36,29 @@ import (
 
 // Server represents the HTTP server for internal-gateway
 type Server struct {
-	router              *gin.Engine
-	cfg                 *config.InternalGatewayConfig
-	proxy2Mgr           *proxy.Router
-	proxy2sp            *proxy.Router
-	managerClient       *client.ManagerClient
-	authMiddleware      *middleware.InternalAuthMiddleware
-	publicAuth          *gatewaymiddleware.AuthMiddleware
-	compositeAuth       *middleware.CompositeAuthMiddleware
-	publicIdentityRepo  *gatewayidentity.Repository
-	publicAPIKeyRepo    *gatewayapikey.Repository
-	rateLimiter         *gatewaymiddleware.RateLimiter
-	externalLimiter     *middleware.ExternalRateLimiter
-	publicBuiltin       *gatewaybuiltin.Provider
-	publicOIDC          *gatewayoidc.Manager
-	publicJWT           *gatewayauthn.Issuer
-	requestLogger       *middleware.RequestLogger
-	logger              *zap.Logger
-	meteringHandler     *gatewayhandlers.MeteringHandler
-	internalAuthGen     *internalauth.Generator
-	procdAuthGen        *internalauth.Generator
-	internalAuthEnabled bool
-	entitlements        licensing.Entitlements
-	sandboxAddrCache    *cache.Cache[string, *url.URL]
-	obsProvider         *observability.Provider
+	router             *gin.Engine
+	cfg                *config.InternalGatewayConfig
+	proxy2Mgr          *proxy.Router
+	proxy2sp           *proxy.Router
+	managerClient      *client.ManagerClient
+	authMiddleware     *middleware.InternalAuthMiddleware
+	publicAuth         *gatewaymiddleware.AuthMiddleware
+	compositeAuth      *middleware.CompositeAuthMiddleware
+	publicIdentityRepo *gatewayidentity.Repository
+	publicAPIKeyRepo   *gatewayapikey.Repository
+	rateLimiter        *gatewaymiddleware.RateLimiter
+	externalLimiter    *middleware.ExternalRateLimiter
+	publicBuiltin      *gatewaybuiltin.Provider
+	publicOIDC         *gatewayoidc.Manager
+	publicJWT          *gatewayauthn.Issuer
+	requestLogger      *middleware.RequestLogger
+	logger             *zap.Logger
+	meteringHandler    *gatewayhandlers.MeteringHandler
+	internalAuthGen    *internalauth.Generator
+	procdAuthGen       *internalauth.Generator
+	entitlements       licensing.Entitlements
+	sandboxAddrCache   *cache.Cache[string, *url.URL]
+	obsProvider        *observability.Provider
 }
 
 // NewServer creates a new HTTP server
@@ -114,12 +113,11 @@ func NewServer(
 		}
 	}
 
-	internalAuthEnabled := authModeEnabled(cfg.AuthMode, authModeInternal)
 	publicAuthEnabled := authModeEnabled(cfg.AuthMode, authModePublic)
 
 	// Initialize internal auth keys
 	var publicKey ed25519.PublicKey
-	if internalAuthEnabled {
+	if authModeEnabled(cfg.AuthMode, authModeInternal) {
 		var err error
 		publicKey, err = internalauth.LoadEd25519PublicKeyFromFile(internalauth.DefaultInternalJWTPublicKeyPath)
 		if err != nil {
@@ -138,7 +136,7 @@ func NewServer(
 		allowedCallers = []string{"edge-gateway", "scheduler"}
 	}
 	var validator *internalauth.Validator
-	if internalAuthEnabled {
+	if authModeEnabled(cfg.AuthMode, authModeInternal) {
 		validator = internalauth.NewValidator(internalauth.ValidatorConfig{
 			Target:             "internal-gateway",
 			PublicKey:          publicKey,
@@ -253,30 +251,29 @@ func NewServer(
 	meteringHandler := gatewayhandlers.NewMeteringHandler(meteringRepo, cfg.RegionID, logger)
 
 	server := &Server{
-		router:              router,
-		cfg:                 cfg,
-		proxy2Mgr:           proxy2Mgr,
-		proxy2sp:            proxy2sp,
-		managerClient:       managerClient,
-		authMiddleware:      authMiddleware,
-		publicAuth:          publicAuth,
-		compositeAuth:       compositeAuth,
-		publicIdentityRepo:  publicIdentityRepo,
-		publicAPIKeyRepo:    publicAPIKeyRepo,
-		rateLimiter:         rateLimiter,
-		externalLimiter:     externalLimiter,
-		publicBuiltin:       publicBuiltin,
-		publicOIDC:          publicOIDC,
-		publicJWT:           publicJWT,
-		requestLogger:       requestLogger,
-		logger:              logger,
-		meteringHandler:     meteringHandler,
-		internalAuthGen:     internalAuthGen,
-		procdAuthGen:        procdAuthGen,
-		internalAuthEnabled: internalAuthEnabled,
-		entitlements:        entitlements,
-		sandboxAddrCache:    sandboxAddrCache,
-		obsProvider:         obsProvider,
+		router:             router,
+		cfg:                cfg,
+		proxy2Mgr:          proxy2Mgr,
+		proxy2sp:           proxy2sp,
+		managerClient:      managerClient,
+		authMiddleware:     authMiddleware,
+		publicAuth:         publicAuth,
+		compositeAuth:      compositeAuth,
+		publicIdentityRepo: publicIdentityRepo,
+		publicAPIKeyRepo:   publicAPIKeyRepo,
+		rateLimiter:        rateLimiter,
+		externalLimiter:    externalLimiter,
+		publicBuiltin:      publicBuiltin,
+		publicOIDC:         publicOIDC,
+		publicJWT:          publicJWT,
+		requestLogger:      requestLogger,
+		logger:             logger,
+		meteringHandler:    meteringHandler,
+		internalAuthGen:    internalAuthGen,
+		procdAuthGen:       procdAuthGen,
+		entitlements:       entitlements,
+		sandboxAddrCache:   sandboxAddrCache,
+		obsProvider:        obsProvider,
 	}
 
 	server.setupRoutes()
@@ -434,10 +431,13 @@ func (s *Server) setupRoutes() {
 	// Internal API routes (for scheduler to call)
 	// These routes are authenticated but don't require specific permissions
 	// (scheduler uses *:* permissions)
-	if s.internalAuthEnabled {
+	if authModeEnabled(s.cfg.AuthMode, authModeInternal) {
 		s.setupInternalControlPlaneRoutes()
-		s.setupMeteringRoutes()
 	}
+
+	// Metering export is region-scoped and must remain available when
+	// internal-gateway serves as the single-cluster public API entrypoint.
+	s.setupMeteringRoutes()
 
 	// Host-based public exposure fallback (for non-/api paths)
 	s.router.NoRoute(s.handlePublicExposureNoRoute)
@@ -466,11 +466,39 @@ func (s *Server) setupMeteringRoutes() {
 	}
 
 	internal := s.router.Group("/internal/v1")
-	internal.Use(s.authMiddleware.Authenticate())
+	switch normalizeAuthMode(s.cfg.AuthMode) {
+	case authModePublic:
+		internal.Use(s.publicAuth.Authenticate())
+		internal.Use(s.publicAuth.RequireSystemAdmin())
+	case authModeBoth:
+		internal.Use(s.compositeAuth.Authenticate())
+		internal.Use(requireMeteringAccess())
+	default:
+		internal.Use(s.authMiddleware.Authenticate())
+	}
 	{
 		internal.GET("/metering/status", s.meteringHandler.GetStatus)
 		internal.GET("/metering/events", s.meteringHandler.ListEvents)
 		internal.GET("/metering/windows", s.meteringHandler.ListWindows)
+	}
+}
+
+func requireMeteringAccess() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authCtx := gatewaymiddleware.GetAuthContext(c)
+		if authCtx == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "not authenticated",
+			})
+			return
+		}
+		if authCtx.AuthMethod == gatewayauthn.AuthMethodInternal || authCtx.IsSystemAdmin {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "system admin access required",
+		})
 	}
 }
 
