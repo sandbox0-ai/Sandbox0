@@ -1,4 +1,4 @@
-package http
+package handlers
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sandbox0-ai/sandbox0/infra-operator/api/config"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"go.uber.org/zap"
@@ -69,20 +68,17 @@ type meteringWindowsResponse struct {
 	Windows []*metering.Window `json:"windows"`
 }
 
-func TestGetMeteringStatus(t *testing.T) {
+func TestMeteringHandlerGetStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("returns unavailable when metering repo is not configured", func(t *testing.T) {
-		server := &Server{
-			cfg:    &config.InternalGatewayConfig{},
-			logger: zap.NewNop(),
-		}
+		handler := NewMeteringHandler(nil, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/status", nil)
 
-		server.getMeteringStatus(ctx)
+		handler.GetStatus(ctx)
 
 		if recorder.Code != http.StatusServiceUnavailable {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
@@ -100,17 +96,13 @@ func TestGetMeteringStatus(t *testing.T) {
 				ProducerCount:        2,
 			},
 		}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{GatewayConfig: config.GatewayConfig{RegionID: "aws/us-east-1"}},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+		handler := NewMeteringHandler(repo, "aws/us-east-1", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/status", nil)
 
-		server.getMeteringStatus(ctx)
+		handler.GetStatus(ctx)
 
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -139,24 +131,34 @@ func TestGetMeteringStatus(t *testing.T) {
 			t.Fatalf("complete_before = %v, want %v", resp.CompleteBefore, completeBefore)
 		}
 	})
+
+	t.Run("returns internal error when repository fails", func(t *testing.T) {
+		handler := NewMeteringHandler(&fakeMeteringReader{statusErr: errors.New("boom")}, "aws/us-east-1", zap.NewNop())
+
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/status", nil)
+
+		handler.GetStatus(ctx)
+
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+		}
+	})
 }
 
-func TestListMeteringEvents(t *testing.T) {
+func TestMeteringHandlerListEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("rejects invalid after_sequence", func(t *testing.T) {
 		repo := &fakeMeteringReader{}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+		handler := NewMeteringHandler(repo, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/events?after_sequence=bad", nil)
 
-		server.listMeteringEvents(ctx)
+		handler.ListEvents(ctx)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -185,17 +187,13 @@ func TestListMeteringEvents(t *testing.T) {
 				},
 			},
 		}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+		handler := NewMeteringHandler(repo, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/events?after_sequence=10&limit=5000", nil)
 
-		server.listMeteringEvents(ctx)
+		handler.ListEvents(ctx)
 
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -218,23 +216,18 @@ func TestListMeteringEvents(t *testing.T) {
 			t.Fatalf("event count = %d, want 1", len(resp.Events))
 		}
 		if resp.Events[0].Sequence != 11 {
-			t.Fatalf("sequence = %d, want 11", resp.Events[0].Sequence)
+			t.Fatalf("event sequence = %d, want 11", resp.Events[0].Sequence)
 		}
 	})
 
-	t.Run("returns internal error when repo lookup fails", func(t *testing.T) {
-		repo := &fakeMeteringReader{eventsErr: errors.New("boom")}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+	t.Run("returns internal error when repository fails", func(t *testing.T) {
+		handler := NewMeteringHandler(&fakeMeteringReader{eventsErr: errors.New("boom")}, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/events", nil)
 
-		server.listMeteringEvents(ctx)
+		handler.ListEvents(ctx)
 
 		if recorder.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
@@ -242,22 +235,18 @@ func TestListMeteringEvents(t *testing.T) {
 	})
 }
 
-func TestListMeteringWindows(t *testing.T) {
+func TestMeteringHandlerListWindows(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	t.Run("rejects invalid limit", func(t *testing.T) {
 		repo := &fakeMeteringReader{}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+		handler := NewMeteringHandler(repo, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/windows?limit=bad", nil)
 
-		server.listMeteringWindows(ctx)
+		handler.ListWindows(ctx)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -268,42 +257,36 @@ func TestListMeteringWindows(t *testing.T) {
 	})
 
 	t.Run("clamps limit and returns windows", func(t *testing.T) {
-		windowStart := time.Date(2026, 3, 12, 9, 0, 0, 0, time.UTC)
+		windowStart := time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC)
 		windowEnd := windowStart.Add(5 * time.Minute)
+		recordedAt := windowEnd.Add(5 * time.Second)
 		repo := &fakeMeteringReader{
 			windows: []*metering.Window{
 				{
 					Sequence:    3,
-					WindowID:    "sandbox/sb-1/windows/sandbox.active_seconds/1/2",
-					Producer:    "manager.sandbox_lifecycle",
+					WindowID:    "sandbox/sb-1/active/2026-03-12T10:00:00Z/2026-03-12T10:05:00Z",
+					Producer:    "manager.lifecycle",
 					RegionID:    "aws/us-east-1",
 					WindowType:  metering.WindowTypeSandboxActiveSeconds,
 					SubjectType: metering.SubjectTypeSandbox,
 					SubjectID:   "sb-1",
 					TeamID:      "team-1",
-					UserID:      "user-1",
 					SandboxID:   "sb-1",
-					TemplateID:  "tpl-1",
-					ClusterID:   "cluster-a",
 					WindowStart: windowStart,
 					WindowEnd:   windowEnd,
 					Value:       300,
 					Unit:        metering.WindowUnitSeconds,
-					RecordedAt:  windowEnd,
+					RecordedAt:  recordedAt,
 				},
 			},
 		}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+		handler := NewMeteringHandler(repo, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/windows?after_sequence=2&limit=5000", nil)
 
-		server.listMeteringWindows(ctx)
+		handler.ListWindows(ctx)
 
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -325,24 +308,19 @@ func TestListMeteringWindows(t *testing.T) {
 		if len(resp.Windows) != 1 {
 			t.Fatalf("window count = %d, want 1", len(resp.Windows))
 		}
-		if resp.Windows[0].Value != 300 {
-			t.Fatalf("value = %d, want 300", resp.Windows[0].Value)
+		if resp.Windows[0].Sequence != 3 {
+			t.Fatalf("window sequence = %d, want 3", resp.Windows[0].Sequence)
 		}
 	})
 
-	t.Run("returns internal error when window lookup fails", func(t *testing.T) {
-		repo := &fakeMeteringReader{windowsErr: errors.New("boom")}
-		server := &Server{
-			cfg:          &config.InternalGatewayConfig{},
-			logger:       zap.NewNop(),
-			meteringRepo: repo,
-		}
+	t.Run("returns internal error when repository fails", func(t *testing.T) {
+		handler := NewMeteringHandler(&fakeMeteringReader{windowsErr: errors.New("boom")}, "", zap.NewNop())
 
 		recorder := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(recorder)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/internal/v1/metering/windows", nil)
 
-		server.listMeteringWindows(ctx)
+		handler.ListWindows(ctx)
 
 		if recorder.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)

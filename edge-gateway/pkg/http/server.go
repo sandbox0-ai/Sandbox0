@@ -17,12 +17,14 @@ import (
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
+	gatewayhandlers "github.com/sandbox0-ai/sandbox0/pkg/gateway/http/handlers"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/public"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/spec"
 	"github.com/sandbox0-ai/sandbox0/pkg/internalauth"
 	"github.com/sandbox0-ai/sandbox0/pkg/licensing"
+	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	"github.com/sandbox0-ai/sandbox0/pkg/observability"
 	httpobs "github.com/sandbox0-ai/sandbox0/pkg/observability/http"
 	"github.com/sandbox0-ai/sandbox0/pkg/proxy"
@@ -43,6 +45,7 @@ type Server struct {
 	requestLogger   *middleware.RequestLogger
 	logger          *zap.Logger
 	internalAuthGen *internalauth.Generator
+	meteringHandler *gatewayhandlers.MeteringHandler
 	obsProvider     *observability.Provider
 
 	internalGatewayProxies   map[string]*proxy.Router
@@ -78,6 +81,10 @@ func NewServer(
 	// Create repository
 	identityRepo := identity.NewRepository(pool)
 	apiKeyRepo := apikey.NewRepository(pool)
+	var meteringRepo *metering.Repository
+	if pool != nil {
+		meteringRepo = metering.NewRepository(pool)
+	}
 	registryProvider, err := registryprovider.NewProvider(cfg.Registry, nil, logger)
 	if err != nil {
 		logger.Warn("Registry provider disabled", zap.Error(err))
@@ -206,6 +213,7 @@ func NewServer(
 		requestLogger:          requestLogger,
 		logger:                 logger,
 		internalAuthGen:        internalAuthGen,
+		meteringHandler:        gatewayhandlers.NewMeteringHandler(meteringRepo, cfg.RegionID, logger),
 		obsProvider:            obsProvider,
 		internalGatewayProxies: make(map[string]*proxy.Router),
 		clusterCache:           make(map[string]string),
@@ -239,6 +247,7 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	s.setupPublicRoutes()
+	s.setupMeteringRoutes()
 
 	// ===== API Proxy Routes =====
 	// These routes proxy to internal-gateway (or scheduler for templates) after authentication
@@ -283,6 +292,25 @@ func (s *Server) setupRoutes() {
 
 	// Host-based public exposure fallback (non-/api paths).
 	s.router.NoRoute(s.proxyPublicExposureNoRoute)
+}
+
+func (s *Server) setupMeteringRoutes() {
+	if s.meteringHandler == nil {
+		regionID := ""
+		if s.cfg != nil {
+			regionID = s.cfg.RegionID
+		}
+		s.meteringHandler = gatewayhandlers.NewMeteringHandler(nil, regionID, s.logger)
+	}
+
+	internal := s.router.Group("/internal/v1")
+	internal.Use(s.authMiddleware.Authenticate())
+	internal.Use(s.authMiddleware.RequireSystemAdmin())
+	{
+		internal.GET("/metering/status", s.meteringHandler.GetStatus)
+		internal.GET("/metering/events", s.meteringHandler.ListEvents)
+		internal.GET("/metering/windows", s.meteringHandler.ListWindows)
+	}
 }
 
 func (s *Server) setupPublicRoutes() {

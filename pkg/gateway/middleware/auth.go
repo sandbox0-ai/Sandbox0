@@ -322,6 +322,28 @@ func (m *AuthMiddleware) RequireJWTAuth() gin.HandlerFunc {
 	}
 }
 
+// RequireSystemAdmin returns middleware that restricts access to system admins.
+func (m *AuthMiddleware) RequireSystemAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authCtx := GetAuthContext(c)
+		if authCtx == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "not authenticated",
+			})
+			return
+		}
+
+		if !authCtx.IsSystemAdmin {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "system admin access required",
+			})
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // GetAuthContext extracts auth context from gin context
 func GetAuthContext(c *gin.Context) *authn.AuthContext {
 	if v, exists := c.Get("auth_context"); exists {

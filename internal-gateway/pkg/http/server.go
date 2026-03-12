@@ -20,6 +20,7 @@ import (
 	gatewaybuiltin "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/builtin"
 	gatewayoidc "github.com/sandbox0-ai/sandbox0/pkg/gateway/auth/oidc"
 	gatewayauthn "github.com/sandbox0-ai/sandbox0/pkg/gateway/authn"
+	gatewayhandlers "github.com/sandbox0-ai/sandbox0/pkg/gateway/http/handlers"
 	gatewayidentity "github.com/sandbox0-ai/sandbox0/pkg/gateway/identity"
 	gatewaymiddleware "github.com/sandbox0-ai/sandbox0/pkg/gateway/middleware"
 	"github.com/sandbox0-ai/sandbox0/pkg/gateway/public"
@@ -52,19 +53,13 @@ type Server struct {
 	publicJWT           *gatewayauthn.Issuer
 	requestLogger       *middleware.RequestLogger
 	logger              *zap.Logger
-	meteringRepo        meteringReader
+	meteringHandler     *gatewayhandlers.MeteringHandler
 	internalAuthGen     *internalauth.Generator
 	procdAuthGen        *internalauth.Generator
 	internalAuthEnabled bool
 	entitlements        licensing.Entitlements
 	sandboxAddrCache    *cache.Cache[string, *url.URL]
 	obsProvider         *observability.Provider
-}
-
-type meteringReader interface {
-	GetStatus(ctx context.Context, fallbackRegionID string) (*metering.Status, error)
-	ListEventsAfter(ctx context.Context, afterSequence int64, limit int) ([]*metering.Event, error)
-	ListWindowsAfter(ctx context.Context, afterSequence int64, limit int) ([]*metering.Window, error)
 }
 
 // NewServer creates a new HTTP server
@@ -255,6 +250,7 @@ func NewServer(
 	if pool != nil {
 		meteringRepo = metering.NewRepository(pool)
 	}
+	meteringHandler := gatewayhandlers.NewMeteringHandler(meteringRepo, cfg.RegionID, logger)
 
 	server := &Server{
 		router:              router,
@@ -274,7 +270,7 @@ func NewServer(
 		publicJWT:           publicJWT,
 		requestLogger:       requestLogger,
 		logger:              logger,
-		meteringRepo:        meteringRepo,
+		meteringHandler:     meteringHandler,
 		internalAuthGen:     internalAuthGen,
 		procdAuthGen:        procdAuthGen,
 		internalAuthEnabled: internalAuthEnabled,
@@ -439,25 +435,43 @@ func (s *Server) setupRoutes() {
 	// These routes are authenticated but don't require specific permissions
 	// (scheduler uses *:* permissions)
 	if s.internalAuthEnabled {
-		internal := s.router.Group("/internal/v1")
-		internal.Use(s.managerUpstreamMiddleware())
-		internal.Use(s.authMiddleware.Authenticate())
-		{
-
-			// Cluster information (→ Manager)
-			internal.GET("/cluster/summary", s.getClusterSummary)
-
-			// Template statistics (→ Manager)
-			internal.GET("/templates/stats", s.getTemplateStats)
-
-			internal.GET("/metering/status", s.getMeteringStatus)
-			internal.GET("/metering/events", s.listMeteringEvents)
-			internal.GET("/metering/windows", s.listMeteringWindows)
-		}
+		s.setupInternalControlPlaneRoutes()
+		s.setupMeteringRoutes()
 	}
 
 	// Host-based public exposure fallback (for non-/api paths)
 	s.router.NoRoute(s.handlePublicExposureNoRoute)
+}
+
+func (s *Server) setupInternalControlPlaneRoutes() {
+	internal := s.router.Group("/internal/v1")
+	internal.Use(s.managerUpstreamMiddleware())
+	internal.Use(s.authMiddleware.Authenticate())
+	{
+		// Cluster information (→ Manager)
+		internal.GET("/cluster/summary", s.getClusterSummary)
+
+		// Template statistics (→ Manager)
+		internal.GET("/templates/stats", s.getTemplateStats)
+	}
+}
+
+func (s *Server) setupMeteringRoutes() {
+	if s.meteringHandler == nil {
+		regionID := ""
+		if s.cfg != nil {
+			regionID = s.cfg.RegionID
+		}
+		s.meteringHandler = gatewayhandlers.NewMeteringHandler(nil, regionID, s.logger)
+	}
+
+	internal := s.router.Group("/internal/v1")
+	internal.Use(s.authMiddleware.Authenticate())
+	{
+		internal.GET("/metering/status", s.meteringHandler.GetStatus)
+		internal.GET("/metering/events", s.meteringHandler.ListEvents)
+		internal.GET("/metering/windows", s.meteringHandler.ListWindows)
+	}
 }
 
 // Start starts the HTTP server
