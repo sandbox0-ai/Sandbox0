@@ -142,14 +142,6 @@ func initLogger(level string) (*zap.Logger, error) {
 	return config.Build()
 }
 
-func isPublicAuthEnabled(mode string) bool {
-	mode = strings.TrimSpace(strings.ToLower(mode))
-	if mode == "" {
-		return false
-	}
-	return mode == "public" || mode == "both"
-}
-
 func initDatabase(ctx context.Context, cfg *config.InternalGatewayConfig, logger *zap.Logger, obsProvider *observability.Provider) *pgxpool.Pool {
 	pool, err := dbpool.New(ctx, dbpool.Options{
 		DatabaseURL: cfg.DatabaseURL,
