@@ -1,15 +1,20 @@
 package cases
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	mgrv1alpha1 "github.com/sandbox0-ai/sandbox0/manager/pkg/apis/sandbox0/v1alpha1"
 	"github.com/sandbox0-ai/sandbox0/pkg/apispec"
 	"github.com/sandbox0-ai/sandbox0/pkg/framework"
 	"github.com/sandbox0-ai/sandbox0/pkg/metering"
 	e2eutils "github.com/sandbox0-ai/sandbox0/tests/e2e/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -427,16 +432,16 @@ func assertSandboxNetworkIsolation(env *framework.ScenarioEnv, session *e2eutils
 	templateAID := "e2e-net-a-" + suffix
 	templateBID := "e2e-net-b-" + suffix
 
-	_, err = session.CreateTemplate(env.TestCtx.Context, GinkgoT(), buildPinnedTemplate(*baseTemplate, templateAID, workerNodes[0]))
+	err = applyPinnedTemplate(env, *baseTemplate, templateAID, workerNodes[0])
 	Expect(err).NotTo(HaveOccurred())
 	defer func() {
-		_ = session.DeleteTemplate(env.TestCtx.Context, GinkgoT(), templateAID)
+		_ = deleteTemplateCR(env, templateAID)
 	}()
 
-	_, err = session.CreateTemplate(env.TestCtx.Context, GinkgoT(), buildPinnedTemplate(*baseTemplate, templateBID, workerNodes[1]))
+	err = applyPinnedTemplate(env, *baseTemplate, templateBID, workerNodes[1])
 	Expect(err).NotTo(HaveOccurred())
 	defer func() {
-		_ = session.DeleteTemplate(env.TestCtx.Context, GinkgoT(), templateBID)
+		_ = deleteTemplateCR(env, templateBID)
 	}()
 
 	waitForTemplateStatusEventually(env, session, templateAID)
@@ -527,54 +532,81 @@ func assertSandboxNetworkIsolation(env *framework.ScenarioEnv, session *e2eutils
 	}).WithTimeout(45 * time.Second).WithPolling(3 * time.Second).Should(Succeed())
 }
 
-func buildPinnedTemplate(base apispec.Template, templateID, nodeName string) apispec.TemplateCreateRequest {
-	spec := e2eutils.CloneTemplateForCreate(base, templateID).Spec
-	description := "E2E network isolation template pinned to " + nodeName
-	displayName := "E2E network isolation " + nodeName
-	spec.Description = &description
-	spec.DisplayName = &displayName
-	spec.Pool = &apispec.PoolStrategy{
+func applyPinnedTemplate(env *framework.ScenarioEnv, base apispec.Template, templateID, nodeName string) error {
+	templateCR, err := buildPinnedTemplateCR(env, base, templateID, nodeName)
+	if err != nil {
+		return err
+	}
+	raw, err := yaml.Marshal(templateCR)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp("", "sandbox0-e2e-template-*.yaml")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(raw); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return framework.ApplyManifest(env.TestCtx.Context, env.Config.Kubeconfig, file.Name())
+}
+
+func buildPinnedTemplateCR(env *framework.ScenarioEnv, base apispec.Template, templateID, nodeName string) (*mgrv1alpha1.SandboxTemplate, error) {
+	raw, err := json.Marshal(base.Spec)
+	if err != nil {
+		return nil, err
+	}
+
+	var spec mgrv1alpha1.SandboxTemplateSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return nil, err
+	}
+
+	spec.Description = "E2E network isolation template pinned to " + nodeName
+	spec.DisplayName = "E2E network isolation " + nodeName
+	spec.Pool = mgrv1alpha1.PoolStrategy{
 		MinIdle: 0,
 		MaxIdle: 0,
 	}
-
-	pod := clonePodSpecOverride(spec.Pod)
-	if pod == nil {
-		pod = &apispec.PodSpecOverride{}
+	if spec.Pod == nil {
+		spec.Pod = &mgrv1alpha1.PodSpecOverride{}
 	}
 	nodeSelector := map[string]string{}
-	if pod.NodeSelector != nil {
-		for key, value := range *pod.NodeSelector {
-			nodeSelector[key] = value
-		}
+	for key, value := range spec.Pod.NodeSelector {
+		nodeSelector[key] = value
 	}
 	nodeSelector["kubernetes.io/hostname"] = nodeName
-	pod.NodeSelector = &nodeSelector
-	spec.Pod = pod
+	spec.Pod.NodeSelector = nodeSelector
 
-	return apispec.TemplateCreateRequest{
-		TemplateId: templateID,
-		Spec:       spec,
-	}
+	return &mgrv1alpha1.SandboxTemplate{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "sandbox0.ai/v1alpha1",
+			Kind:       "SandboxTemplate",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      templateID,
+			Namespace: env.Infra.Namespace,
+		},
+		Spec: spec,
+	}, nil
 }
 
-func clonePodSpecOverride(base *apispec.PodSpecOverride) *apispec.PodSpecOverride {
-	if base == nil {
-		return nil
-	}
-	cloned := *base
-	if base.NodeSelector != nil {
-		nodeSelector := make(map[string]string, len(*base.NodeSelector))
-		for key, value := range *base.NodeSelector {
-			nodeSelector[key] = value
-		}
-		cloned.NodeSelector = &nodeSelector
-	}
-	if base.Tolerations != nil {
-		tolerations := append([]apispec.Toleration(nil), (*base.Tolerations)...)
-		cloned.Tolerations = &tolerations
-	}
-	return &cloned
+func deleteTemplateCR(env *framework.ScenarioEnv, templateID string) error {
+	return framework.Kubectl(
+		env.TestCtx.Context,
+		env.Config.Kubeconfig,
+		"delete",
+		"sandboxtemplate",
+		templateID,
+		"--namespace",
+		env.Infra.Namespace,
+		"--ignore-not-found=true",
+	)
 }
 
 func waitForTemplateStatusEventually(env *framework.ScenarioEnv, session *e2eutils.Session, templateID string) {
