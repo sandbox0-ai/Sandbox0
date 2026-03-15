@@ -7,11 +7,12 @@
     "docs:generate:content": "node ./scripts/generate_docs_content.mjs",
     "docs:prepare:versions": "node ./scripts/prepare_docs_versions.mjs",
     "docs:finalize:build": "node ./scripts/finalize_docs_build.mjs",
+    "docs:verify:rendered": "node ./scripts/verify_versioned_docs_render.mjs",
     "predev": "npm run docs:generate:sandbox0infra-schema && npm run docs:generate:content && npm run docs:prepare:versions",
     "dev": "next dev --port 4300",
     "prebuild": "npm run docs:generate:sandbox0infra-schema && npm run docs:generate:content && npm run docs:prepare:versions",
     "build": "next build",
-    "postbuild": "npm run docs:finalize:build",
+    "postbuild": "npm run docs:finalize:build && npm run docs:verify:rendered",
     "start": "next start --port 4300",
     "lint": "next lint"
   },
