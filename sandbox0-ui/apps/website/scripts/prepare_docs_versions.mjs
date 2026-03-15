@@ -6,6 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const publicManifestPath = path.join(appRoot, "public", "docs", "versions.json");
 const generatedDir = path.join(appRoot, "src", "generated", "docs");
+const generatedManifestPath = path.join(generatedDir, "versions.generated.json");
 const buildConfigPath = path.join(generatedDir, "build-config.json");
 const githubRepo = process.env.DOCS_GITHUB_REPOSITORY || process.env.GITHUB_REPOSITORY || "sandbox0-ai/sandbox0";
 const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
@@ -30,15 +31,17 @@ const listedReleaseLimit = parsePositiveInt(process.env.DOCS_VERSION_SWITCHER_LI
  */
 
 async function main() {
-  const fallbackManifest = await readJson(publicManifestPath);
+  const cachedManifest = await readCachedManifest(generatedManifestPath);
   const releases = await fetchGithubReleases(githubRepo, githubToken);
-  const manifest = buildManifest(releases, fallbackManifest);
+  const manifest = buildManifest(releases, cachedManifest);
   const renderVersions = resolveRenderVersions(manifest, explicitRenderVersions);
+  const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
 
   await fs.mkdir(path.dirname(publicManifestPath), { recursive: true });
-  await fs.writeFile(publicManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await fs.writeFile(publicManifestPath, manifestJson);
 
   await fs.mkdir(generatedDir, { recursive: true });
+  await fs.writeFile(generatedManifestPath, manifestJson);
   await fs.writeFile(
     buildConfigPath,
     `${JSON.stringify({ renderedVersions: renderVersions }, null, 2)}\n`
@@ -47,6 +50,20 @@ async function main() {
   console.log(
     `prepared docs manifest with ${manifest.versions.length} versions; rendered versions: ${renderVersions.join(", ")}`
   );
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<DocsVersionsManifest | null>}
+ */
+async function readCachedManifest(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return isDocsVersionsManifest(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -69,15 +86,6 @@ function parseList(value) {
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-/**
- * @param {string} filePath
- * @returns {Promise<DocsVersionsManifest>}
- */
-async function readJson(filePath) {
-  const raw = await fs.readFile(filePath, "utf8");
-  return JSON.parse(raw);
 }
 
 /**
@@ -134,10 +142,10 @@ async function fetchGithubReleases(repo, token) {
 
 /**
  * @param {Array<{ tag_name: string; prerelease: boolean; assets?: Array<{ name?: string }> }>} releases
- * @param {DocsVersionsManifest} fallbackManifest
+ * @param {DocsVersionsManifest | null} cachedManifest
  * @returns {DocsVersionsManifest}
  */
-function buildManifest(releases, fallbackManifest) {
+function buildManifest(releases, cachedManifest) {
   const actualVersions = releases
     .map((release) => {
       const id = normalizeReleaseTag(release.tag_name);
@@ -154,11 +162,6 @@ function buildManifest(releases, fallbackManifest) {
     .filter(Boolean)
     .sort(compareDocsVersionDesc);
 
-  actualVersions.forEach((version, index) => {
-    version.listed = index < listedReleaseLimit;
-  });
-
-  const latestStable = actualVersions.find((version) => version.channel === "stable");
   const includeNext =
     process.env.DOCS_INCLUDE_NEXT === "false"
       ? false
@@ -166,12 +169,22 @@ function buildManifest(releases, fallbackManifest) {
         ? true
         : true;
 
+  if (actualVersions.length === 0) {
+    return cachedManifest ?? createFallbackManifest(includeNext);
+  }
+
+  actualVersions.forEach((version, index) => {
+    version.listed = index < listedReleaseLimit;
+  });
+
+  const latestStable = actualVersions.find((version) => version.channel === "stable");
+
   const versions = [
     {
       id: "latest",
       label: "Latest",
       channel: "stable",
-      target: latestStable?.id ?? "next",
+      target: latestStable?.id ?? (includeNext ? "next" : "latest"),
       listed: true,
     },
     ...(includeNext
@@ -187,13 +200,51 @@ function buildManifest(releases, fallbackManifest) {
     ...actualVersions,
   ];
 
-  if (actualVersions.length === 0) {
-    return fallbackManifest;
-  }
-
   return {
     defaultVersion: "latest",
     versions,
+  };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is DocsVersionsManifest}
+ */
+function isDocsVersionsManifest(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = /** @type {{ defaultVersion?: unknown; versions?: unknown }} */ (value);
+  return typeof candidate.defaultVersion === "string" && Array.isArray(candidate.versions);
+}
+
+/**
+ * @param {boolean} includeNext
+ * @returns {DocsVersionsManifest}
+ */
+function createFallbackManifest(includeNext) {
+  return {
+    defaultVersion: "latest",
+    versions: [
+      {
+        id: "latest",
+        label: "Latest",
+        channel: "stable",
+        target: includeNext ? "next" : "latest",
+        listed: true,
+      },
+      ...(includeNext
+        ? [
+            {
+              id: "next",
+              label: "Next",
+              channel: "next",
+              listed: true,
+            },
+          ]
+        : []),
+    ],
   };
 }
 

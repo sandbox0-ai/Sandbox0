@@ -1,4 +1,4 @@
-import manifestJson from "../../../public/docs/versions.json";
+import manifestJson from "@/generated/docs/versions.generated.json";
 import buildConfigJson from "@/generated/docs/build-config.json";
 
 export interface DocsVersion {

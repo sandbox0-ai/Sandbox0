@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
 const outDir = path.join(appRoot, "out");
-const publicManifestPath = path.join(appRoot, "public", "docs", "versions.json");
+const generatedManifestPath = path.join(appRoot, "src", "generated", "docs", "versions.generated.json");
 const githubRepo = process.env.DOCS_GITHUB_REPOSITORY || process.env.GITHUB_REPOSITORY || "sandbox0-ai/sandbox0";
 const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 const shouldDownloadBundles =
@@ -33,7 +33,7 @@ async function main() {
   }
 
   const manifest = /** @type {DocsVersionsManifest} */ (
-    JSON.parse(await fs.readFile(publicManifestPath, "utf8"))
+    JSON.parse(await fs.readFile(generatedManifestPath, "utf8"))
   );
   const releases = await fetchGithubReleases(githubRepo, githubToken);
   const releaseAssetByTag = new Map();

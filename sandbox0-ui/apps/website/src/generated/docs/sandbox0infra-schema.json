@@ -3314,6 +3314,12 @@
           "default": "info"
         },
         {
+          "path": "spec.services.netd.config.meteringReportInterval",
+          "type": "string",
+          "required": false,
+          "default": "10s"
+        },
+        {
           "path": "spec.services.netd.config.metricsPort",
           "type": "integer",
           "required": false,
