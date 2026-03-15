@@ -47,6 +47,7 @@ jobs:
     uses: ./.github/workflows/release-package.yml
     with:
       version: ${{ needs.prepare-release.outputs.version }}
+      upload_artifacts: true
 
   publish-dashboard-core:
     name: Publish dashboard-core package
@@ -324,6 +325,7 @@ jobs:
       - name: Create or update GitHub Release with docs bundle
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           OWNER_LOWER="${GITHUB_REPOSITORY_OWNER,,}"

@@ -15,11 +15,19 @@ on:
       version:
         required: false
         type: string
+      upload_artifacts:
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       version:
         required: false
         type: string
+      upload_artifacts:
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -35,13 +43,23 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
+      upload_artifacts: ${{ steps.meta.outputs.upload_artifacts }}
     steps:
       - name: Derive release metadata
         id: meta
         shell: bash
         run: |
-          if [[ -n "${{ inputs.version }}" ]]; then
-            version="${{ inputs.version }}"
+          requested_version="${{ inputs.version }}"
+          upload_artifacts="false"
+
+          if [[ "${{ github.event_name }}" == "workflow_call" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ inputs.upload_artifacts }}" == "true" ]]; then
+              upload_artifacts="true"
+            fi
+          fi
+
+          if [[ -n "${requested_version}" ]]; then
+            version="${requested_version}"
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
@@ -50,6 +68,7 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "upload_artifacts=${upload_artifacts}" >> "$GITHUB_OUTPUT"
 
   dashboard-core:
     name: release-package / dashboard-core
@@ -92,6 +111,7 @@ jobs:
           echo "pack_file=sandbox0-ui/.release-npm/${pack_file}" >> "$GITHUB_OUTPUT"
 
       - name: Upload dashboard-core package artifact
+        if: ${{ needs.metadata.outputs.upload_artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: dashboard-core-package-${{ needs.metadata.outputs.version }}
@@ -138,6 +158,7 @@ jobs:
           test -f ".cr-release-packages/infra-operator-${VERSION}.tgz"
 
       - name: Upload Helm chart artifact
+        if: ${{ needs.metadata.outputs.upload_artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: infra-operator-chart-${{ needs.metadata.outputs.version }}
@@ -184,6 +205,7 @@ jobs:
           echo "Created ${BUNDLE_NAME}"
 
       - name: Upload docs bundle artifact
+        if: ${{ needs.metadata.outputs.upload_artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: docs-bundle-${{ needs.metadata.outputs.tag }}
