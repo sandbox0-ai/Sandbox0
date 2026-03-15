@@ -41,23 +41,38 @@ jobs:
             echo "IS_PRERELEASE=false" >> "$GITHUB_OUTPUT"
           fi
 
+  package:
+    name: Package release assets
+    needs: prepare-release
+    uses: ./.github/workflows/release-package.yml
+    with:
+      version: ${{ needs.prepare-release.outputs.version }}
+
   publish-dashboard-core:
     name: Publish dashboard-core package
     runs-on: ubuntu-latest
-    needs: prepare-release
+    needs:
+      - prepare-release
+      - package
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Update dashboard-core package version
-        working-directory: sandbox0-ui
-        run: npm version ${{ needs.prepare-release.outputs.version }} --workspace @sandbox0/dashboard-core --no-git-tag-version
+      - name: Download dashboard-core package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-core-package-${{ needs.prepare-release.outputs.version }}
+          path: .release-npm
+
+      - name: Resolve dashboard-core package path
+        run: |
+          PACKAGE_PATH="$(find .release-npm -maxdepth 1 -type f -name '*.tgz' | head -n 1)"
+          test -n "${PACKAGE_PATH}"
+          test -f "${PACKAGE_PATH}"
+          echo "PACKAGE_PATH=${PACKAGE_PATH}" >> "$GITHUB_ENV"
 
       - name: Check whether dashboard-core version already exists on npm
         id: dashboard_core_npm
@@ -70,21 +85,8 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install sandbox0-ui dependencies
-        working-directory: sandbox0-ui
-        run: npm ci
-
-      - name: Lint dashboard-core package
-        working-directory: sandbox0-ui
-        run: npm run lint -w @sandbox0/dashboard-core
-
-      - name: Test dashboard-core package
-        working-directory: sandbox0-ui
-        run: npm run test -w @sandbox0/dashboard-core
-
       - name: Publish dashboard-core package to npm
         if: steps.dashboard_core_npm.outputs.published != 'true'
-        working-directory: sandbox0-ui
         run: |
           VERSION="${{ needs.prepare-release.outputs.version }}"
           NPM_TAG="latest"
@@ -98,14 +100,16 @@ jobs:
             esac
           fi
 
-          npm publish -w @sandbox0/dashboard-core --tag "${NPM_TAG}"
+          npm publish "${PACKAGE_PATH}" --tag "${NPM_TAG}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-image:
     name: Publish infra image (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: prepare-release
+    needs:
+      - prepare-release
+      - package
     strategy:
       fail-fast: false
       matrix:
@@ -200,36 +204,23 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - prepare-release
+      - package
       - publish-image-manifest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Setup Helm
         uses: azure/setup-helm@v4
 
-      - name: Update chart version
-        run: |
-          VERSION="${{ needs.prepare-release.outputs.version }}"
-          sed -E -i "s/^version:.*/version: ${VERSION}/" infra-operator/chart/Chart.yaml
-          sed -E -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" infra-operator/chart/Chart.yaml
-
-      - name: Lint chart
-        run: helm lint infra-operator/chart
+      - name: Download Helm chart artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: infra-operator-chart-${{ needs.prepare-release.outputs.version }}
+          path: .cr-release-packages
 
       - name: Login to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
             --username "${{ github.actor }}" \
             --password-stdin
-
-      - name: Package Helm chart
-        run: |
-          VERSION="${{ needs.prepare-release.outputs.version }}"
-          helm package infra-operator/chart --destination .cr-release-packages
-          test -f ".cr-release-packages/infra-operator-${VERSION}.tgz"
 
       - name: Publish chart to GitHub Packages (GHCR OCI)
         run: |
@@ -310,42 +301,23 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - prepare-release
+      - package
       - publish-helm
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download docs bundle artifact
+        uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
+          name: docs-bundle-v${{ needs.prepare-release.outputs.version }}
+          path: .release-docs
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: sandbox0-ui/package-lock.json
-
-      - name: Install website dependencies
-        run: npm ci
-        working-directory: sandbox0-ui
-
-      - name: Build docs snapshot bundle
-        env:
-          DOCS_BUILD_VERSIONS: v${{ needs.prepare-release.outputs.version }}
-          DOCS_INCLUDE_NEXT: false
-        run: npm run build -w @sandbox0/website
-        working-directory: sandbox0-ui
-
-      - name: Package docs snapshot bundle
+      - name: Resolve docs bundle path
         run: |
           VERSION="v${{ needs.prepare-release.outputs.version }}"
           BUNDLE_NAME="${DOCS_BUNDLE_PREFIX}-${VERSION}.tar.gz"
-          tar -czf "${BUNDLE_NAME}" \
-            -C sandbox0-ui/apps/website/out \
-            "docs/${VERSION}" \
-            "_next" \
-            "favicon.ico" \
-            "sandbox0.png"
+          BUNDLE_PATH=".release-docs/${BUNDLE_NAME}"
+          test -f "${BUNDLE_PATH}"
           echo "BUNDLE_NAME=${BUNDLE_NAME}" >> "$GITHUB_ENV"
+          echo "BUNDLE_PATH=${BUNDLE_PATH}" >> "$GITHUB_ENV"
 
       - name: Create or update GitHub Release with docs bundle
         env:
@@ -372,9 +344,9 @@ jobs:
             fi
 
             gh release edit "${TAG}" --title "${TAG}" --notes "${NOTES}"
-            gh release upload "${TAG}" "${BUNDLE_NAME}" --clobber
+            gh release upload "${TAG}" "${BUNDLE_PATH}" --clobber
           else
-            args=("${BUNDLE_NAME}" --title "${TAG}" --notes "${NOTES}")
+            args=("${BUNDLE_PATH}" --title "${TAG}" --notes "${NOTES}")
             if [[ "${{ needs.prepare-release.outputs.is_prerelease }}" == "true" ]]; then
               args+=(--prerelease)
             fi

@@ -1,0 +1,191 @@
+name: Release Package
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_REPO: sandbox0ai/infra
+  DOCS_BUNDLE_PREFIX: sandbox0-docs
+
+jobs:
+  metadata:
+    name: release-package / metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Derive release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            version="${{ inputs.version }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+  dashboard-core:
+    name: release-package / dashboard-core
+    runs-on: ubuntu-latest
+    needs: metadata
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sandbox0-ui/package-lock.json
+
+      - name: Install sandbox0-ui dependencies
+        working-directory: sandbox0-ui
+        run: npm ci
+
+      - name: Apply release version to dashboard-core
+        working-directory: sandbox0-ui
+        run: npm version ${{ needs.metadata.outputs.version }} --workspace @sandbox0/dashboard-core --no-git-tag-version
+
+      - name: Lint dashboard-core package
+        working-directory: sandbox0-ui
+        run: npm run lint -w @sandbox0/dashboard-core
+
+      - name: Test dashboard-core package
+        working-directory: sandbox0-ui
+        run: npm run test -w @sandbox0/dashboard-core
+
+      - name: Pack dashboard-core package
+        id: pack
+        working-directory: sandbox0-ui
+        shell: bash
+        run: |
+          mkdir -p .release-npm
+          pack_file="$(npm pack -w @sandbox0/dashboard-core --pack-destination .release-npm | tail -n 1)"
+          echo "pack_file=sandbox0-ui/.release-npm/${pack_file}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dashboard-core package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-core-package-${{ needs.metadata.outputs.version }}
+          path: ${{ steps.pack.outputs.pack_file }}
+          if-no-files-found: error
+
+  infra:
+    name: release-package / infra
+    runs-on: ubuntu-latest
+    needs: metadata
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner space
+        uses: ./.github/actions/free-runner-space
+
+      - name: Restore infra build cache
+        uses: ./.github/actions/restore-infra-build-cache
+        with:
+          cache-key-suffix: release-package-amd64
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Build local binaries
+        run: make build-local-all
+
+      - name: Build unified infra image from local binaries
+        env:
+          TAG: release-package
+        run: docker build -t "${IMAGE_REPO}:${TAG}" -f Dockerfile.local .
+
+      - name: Validate and package Helm chart
+        run: |
+          VERSION="${{ needs.metadata.outputs.version }}"
+          sed -E -i "s/^version:.*/version: ${VERSION}/" infra-operator/chart/Chart.yaml
+          sed -E -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" infra-operator/chart/Chart.yaml
+          helm lint infra-operator/chart
+          helm package infra-operator/chart --destination .cr-release-packages
+          test -f ".cr-release-packages/infra-operator-${VERSION}.tgz"
+
+      - name: Upload Helm chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-operator-chart-${{ needs.metadata.outputs.version }}
+          path: .cr-release-packages/infra-operator-${{ needs.metadata.outputs.version }}.tgz
+          if-no-files-found: error
+
+  docs:
+    name: release-package / docs
+    runs-on: ubuntu-latest
+    needs: metadata
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sandbox0-ui/package-lock.json
+
+      - name: Install website dependencies
+        working-directory: sandbox0-ui
+        run: npm ci
+
+      - name: Build website with release docs version
+        working-directory: sandbox0-ui
+        env:
+          DOCS_BUILD_VERSIONS: ${{ needs.metadata.outputs.tag }}
+          DOCS_INCLUDE_NEXT: false
+        run: npm run build -w @sandbox0/website
+
+      - name: Package docs bundle
+        shell: bash
+        run: |
+          TAG="${{ needs.metadata.outputs.tag }}"
+          BUNDLE_NAME="${DOCS_BUNDLE_PREFIX}-${TAG}.tar.gz"
+          tar -czf "${BUNDLE_NAME}" \
+            -C sandbox0-ui/apps/website/out \
+            "docs/${TAG}" \
+            "_next" \
+            "favicon.ico" \
+            "sandbox0.png"
+          echo "Created ${BUNDLE_NAME}"
+
+      - name: Upload docs bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-bundle-${{ needs.metadata.outputs.tag }}
+          path: ${{ env.DOCS_BUNDLE_PREFIX }}-${{ needs.metadata.outputs.tag }}.tar.gz
+          if-no-files-found: error
